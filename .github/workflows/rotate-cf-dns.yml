@@ -1,0 +1,46 @@
+name: Rotate Cloudflare DNS
+
+on:
+  schedule:
+    - cron: "3 1 * * *"
+    - cron: "3 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  rotate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Pick target IP
+        id: pick
+        shell: bash
+        run: |
+          IPS='${{ secrets.IPS }}'
+
+          IP1=$(echo "$IPS" | jq -r '.[0]')
+          IP2=$(echo "$IPS" | jq -r '.[1]')
+
+          NOW_HM=$(date -u +%H:%M)
+
+          if [ "$NOW_HM" = "01:03" ]; then
+            TARGET_IP="$IP1"
+          elif [ "$NOW_HM" = "07:03" ]; then
+            TARGET_IP="$IP2"
+          else
+            echo "Skip unexpected trigger: $NOW_HM"
+            exit 0
+          fi
+
+          echo "target_ip=$TARGET_IP" >> "$GITHUB_OUTPUT"
+          echo "Selected IP: $TARGET_IP"
+
+      - name: Update Cloudflare DNS
+        uses: rez0n/create-dns-record@v2.1
+        with:
+          type: "A"
+          name: ${{ secrets.DOMAIN }}
+          content: ${{ steps.pick.outputs.target_ip }}
+          ttl: 1
+          proxied: false
+          token: ${{ secrets.CLOUDFLARE_TOKEN }}
+          zone: ${{ secrets.CLOUDFLARE_ZONE }}
