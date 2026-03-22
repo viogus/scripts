@@ -2,8 +2,8 @@ name: Rotate Cloudflare DNS
 
 on:
   schedule:
-    - cron: "3 1 * * *"
-    - cron: "3 7 * * *"
+    - cron: "3 1 * * *"   # 01:03 UTC
+    - cron: "3 7 * * *"   # 07:03 UTC
   workflow_dispatch:
 
 jobs:
@@ -11,24 +11,74 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Ensure jq is installed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq not found, installing..."
+            sudo apt-get update
+            sudo apt-get install -y jq
+          else
+            echo "jq already installed"
+            jq --version
+          fi
+
       - name: Pick target IP
         id: pick
         shell: bash
         run: |
+          set -euo pipefail
+
           IPS='${{ secrets.IPS }}'
+          DOMAIN='${{ secrets.DOMAIN }}'
+
+          if [ -z "$IPS" ]; then
+            echo "Secret IPS is empty"
+            exit 1
+          fi
+
+          if [ -z "$DOMAIN" ]; then
+            echo "Secret DOMAIN is empty"
+            exit 1
+          fi
 
           IP1=$(echo "$IPS" | jq -r '.[0]')
           IP2=$(echo "$IPS" | jq -r '.[1]')
 
+          if [ -z "$IP1" ] || [ "$IP1" = "null" ]; then
+            echo "IPS[0] is invalid"
+            exit 1
+          fi
+
+          if [ -z "$IP2" ] || [ "$IP2" = "null" ]; then
+            echo "IPS[1] is invalid"
+            exit 1
+          fi
+
+          NOW_HM=$(date -u +%H:%M)
+          TARGET_IP=""
+
+          if [ "$NOW_HM" = "01:03" ]; then
+            TARGET_IP="$IP1"
+          elif [ "$NOW_HM" = "07:03" ]; then
+            TARGET_IP="$IP2"
+          else
+            echo "Skip unexpected trigger: $NOW_HM"
+            exit 0
+          fi
 
           echo "target_ip=$TARGET_IP" >> "$GITHUB_OUTPUT"
+          echo "domain=$DOMAIN" >> "$GITHUB_OUTPUT"
           echo "Selected IP: $TARGET_IP"
+          echo "Domain: $DOMAIN"
 
       - name: Update Cloudflare DNS
+        if: steps.pick.outputs.target_ip != ''
         uses: rez0n/create-dns-record@v2.1
         with:
           type: "A"
-          name: ${{ secrets.DOMAIN }}
+          name: ${{ steps.pick.outputs.domain }}
           content: ${{ steps.pick.outputs.target_ip }}
           ttl: 1
           proxied: false
