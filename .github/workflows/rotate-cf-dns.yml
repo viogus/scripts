@@ -1,9 +1,9 @@
-name: Rotate Cloudflare DNS
+name: Rotate Cloudflare DNS (Beijing Time)
 
 on:
   schedule:
-    - cron: "3 1 * * *"   # 01:03 UTC
-    - cron: "3 7 * * *"   # 07:03 UTC
+    - cron: "3 17 * * *"   # 北京时间 01:03
+    - cron: "3 23 * * *"   # 北京时间 07:03
   workflow_dispatch:
 
 jobs:
@@ -56,15 +56,17 @@ jobs:
             exit 1
           fi
 
-          NOW_HM=$(date -u +%H:%M)
+          UTC_HOUR=$(date -u +%H)
           TARGET_IP=""
 
-          if [ "$NOW_HM" = "01:03" ]; then
+          # 北京时间 01:03 ≈ UTC 17点触发
+          # 北京时间 07:03 ≈ UTC 23点触发
+          if [ "$UTC_HOUR" = "17" ]; then
             TARGET_IP="$IP1"
-          elif [ "$NOW_HM" = "07:03" ]; then
+          elif [ "$UTC_HOUR" = "23" ]; then
             TARGET_IP="$IP2"
           else
-            echo "Skip unexpected trigger: $NOW_HM"
+            echo "Skip unexpected trigger hour: $UTC_HOUR UTC"
             exit 0
           fi
 
