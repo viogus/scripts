@@ -20,16 +20,6 @@ jobs:
           IP1=$(echo "$IPS" | jq -r '.[0]')
           IP2=$(echo "$IPS" | jq -r '.[1]')
 
-          NOW_HM=$(date -u +%H:%M)
-
-          if [ "$NOW_HM" = "01:03" ]; then
-            TARGET_IP="$IP1"
-          elif [ "$NOW_HM" = "07:03" ]; then
-            TARGET_IP="$IP2"
-          else
-            echo "Skip unexpected trigger: $NOW_HM"
-            exit 0
-          fi
 
           echo "target_ip=$TARGET_IP" >> "$GITHUB_OUTPUT"
           echo "Selected IP: $TARGET_IP"
