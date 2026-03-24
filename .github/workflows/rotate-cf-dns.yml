@@ -74,6 +74,8 @@ jobs:
           echo "domain=$DOMAIN" >> "$GITHUB_OUTPUT"
           echo "Selected IP: $TARGET_IP"
           echo "Domain: $DOMAIN"
+          echo "UTC: $(date -u)"
+          echo "Beijing: $(TZ=Asia/Shanghai date)"
 
       - name: Update Cloudflare DNS
         if: steps.pick.outputs.target_ip != ''
