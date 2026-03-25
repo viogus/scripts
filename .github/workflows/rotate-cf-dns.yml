@@ -85,6 +85,6 @@ jobs:
           name: ${{ steps.pick.outputs.domain }}
           content: ${{ steps.pick.outputs.target_ip }}
           ttl: 1
-          proxied: true
+          proxied: false
           token: ${{ secrets.CLOUDFLARE_TOKEN }}
           zone: ${{ secrets.CLOUDFLARE_ZONE }}
