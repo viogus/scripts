@@ -1,11 +1,8 @@
 #!/bin/sh
 # =========================================
 # 共享 Init/Service 工具库
-# 用途: 为 viogus/scripts 下所有管理脚本提供统一的系统检测和服务操作
-# 用法: source /path/to/lib/svc-utils.sh 或嵌入脚本内联
 # =========================================
 
-# --- Init 系统检测（结果缓存在 _INIT_TYPE） ---
 _INIT_TYPE=""
 detect_init() {
     if [ -n "$_INIT_TYPE" ]; then echo "$_INIT_TYPE"; return; fi
@@ -19,7 +16,6 @@ detect_init() {
     echo "$_INIT_TYPE"
 }
 
-# --- OS 检测 ---
 detect_os() {
     if grep -qi "alpine" /etc/os-release 2>/dev/null; then echo "alpine"
     elif grep -qi "debian\|ubuntu" /etc/os-release 2>/dev/null; then echo "debian"
@@ -27,19 +23,21 @@ detect_os() {
     else echo "unknown"; fi
 }
 
-# --- 服务操作包装器（自动分发到 systemctl / rc-service） ---
 svc_start()   { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" start; else systemctl start "$1"; fi; }
 svc_stop()    { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
 svc_restart() { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
 svc_enable()  { if [ "$(detect_init)" = "openrc" ]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
 svc_disable() { if [ "$(detect_init)" = "openrc" ]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
+
+# MUST output "active"/"inactive" text AND return 0/1 exit code
 svc_is_active() {
     if [ "$(detect_init)" = "openrc" ]; then
-        if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; fi
+        if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi
     else
-        systemctl is-active "$1" 2>/dev/null || echo "inactive"
+        if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi
     fi
 }
+
 svc_status() {
     if [ "$(detect_init)" = "openrc" ]; then
         rc-service "$1" status 2>/dev/null || true
@@ -47,9 +45,7 @@ svc_status() {
         systemctl status "$1" --no-pager 2>/dev/null || true
     fi
 }
-svc_reload() {
-    if [ "$(detect_init)" != "openrc" ]; then systemctl daemon-reload; fi
-}
+svc_reload()  { if [ "$(detect_init)" != "openrc" ]; then systemctl daemon-reload; fi; }
 svc_main_pid() {
     if [ "$(detect_init)" = "openrc" ]; then
         cat "/run/${1}.pid" 2>/dev/null || echo "0"
@@ -58,23 +54,15 @@ svc_main_pid() {
     fi
 }
 
-# --- 服务文件辅助 ---
 svc_file_path() {
     if [ -f "/etc/init.d/${1}" ]; then echo "/etc/init.d/${1}"
     elif [ -f "/etc/systemd/system/${1}.service" ]; then echo "/etc/systemd/system/${1}.service"
     else echo ""; fi
 }
-svc_find_services() {
-    find /etc/systemd/system /etc/init.d -name "$1" 2>/dev/null || true
-}
-svc_list() {
-    ls /etc/systemd/system/"$1"*.service /etc/init.d/"$1"* 2>/dev/null | sed 's|.*/||; s/\.service$//' | sort -u
-}
-svc_cat() {
-    if [ "$(detect_init)" = "openrc" ]; then cat "/etc/init.d/$1" 2>/dev/null; else systemctl cat "$1" 2>/dev/null; fi
-}
+svc_find_services() { find /etc/systemd/system /etc/init.d -name "$1" 2>/dev/null || true; }
+svc_list()          { ls /etc/systemd/system/"$1"*.service /etc/init.d/"$1"* 2>/dev/null | sed 's|.*/||; s/\.service$//' | sort -u; }
+svc_cat()  { if [ "$(detect_init)" = "openrc" ]; then cat "/etc/init.d/$1" 2>/dev/null; else systemctl cat "$1" 2>/dev/null; fi; }
 
-# --- 安装依赖（按 OS 类型） ---
 install_pkg() {
     local os; os=$(detect_os)
     case "$os" in

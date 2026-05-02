@@ -41,6 +41,8 @@ svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" d
 svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
 svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
 svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
+svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi; else if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi; fi; }
+svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi; else if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi; fi; }
 
 write_openrc_xray() {
   cat > "/etc/init.d/xray" << 'OPENRCEOF'
