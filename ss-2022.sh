@@ -210,12 +210,6 @@ check_installation() {
     fi
 }
 
-# 检查服务状态
-check_service_status() {
-    local status=$(svc_is_active ss-rust)
-    echo "${status}"
-}
-
 # 获取最新版本
 get_latest_version() {
     SS_VERSION=$(wget -qO- https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases | \
