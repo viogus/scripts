@@ -75,6 +75,7 @@ ensure_root() {
 has_cmd(){ command -v "$1" >/dev/null 2>&1; }
 
 if ! command -v detect_init >/dev/null 2>&1; then
+_INIT_TYPE=""
 detect_os() {
     if grep -qi "alpine" /etc/os-release 2>/dev/null; then
         echo "alpine"
