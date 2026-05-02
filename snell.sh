@@ -409,7 +409,7 @@ svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop
 svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
 svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
 svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
-svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; fi; else if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi; fi; }
+svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi; else if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi; fi; }
 svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
 svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
 svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi; }
@@ -689,7 +689,7 @@ EOF
     # 获取 IPv4 地址
     IPV4_ADDR=$(curl -s4 https://api.ipify.org)
     if [ $? -eq 0 ] && [ ! -z "$IPV4_ADDR" ]; then
-        IP_COUNTRY_IPV4=$(curl -s http://ipinfo.io/${IPV4_ADDR}/country)
+        IP_COUNTRY_IPV4=$(curl -s https://ipinfo.io/${IPV4_ADDR}/country)
         echo -e "${GREEN}IPv4 地址: ${RESET}${IPV4_ADDR} ${GREEN}所在国家: ${RESET}${IP_COUNTRY_IPV4}"
     fi
     
@@ -1038,7 +1038,7 @@ view_snell_config() {
     # 获取 IPv4 地址
     IPV4_ADDR=$(curl -s4 https://api.ipify.org)
     if [ $? -eq 0 ] && [ ! -z "$IPV4_ADDR" ]; then
-        IP_COUNTRY_IPV4=$(curl -s http://ipinfo.io/${IPV4_ADDR}/country)
+        IP_COUNTRY_IPV4=$(curl -s https://ipinfo.io/${IPV4_ADDR}/country)
         echo -e "${GREEN}IPv4 地址: ${RESET}${IPV4_ADDR} ${GREEN}所在国家: ${RESET}${IP_COUNTRY_IPV4}"
     fi
     
