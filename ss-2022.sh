@@ -47,12 +47,12 @@ ERROR="${RED}[错误]${PLAIN}"
 WARNING="${YELLOW}[警告]${PLAIN}"
 SUCCESS="${GREEN}[成功]${PLAIN}"
 
-# 系统信息
+# 系统信息（detect_os/detect_arch 写入，全程只读）
 OS_TYPE=""
 OS_ARCH=""
 OS_VERSION=""
 
-# 配置信息
+# 配置信息（set_port/set_password/set_method/set_tfo 写入，write_config/View 读取）
 SS_PORT=""
 SS_PASSWORD=""
 SS_METHOD=""
