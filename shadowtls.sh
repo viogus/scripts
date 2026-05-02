@@ -9,11 +9,13 @@ set -euo pipefail
 # =========================================
 
 # 定义颜色代码
+[ -z "${RED:-}" ] && {
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 RESET='\033[0m'
+}
 
 # 定义系统路径
 INSTALL_DIR="/usr/local/bin"
