@@ -215,14 +215,10 @@ get_latest_version() {
     echo -e "${INFO} 检测到 Shadowsocks Rust 最新版本为 [ ${SS_VERSION} ]"
 }
 
-Green_font_prefix="\033[32m" && Red_font_prefix="\033[31m" && Green_background_prefix="\033[42;37m" && Red_background_prefix="\033[41;37m" && Font_color_suffix="\033[0m" && Yellow_font_prefix="\033[0;33m"
-Info="${Green_font_prefix}[信息]${Font_color_suffix}"
-Error="${Red_font_prefix}[错误]${Font_color_suffix}"
-Tip="${Yellow_font_prefix}[注意]${Font_color_suffix}"
 
 check_installed_status() {
     if [[ ! -e ${BINARY_PATH} ]]; then
-        echo -e "${Error} Shadowsocks Rust 没有安装，请检查！"
+        echo -e "${RED}[错误]${RESET} Shadowsocks Rust 没有安装，请检查！"
         return 1
     fi
     return 0
@@ -238,24 +234,24 @@ check_status() {
 
 check_new_ver() {
     new_ver=$(wget -qO- https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases| jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]')
-    [[ -z ${new_ver} ]] && echo -e "${Error} Shadowsocks Rust 最新版本获取失败！" && exit 1
-    echo -e "${Info} 检测到 Shadowsocks Rust 最新版本为 [ ${new_ver} ]"
+    [[ -z ${new_ver} ]] && echo -e "${RED}[错误]${RESET} Shadowsocks Rust 最新版本获取失败！" && exit 1
+    echo -e "${GREEN}[信息]${RESET} 检测到 Shadowsocks Rust 最新版本为 [ ${new_ver} ]"
 }
 
 # 检查版本并比较
 check_ver_comparison() {
     if [[ ! -f "${VERSION_FILE}" ]]; then
-        echo -e "${Info} 未找到版本文件，可能是首次安装"
+        echo -e "${GREEN}[信息]${RESET} 未找到版本文件，可能是首次安装"
         return 0
     fi
     
     local now_ver=$(cat ${VERSION_FILE})
     if [[ "${now_ver}" != "${new_ver}" ]]; then
-        echo -e "${Info} 发现 Shadowsocks Rust 新版本 [ ${new_ver} ]"
-        echo -e "${Info} 当前版本 [ ${now_ver} ]"
+        echo -e "${GREEN}[信息]${RESET} 发现 Shadowsocks Rust 新版本 [ ${new_ver} ]"
+        echo -e "${GREEN}[信息]${RESET} 当前版本 [ ${now_ver} ]"
         return 0
     else
-        echo -e "${Info} 当前已是最新版本 [ ${new_ver} ]"
+        echo -e "${GREEN}[信息]${RESET} 当前已是最新版本 [ ${new_ver} ]"
         return 1
     fi
 }
@@ -531,10 +527,10 @@ generate_random_port() {
 set_port() {
     SS_PORT=$(generate_random_port)
     echo -e "${INFO} 已生成随机端口：${SS_PORT}"
-    echo -e "${Tip} 是否使用该随机端口？"
+    echo -e "${YELLOW}[注意]${RESET} 是否使用该随机端口？"
     echo "=================================="
-    echo -e " ${Green_font_prefix}1.${Font_color_suffix} 是"
-    echo -e " ${Green_font_prefix}2.${Font_color_suffix} 否，我要自定义端口"
+    echo -e " ${GREEN}1.${RESET} 是"
+    echo -e " ${GREEN}2.${RESET} 否，我要自定义端口"
     echo "=================================="
     
     read -e -p "(默认: 1. 使用随机端口)：" port_choice
@@ -550,16 +546,16 @@ set_port() {
                 if (( SS_PORT >= 1 && SS_PORT <= 65535 )); then
                     break
                 else
-                    echo -e "${Error} 输入错误，端口范围必须在 1-65535 之间"
+                    echo -e "${RED}[错误]${RESET} 输入错误，端口范围必须在 1-65535 之间"
                 fi
             else
-                echo -e "${Error} 输入错误，请输入数字"
+                echo -e "${RED}[错误]${RESET} 输入错误，请输入数字"
             fi
         done
     fi
     
     echo && echo "=================================="
-    echo -e "端口：${Red_background_prefix} ${SS_PORT} ${Font_color_suffix}"
+    echo -e "端口：${Red_background_prefix} ${SS_PORT} ${RESET}"
     echo "=================================="
     
     # 检查并配置防火墙
@@ -610,7 +606,7 @@ set_password() {
     fi
     
     echo && echo "=================================="
-    echo -e "密码：${Red_background_prefix} ${SS_PASSWORD} ${Font_color_suffix}"
+    echo -e "密码：${Red_background_prefix} ${SS_PASSWORD} ${RESET}"
     echo "==================================" && echo
 }
 
@@ -618,25 +614,25 @@ set_password() {
 set_method() {
     echo -e "请选择 Shadowsocks Rust 加密方式
 ==================================	
- ${Green_font_prefix} 1.${Font_color_suffix} aes-128-gcm
- ${Green_font_prefix} 2.${Font_color_suffix} aes-256-gcm
- ${Green_font_prefix} 3.${Font_color_suffix} chacha20-ietf-poly1305
- ${Green_font_prefix} 4.${Font_color_suffix} plain
- ${Green_font_prefix} 5.${Font_color_suffix} none
- ${Green_font_prefix} 6.${Font_color_suffix} table
- ${Green_font_prefix} 7.${Font_color_suffix} aes-128-cfb
- ${Green_font_prefix} 8.${Font_color_suffix} aes-256-cfb
- ${Green_font_prefix} 9.${Font_color_suffix} aes-256-ctr 
- ${Green_font_prefix}10.${Font_color_suffix} camellia-256-cfb
- ${Green_font_prefix}11.${Font_color_suffix} rc4-md5
- ${Green_font_prefix}12.${Font_color_suffix} chacha20-ietf
+ ${GREEN} 1.${RESET} aes-128-gcm
+ ${GREEN} 2.${RESET} aes-256-gcm
+ ${GREEN} 3.${RESET} chacha20-ietf-poly1305
+ ${GREEN} 4.${RESET} plain
+ ${GREEN} 5.${RESET} none
+ ${GREEN} 6.${RESET} table
+ ${GREEN} 7.${RESET} aes-128-cfb
+ ${GREEN} 8.${RESET} aes-256-cfb
+ ${GREEN} 9.${RESET} aes-256-ctr 
+ ${GREEN}10.${RESET} camellia-256-cfb
+ ${GREEN}11.${RESET} rc4-md5
+ ${GREEN}12.${RESET} chacha20-ietf
 ==================================
- ${Tip} AEAD 2022 加密（使用随机加密）
+ ${YELLOW}[注意]${RESET} AEAD 2022 加密（使用随机加密）
 ==================================	
- ${Green_font_prefix}13.${Font_color_suffix} 2022-blake3-aes-128-gcm ${Green_font_prefix}(默认)${Font_color_suffix}
- ${Green_font_prefix}14.${Font_color_suffix} 2022-blake3-aes-256-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix}15.${Font_color_suffix} 2022-blake3-chacha20-poly1305
- ${Green_font_prefix}16.${Font_color_suffix} 2022-blake3-chacha8-poly1305
+ ${GREEN}13.${RESET} 2022-blake3-aes-128-gcm ${GREEN}(默认)${RESET}
+ ${GREEN}14.${RESET} 2022-blake3-aes-256-gcm ${GREEN}(推荐)${RESET}
+ ${GREEN}15.${RESET} 2022-blake3-chacha20-poly1305
+ ${GREEN}16.${RESET} 2022-blake3-chacha8-poly1305
 =================================="
     
     read -e -p "(默认: 13. 2022-blake3-aes-128-gcm)：" method_choice
@@ -663,7 +659,7 @@ set_method() {
     esac
     
     echo && echo "=================================="
-    echo -e "加密：${Red_background_prefix} ${SS_METHOD} ${Font_color_suffix}"
+    echo -e "加密：${Red_background_prefix} ${SS_METHOD} ${RESET}"
     echo "==================================" && echo
 }
 
@@ -671,8 +667,8 @@ set_method() {
 set_tfo() {
     echo -e "是否启用 TFO ？
 ==================================
- ${Green_font_prefix}1.${Font_color_suffix} 启用
- ${Green_font_prefix}2.${Font_color_suffix} 禁用
+ ${GREEN}1.${RESET} 启用
+ ${GREEN}2.${RESET} 禁用
 =================================="
     read -e -p "(默认：1)：" tfo_choice
     [[ -z "${tfo_choice}" ]] && tfo_choice="1"
@@ -684,7 +680,7 @@ set_tfo() {
     fi
     
     echo && echo "=================================="
-    echo -e "TFO：${Red_background_prefix} ${SS_TFO} ${Font_color_suffix}"
+    echo -e "TFO：${Red_background_prefix} ${SS_TFO} ${RESET}"
     echo "==================================" && echo
 }
 
@@ -692,8 +688,8 @@ set_tfo() {
 set_dns() {
     echo -e "请选择 DNS 配置方式：
 ==================================
- ${Green_font_prefix}1.${Font_color_suffix} 使用系统默认 DNS ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix}2.${Font_color_suffix} 自定义 DNS 服务器
+ ${GREEN}1.${RESET} 使用系统默认 DNS ${GREEN}(推荐)${RESET}
+ ${GREEN}2.${RESET} 自定义 DNS 服务器
 =================================="
     read -e -p "(默认：1)：" dns_choice
     [[ -z "${dns_choice}" ]] && dns_choice="1"
@@ -703,12 +699,12 @@ set_dns() {
         read -e -p "(默认：8.8.8.8)：" SS_DNS
         [[ -z "${SS_DNS}" ]] && SS_DNS="8.8.8.8"
         echo && echo "=================================="
-        echo -e "DNS：${Red_background_prefix} ${SS_DNS} ${Font_color_suffix}"
+        echo -e "DNS：${Red_background_prefix} ${SS_DNS} ${RESET}"
         echo "==================================" && echo
     else
         SS_DNS=""
         echo && echo "=================================="
-        echo -e "DNS：${Red_background_prefix} 使用系统默认 DNS ${Font_color_suffix}"
+        echo -e "DNS：${Red_background_prefix} 使用系统默认 DNS ${RESET}"
         echo "==================================" && echo
     fi
 }
@@ -718,12 +714,12 @@ modify_config() {
     check_installation
     echo && echo -e "你要做什么？
 ==================================
- ${Green_font_prefix}1.${Font_color_suffix}  修改 端口配置
- ${Green_font_prefix}2.${Font_color_suffix}  修改 密码配置
- ${Green_font_prefix}3.${Font_color_suffix}  修改 加密配置
- ${Green_font_prefix}4.${Font_color_suffix}  修改 TFO 配置
- ${Green_font_prefix}5.${Font_color_suffix}  修改 DNS 配置
- ${Green_font_prefix}6.${Font_color_suffix}  修改 全部配置" && echo
+ ${GREEN}1.${RESET}  修改 端口配置
+ ${GREEN}2.${RESET}  修改 密码配置
+ ${GREEN}3.${RESET}  修改 加密配置
+ ${GREEN}4.${RESET}  修改 TFO 配置
+ ${GREEN}5.${RESET}  修改 DNS 配置
+ ${GREEN}6.${RESET}  修改 全部配置" && echo
     
     read -e -p "(默认：取消)：" modify
     [[ -z "${modify}" ]] && echo "已取消..." && Start_Menu
@@ -770,7 +766,7 @@ modify_config() {
             Restart
             ;;
         *)
-            echo -e "${Error} 请输入正确的数字(1-6)"
+            echo -e "${RED}[错误]${RESET} 请输入正确的数字(1-6)"
             sleep 2s
             modify_config
             ;;
@@ -779,33 +775,33 @@ modify_config() {
 
 # 安装
 Install() {
-    [[ -e ${BINARY_PATH} ]] && echo -e "${Error} 检测到 Shadowsocks Rust 已安装！" && exit 1
+    [[ -e ${BINARY_PATH} ]] && echo -e "${RED}[错误]${RESET} 检测到 Shadowsocks Rust 已安装！" && exit 1
     
-    echo -e "${Info} 检测系统信息..."
+    echo -e "${GREEN}[信息]${RESET} 检测系统信息..."
     detect_os
     
-    echo -e "${Info} 开始设置配置..."
+    echo -e "${GREEN}[信息]${RESET} 开始设置配置..."
     set_port
     set_method
     set_password
     set_tfo
     set_dns
     
-    echo -e "${Info} 开始安装/配置依赖..."
+    echo -e "${GREEN}[信息]${RESET} 开始安装/配置依赖..."
     install_dependencies
     
-    echo -e "${Info} 开始下载/安装..."
+    echo -e "${GREEN}[信息]${RESET} 开始下载/安装..."
     detect_arch
     get_latest_version
     download
     
-    echo -e "${Info} 开始写入配置文件..."
+    echo -e "${GREEN}[信息]${RESET} 开始写入配置文件..."
     write_config
     
-    echo -e "${Info} 开始安装系统服务..."
+    echo -e "${GREEN}[信息]${RESET} 开始安装系统服务..."
     install_service
 
-    echo -e "${Info} 创建命令快捷方式..."
+    echo -e "${GREEN}[信息]${RESET} 创建命令快捷方式..."
     curl -L -s https://raw.githubusercontent.com/viogus/scripts/main/ss-2022.sh -o "/usr/local/bin/ss-2022.sh"
     chmod +x "/usr/local/bin/ss-2022.sh"
     if [ -f "/usr/local/bin/ssrust" ]; then
@@ -813,17 +809,17 @@ Install() {
     fi
     ln -s "/usr/local/bin/ss-2022.sh" "/usr/local/bin/ssrust"
     
-    echo -e "${Info} 所有步骤安装完毕，开始启动服务..."
+    echo -e "${GREEN}[信息]${RESET} 所有步骤安装完毕，开始启动服务..."
     start_service
     
     if [[ "$?" == "0" ]]; then
         echo -e "${Success} Shadowsocks Rust 安装并启动成功！"
         View
-        echo -e "${Info} 您可以使用 ${Green_font_prefix}ssrust${Font_color_suffix} 命令进行管理"
+        echo -e "${GREEN}[信息]${RESET} 您可以使用 ${GREEN}ssrust${RESET} 命令进行管理"
         Before_Start_Menu
     else
-        echo -e "${Error} Shadowsocks Rust 启动失败，请检查日志！"
-        echo -e "${Info} 您可以使用以下命令查看详细日志："
+        echo -e "${RED}[错误]${RESET} Shadowsocks Rust 启动失败，请检查日志！"
+        echo -e "${GREEN}[信息]${RESET} 您可以使用以下命令查看详细日志："
         echo -e " - svc_status ss-rust"
         echo -e " - journalctl -xe --unit ss-rust"
         Before_Start_Menu
@@ -863,18 +859,18 @@ Stop() {
     check_installed_status || return 1
     check_status
     if [[ ! "$status" == "running" ]]; then
-        echo -e "${Error} Shadowsocks Rust 没有运行，请检查！"
+        echo -e "${RED}[错误]${RESET} Shadowsocks Rust 没有运行，请检查！"
         return 1
     fi
     svc_stop ss-rust
-    echo -e "${Info} Shadowsocks Rust 已停止！"
+    echo -e "${GREEN}[信息]${RESET} Shadowsocks Rust 已停止！"
 }
 
 # 重启
 Restart() {
     check_installed_status || return 1
     svc_restart ss-rust
-    echo -e "${Info} Shadowsocks Rust 重启完毕！"
+    echo -e "${GREEN}[信息]${RESET} Shadowsocks Rust 重启完毕！"
 }
 
 # 更新
@@ -883,28 +879,28 @@ Update() {
     
     # 获取当前版本
     current_ver=$(get_current_version)
-    echo -e "${Info} 当前版本: [ ${current_ver} ]"
+    echo -e "${GREEN}[信息]${RESET} 当前版本: [ ${current_ver} ]"
     
     # 获取最新版本
     check_new_ver
     
     # 比较版本
     if version_compare "${current_ver}" "${new_ver}"; then
-        echo -e "${Info} 发现新版本 [ ${new_ver} ]"
-        echo -e "${Info} 是否更新？[Y/n]"
+        echo -e "${GREEN}[信息]${RESET} 发现新版本 [ ${new_ver} ]"
+        echo -e "${GREEN}[信息]${RESET} 是否更新？[Y/n]"
         read -p "(默认: y)：" yn
         [[ -z "${yn}" ]] && yn="y"
         if [[ ${yn} == [Yy] ]]; then
-            echo -e "${Info} 开始更新 Shadowsocks Rust..."
+            echo -e "${GREEN}[信息]${RESET} 开始更新 Shadowsocks Rust..."
             detect_arch
             download_ss "${new_ver#v}" "${OS_ARCH}"
             svc_restart ss-rust
             echo -e "${Success} Shadowsocks Rust 已更新到最新版本 [ ${new_ver} ]"
         else
-            echo -e "${Info} 已取消更新"
+            echo -e "${GREEN}[信息]${RESET} 已取消更新"
         fi
     else
-        echo -e "${Info} 当前已是最新版本 [ ${new_ver} ]，无需更新"
+        echo -e "${GREEN}[信息]${RESET} 当前已是最新版本 [ ${new_ver} ]，无需更新"
     fi
     
     sleep 3s
@@ -964,14 +960,14 @@ Link_QR() {
     if [[ "${ipv4}" != "IPv4_Error" ]]; then
         SSbase64=$(urlsafe_base64 "${SS_METHOD}:${SS_PASSWORD}@${ipv4}:${SS_PORT}")
         SSurl="ss://${SSbase64}"
-        link_ipv4=" 链接  [IPv4]：${Green_font_prefix}${SSurl}${Font_color_suffix}"
+        link_ipv4=" 链接  [IPv4]：${GREEN}${SSurl}${RESET}"
         echo -e "\n IPv4 二维码:"
         echo "${SSurl}" | qrencode -t utf8
     fi
     if [[ "${ipv6}" != "IPv6_Error" ]]; then
         SSbase64=$(urlsafe_base64 "${SS_METHOD}:${SS_PASSWORD}@${ipv6}:${SS_PORT}")
         SSurl="ss://${SSbase64}"
-        link_ipv6=" 链接  [IPv6]：${Green_font_prefix}${SSurl}${Font_color_suffix}"
+        link_ipv6=" 链接  [IPv6]：${GREEN}${SSurl}${RESET}"
         echo -e "\n IPv6 二维码:"
         echo "${SSurl}" | qrencode -t utf8
     fi
@@ -985,7 +981,7 @@ View() {
     
     # 新增：如果 IPv4 和 IPv6 都获取失败，直接报错退出
     if [[ "${ipv4}" == "IPv4_Error" && "${ipv6}" == "IPv6_Error" ]]; then
-        echo -e "${Error} 无法获取 IPv4 或 IPv6 地址，无法输出配置信息！"
+        echo -e "${RED}[错误]${RESET} 无法获取 IPv4 或 IPv6 地址，无法输出配置信息！"
         return 1
     fi
     
@@ -1006,16 +1002,16 @@ View() {
 
         echo -e "Shadowsocks Rust 配置："
         echo -e "——————————————————————————————————"
-        [[ "${ipv4}" != "IPv4_Error" ]] && echo -e " 地址：${Green_font_prefix}${ipv4}${Font_color_suffix}"
-        [[ "${ipv6}" != "IPv6_Error" ]] && echo -e " 地址：${Green_font_prefix}${ipv6}${Font_color_suffix}"
-        echo -e " 端口：${Green_font_prefix}${config_port}${Font_color_suffix}"
-        echo -e " 密码：${Green_font_prefix}${config_password}${Font_color_suffix}"
-        echo -e " 加密：${Green_font_prefix}${config_method}${Font_color_suffix}"
-        echo -e " TFO ：${Green_font_prefix}${config_tfo}${Font_color_suffix}"
-        [[ ! -z "${config_dns}" ]] && echo -e " DNS ：${Green_font_prefix}${config_dns}${Font_color_suffix}"
+        [[ "${ipv4}" != "IPv4_Error" ]] && echo -e " 地址：${GREEN}${ipv4}${RESET}"
+        [[ "${ipv6}" != "IPv6_Error" ]] && echo -e " 地址：${GREEN}${ipv6}${RESET}"
+        echo -e " 端口：${GREEN}${config_port}${RESET}"
+        echo -e " 密码：${GREEN}${config_password}${RESET}"
+        echo -e " 加密：${GREEN}${config_method}${RESET}"
+        echo -e " TFO ：${GREEN}${config_tfo}${RESET}"
+        [[ ! -z "${config_dns}" ]] && echo -e " DNS ：${GREEN}${config_dns}${RESET}"
         echo -e "——————————————————————————————————"
     else
-        echo -e "${Error} 配置文件不存在！"
+        echo -e "${RED}[错误]${RESET} 配置文件不存在！"
         return 1
     fi
 
@@ -1031,25 +1027,25 @@ View() {
         ss_url_ipv6="ss://${userinfo}@${ipv6}:${config_port}#SS-${ipv6}"
     fi
 
-    echo -e "\n${Yellow_font_prefix}=== Shadowsocks 链接 ===${Font_color_suffix}"
-    [[ ! -z "${ss_url_ipv4}" ]] && echo -e "${Green_font_prefix}IPv4 链接：${Font_color_suffix}${ss_url_ipv4}"
-    [[ ! -z "${ss_url_ipv6}" ]] && echo -e "${Green_font_prefix}IPv6 链接：${Font_color_suffix}${ss_url_ipv6}"
+    echo -e "\n${YELLOW}=== Shadowsocks 链接 ===${RESET}"
+    [[ ! -z "${ss_url_ipv4}" ]] && echo -e "${GREEN}IPv4 链接：${RESET}${ss_url_ipv4}"
+    [[ ! -z "${ss_url_ipv6}" ]] && echo -e "${GREEN}IPv6 链接：${RESET}${ss_url_ipv6}"
 
-    echo -e "\n${Yellow_font_prefix}=== Shadowsocks 二维码 ===${Font_color_suffix}"
+    echo -e "\n${YELLOW}=== Shadowsocks 二维码 ===${RESET}"
     if command -v qrencode &> /dev/null; then
         if [[ ! -z "${ss_url_ipv4}" ]]; then
-            echo -e "${Green_font_prefix}IPv4 二维码：${Font_color_suffix}"
+            echo -e "${GREEN}IPv4 二维码：${RESET}"
             echo "${ss_url_ipv4}" | qrencode -t UTF8
         fi
         if [[ ! -z "${ss_url_ipv6}" ]]; then
-            echo -e "${Green_font_prefix}IPv6 二维码：${Font_color_suffix}"
+            echo -e "${GREEN}IPv6 二维码：${RESET}"
             echo "${ss_url_ipv6}" | qrencode -t UTF8
         fi
     else
-        echo -e "${Red_font_prefix}未安装 qrencode，无法生成二维码${Font_color_suffix}"
+        echo -e "${RED}未安装 qrencode，无法生成二维码${RESET}"
     fi
 
-    echo -e "\n${Yellow_font_prefix}=== Surge 配置 ===${Font_color_suffix}"
+    echo -e "\n${YELLOW}=== Surge 配置 ===${RESET}"
     if [[ "${ipv4}" != "IPv4_Error" ]]; then
         echo -e "SS-${ipv4} = ss, ${ipv4}, ${config_port}, encrypt-method=${config_method}, password=${config_password}, tfo=${config_tfo}, udp-relay=true"
     fi
@@ -1069,10 +1065,10 @@ View() {
         local stls_password; stls_password=$(sed -n 's/.*--password \([^ ]*\).*/\1/p' "$stls_svc_file")
         local stls_sni; stls_sni=$(sed -n 's/.*--tls \([^ ]*\).*/\1/p' "$stls_svc_file")
 
-        echo -e "\n${Yellow_font_prefix}=== ShadowTLS 配置 ===${Font_color_suffix}"
-        echo -e " 监听端口：${Green_font_prefix}${stls_listen_port}${Font_color_suffix}"
-        echo -e " 密码：${Green_font_prefix}${stls_password}${Font_color_suffix}"
-        echo -e " SNI：${Green_font_prefix}${stls_sni}${Font_color_suffix}"
+        echo -e "\n${YELLOW}=== ShadowTLS 配置 ===${RESET}"
+        echo -e " 监听端口：${GREEN}${stls_listen_port}${RESET}"
+        echo -e " 密码：${GREEN}${stls_password}${RESET}"
+        echo -e " SNI：${GREEN}${stls_sni}${RESET}"
         echo -e " 版本：3"
 
         # 生成 SS + ShadowTLS 合并链接
@@ -1080,17 +1076,17 @@ View() {
         local shadow_tls_base64=$(echo -n "${shadow_tls_config}" | base64 -w 0)
         local ss_stls_url="ss://${userinfo}@${ipv4}:${config_port}?shadow-tls=${shadow_tls_base64}#SS-${ipv4}"
 
-        echo -e "\n${Yellow_font_prefix}=== SS + ShadowTLS 链接 ===${Font_color_suffix}"
-        [[ "${ipv4}" != "IPv4_Error" ]] && echo -e "${Green_font_prefix}合并链接：${Font_color_suffix}${ss_stls_url}"
+        echo -e "\n${YELLOW}=== SS + ShadowTLS 链接 ===${RESET}"
+        [[ "${ipv4}" != "IPv4_Error" ]] && echo -e "${GREEN}合并链接：${RESET}${ss_stls_url}"
 
-        echo -e "\n${Yellow_font_prefix}=== SS + ShadowTLS 二维码 ===${Font_color_suffix}"
+        echo -e "\n${YELLOW}=== SS + ShadowTLS 二维码 ===${RESET}"
         if command -v qrencode &> /dev/null; then
             [[ "${ipv4}" != "IPv4_Error" ]] && echo "${ss_stls_url}" | qrencode -t UTF8
         else
-            echo -e "${Red_font_prefix}未安装 qrencode，无法生成二维码${Font_color_suffix}"
+            echo -e "${RED}未安装 qrencode，无法生成二维码${RESET}"
         fi
 
-        echo -e "\n${Yellow_font_prefix}=== Surge Shadowsocks + ShadowTLS 配置 ===${Font_color_suffix}"
+        echo -e "\n${YELLOW}=== Surge Shadowsocks + ShadowTLS 配置 ===${RESET}"
         if [[ "${ipv4}" != "IPv4_Error" ]]; then
             echo -e "SS-${ipv4} = ss, ${ipv4}, ${stls_listen_port}, encrypt-method=${config_method}, password=${config_password}, shadow-tls-password=${stls_password}, shadow-tls-sni=${stls_sni}, shadow-tls-version=3, udp-relay=true"
         fi
@@ -1105,28 +1101,28 @@ View() {
 
 # 查看运行状态
 Status() {
-    echo -e "${Info} 获取 Shadowsocks Rust 活动日志 ……"
-    echo -e "${Tip} 返回主菜单请按 q ！"
+    echo -e "${GREEN}[信息]${RESET} 获取 Shadowsocks Rust 活动日志 ……"
+    echo -e "${YELLOW}[注意]${RESET} 返回主菜单请按 q ！"
     svc_status ss-rust
     Start_Menu
 }
 
 # 更新脚本
 Update_Shell() {
-    echo -e "${Info} 当前脚本版本为 [ ${SCRIPT_VERSION} ]"
-    echo -e "${Info} 开始检测脚本更新..."
+    echo -e "${GREEN}[信息]${RESET} 当前脚本版本为 [ ${SCRIPT_VERSION} ]"
+    echo -e "${GREEN}[信息]${RESET} 开始检测脚本更新..."
     
     # 下载最新版本进行版本对比
     local temp_file="/tmp/ss-2022.sh"
     if ! wget --no-check-certificate -O ${temp_file} "https://raw.githubusercontent.com/viogus/scripts/main/ss-2022.sh"; then
-        echo -e "${Error} 下载最新脚本失败！"
+        echo -e "${RED}[错误]${RESET} 下载最新脚本失败！"
         rm -f ${temp_file}
         return 1
     fi
     
     # 检查下载的文件是否存在且有内容
     if [[ ! -s ${temp_file} ]]; then
-        echo -e "${Error} 下载的脚本文件为空！"
+        echo -e "${RED}[错误]${RESET} 下载的脚本文件为空！"
         rm -f ${temp_file}
         return 1
     fi
@@ -1134,55 +1130,55 @@ Update_Shell() {
     # 获取最新版本号（修复版本号提取）
     sh_new_ver=$(grep -m1 '^SCRIPT_VERSION=' ${temp_file} | cut -d'"' -f2)
     if [[ -z ${sh_new_ver} ]]; then
-        echo -e "${Error} 获取最新版本号失败！"
+        echo -e "${RED}[错误]${RESET} 获取最新版本号失败！"
         rm -f ${temp_file}
         return 1
     fi
     
     # 比较版本号
     if [[ ${sh_new_ver} != ${SCRIPT_VERSION} ]]; then
-        echo -e "${Info} 发现新版本 [ ${sh_new_ver} ]"
-        echo -e "${Info} 是否更新？[Y/n]"
+        echo -e "${GREEN}[信息]${RESET} 发现新版本 [ ${sh_new_ver} ]"
+        echo -e "${GREEN}[信息]${RESET} 是否更新？[Y/n]"
         read -p "(默认: y)：" yn
         [[ -z "${yn}" ]] && yn="y"
         if [[ ${yn} == [Yy] ]]; then
             # 备份当前脚本
             cp "${SCRIPT_PATH}/${SCRIPT_NAME}" "${SCRIPT_PATH}/${SCRIPT_NAME}.bak.${SCRIPT_VERSION}"
-            echo -e "${Info} 已备份当前版本到 ${SCRIPT_NAME}.bak.${SCRIPT_VERSION}"
+            echo -e "${GREEN}[信息]${RESET} 已备份当前版本到 ${SCRIPT_NAME}.bak.${SCRIPT_VERSION}"
             
             # 更新脚本
             mv -f ${temp_file} "${SCRIPT_PATH}/${SCRIPT_NAME}"
             chmod +x "${SCRIPT_PATH}/${SCRIPT_NAME}"
             echo -e "${Success} 脚本已更新至 [ ${sh_new_ver} ]"
-            echo -e "${Info} 2秒后执行新脚本..."
+            echo -e "${GREEN}[信息]${RESET} 2秒后执行新脚本..."
             sleep 2s
             exec "${SCRIPT_PATH}/${SCRIPT_NAME}"
         else
-            echo -e "${Info} 已取消更新..."
+            echo -e "${GREEN}[信息]${RESET} 已取消更新..."
             rm -f ${temp_file}
         fi
     else
-        echo -e "${Info} 当前已是最新版本 [ ${sh_new_ver} ]"
+        echo -e "${GREEN}[信息]${RESET} 当前已是最新版本 [ ${sh_new_ver} ]"
         rm -f ${temp_file}
     fi
 }
 
 # 安装 ShadowTLS
 install_shadowtls() {
-    echo -e "${Info} 开始下载 ShadowTLS 安装脚本..."
+    echo -e "${GREEN}[信息]${RESET} 开始下载 ShadowTLS 安装脚本..."
     
     # 下载 ShadowTLS 脚本
     wget -N --no-check-certificate https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh
     
     if [ $? -ne 0 ]; then
-        echo -e "${Error} ShadowTLS 脚本下载失败！"
+        echo -e "${RED}[错误]${RESET} ShadowTLS 脚本下载失败！"
         return 1
     fi
     
     # 添加执行权限
     chmod +x shadowtls.sh
     
-    echo -e "${Info} 开始安装 ShadowTLS..."
+    echo -e "${GREEN}[信息]${RESET} 开始安装 ShadowTLS..."
     
     # 执行 ShadowTLS 安装脚本
     bash shadowtls.sh
@@ -1198,7 +1194,7 @@ install_mainland_block_scripts() {
     local local_block_script="${SCRIPT_PATH}/block-mainland.sh"
     local local_extract_script="${SCRIPT_PATH}/extract-cn-ip-from-mmdb.py"
 
-    echo -e "${Info} 准备部署中国大陆IP屏蔽脚本..."
+    echo -e "${GREEN}[信息]${RESET} 准备部署中国大陆IP屏蔽脚本..."
 
     if [[ -f "${local_block_script}" ]]; then
         cp -f "${local_block_script}" "${MAINLAND_BLOCK_SCRIPT}"
@@ -1213,7 +1209,7 @@ install_mainland_block_scripts() {
     fi
 
     if [[ ! -s "${MAINLAND_BLOCK_SCRIPT}" || ! -s "${MAINLAND_EXTRACT_SCRIPT}" ]]; then
-        echo -e "${Error} 大陆IP屏蔽脚本部署失败，请检查网络或仓库文件"
+        echo -e "${RED}[错误]${RESET} 大陆IP屏蔽脚本部署失败，请检查网络或仓库文件"
         return 1
     fi
 
@@ -1226,7 +1222,7 @@ run_mainland_block_cmd() {
     local cmd="$1"
 
     if [[ ! -x "${MAINLAND_BLOCK_SCRIPT}" ]]; then
-        echo -e "${Error} 未找到可执行脚本：${MAINLAND_BLOCK_SCRIPT}"
+        echo -e "${RED}[错误]${RESET} 未找到可执行脚本：${MAINLAND_BLOCK_SCRIPT}"
         return 1
     fi
 
@@ -1251,12 +1247,12 @@ mainland_block_menu() {
         echo -e "${GREEN}============================================${RESET}"
         echo -e "${GREEN}        中国大陆IP屏蔽管理 ${RESET}"
         echo -e "${GREEN}============================================${RESET}"
-        echo -e " ${Green_font_prefix}1.${Font_color_suffix} 初始化并启用屏蔽"
-        echo -e " ${Green_font_prefix}2.${Font_color_suffix} 更新中国大陆IP库"
-        echo -e " ${Green_font_prefix}3.${Font_color_suffix} 查看屏蔽状态"
-        echo -e " ${Green_font_prefix}4.${Font_color_suffix} 禁用屏蔽规则"
-        echo -e " ${Green_font_prefix}5.${Font_color_suffix} 进入高级菜单"
-        echo -e " ${Green_font_prefix}0.${Font_color_suffix} 返回上一级"
+        echo -e " ${GREEN}1.${RESET} 初始化并启用屏蔽"
+        echo -e " ${GREEN}2.${RESET} 更新中国大陆IP库"
+        echo -e " ${GREEN}3.${RESET} 查看屏蔽状态"
+        echo -e " ${GREEN}4.${RESET} 禁用屏蔽规则"
+        echo -e " ${GREEN}5.${RESET} 进入高级菜单"
+        echo -e " ${GREEN}0.${RESET} 返回上一级"
         echo -e "${GREEN}============================================${RESET}"
         echo
 
@@ -1266,24 +1262,24 @@ mainland_block_menu() {
                 if run_mainland_block_cmd "enable"; then
                     echo -e "${Success} 大陆IP屏蔽启用完成"
                 else
-                    echo -e "${Error} 大陆IP屏蔽启用失败"
+                    echo -e "${RED}[错误]${RESET} 大陆IP屏蔽启用失败"
                 fi
                 ;;
             2)
                 if run_mainland_block_cmd "update"; then
                     echo -e "${Success} 大陆IP库更新完成"
                 else
-                    echo -e "${Error} 大陆IP库更新失败"
+                    echo -e "${RED}[错误]${RESET} 大陆IP库更新失败"
                 fi
                 ;;
             3)
-                run_mainland_block_cmd "status" || echo -e "${Error} 状态查询失败"
+                run_mainland_block_cmd "status" || echo -e "${RED}[错误]${RESET} 状态查询失败"
                 ;;
             4)
                 if run_mainland_block_cmd "disable"; then
                     echo -e "${Success} 大陆IP屏蔽已禁用"
                 else
-                    echo -e "${Error} 禁用失败"
+                    echo -e "${RED}[错误]${RESET} 禁用失败"
                 fi
                 ;;
             5)
@@ -1293,17 +1289,17 @@ mainland_block_menu() {
                 return 0
                 ;;
             *)
-                echo -e "${Error} 请输入正确数字 [0-5]"
+                echo -e "${RED}[错误]${RESET} 请输入正确数字 [0-5]"
                 ;;
         esac
 
-        echo && echo -n -e "${Yellow_font_prefix}* 按回车返回此菜单 *${Font_color_suffix}" && read temp
+        echo && echo -n -e "${YELLOW}* 按回车返回此菜单 *${RESET}" && read temp
     done
 }
 
 # 返回主菜单
 Before_Start_Menu() {
-    echo && echo -n -e "${Yellow_font_prefix}* 按回车返回主菜单 *${Font_color_suffix}" && read temp
+    echo && echo -n -e "${YELLOW}* 按回车返回主菜单 *${RESET}" && read temp
 }
 
 # 主菜单
@@ -1320,34 +1316,34 @@ Start_Menu() {
     echo -e "${GREEN}   网站: jinqians.com / github.com/viogus${RESET}"
     echo -e "${GREEN}============================================${RESET}"
         echo && echo -e "  
- ${Green_font_prefix}0.${Font_color_suffix} 更新脚本
+ ${GREEN}0.${RESET} 更新脚本
 ——————————————————————————————————
- ${Green_font_prefix}1.${Font_color_suffix} 安装 Shadowsocks Rust
- ${Green_font_prefix}2.${Font_color_suffix} 更新 Shadowsocks Rust
- ${Green_font_prefix}3.${Font_color_suffix} 卸载 Shadowsocks Rust
+ ${GREEN}1.${RESET} 安装 Shadowsocks Rust
+ ${GREEN}2.${RESET} 更新 Shadowsocks Rust
+ ${GREEN}3.${RESET} 卸载 Shadowsocks Rust
 ——————————————————————————————————
- ${Green_font_prefix}4.${Font_color_suffix} 启动 Shadowsocks Rust
- ${Green_font_prefix}5.${Font_color_suffix} 停止 Shadowsocks Rust
- ${Green_font_prefix}6.${Font_color_suffix} 重启 Shadowsocks Rust
+ ${GREEN}4.${RESET} 启动 Shadowsocks Rust
+ ${GREEN}5.${RESET} 停止 Shadowsocks Rust
+ ${GREEN}6.${RESET} 重启 Shadowsocks Rust
 ——————————————————————————————————
- ${Green_font_prefix}7.${Font_color_suffix} 设置 配置信息
- ${Green_font_prefix}8.${Font_color_suffix} 查看 配置信息
- ${Green_font_prefix}9.${Font_color_suffix} 查看 运行状态
+ ${GREEN}7.${RESET} 设置 配置信息
+ ${GREEN}8.${RESET} 查看 配置信息
+ ${GREEN}9.${RESET} 查看 运行状态
 ——————————————————————————————————
- ${Green_font_prefix}10.${Font_color_suffix} 安装 ShadowTLS
- ${Green_font_prefix}11.${Font_color_suffix} 中国大陆IP屏蔽
- ${Green_font_prefix}12.${Font_color_suffix} 退出脚本
+ ${GREEN}10.${RESET} 安装 ShadowTLS
+ ${GREEN}11.${RESET} 中国大陆IP屏蔽
+ ${GREEN}12.${RESET} 退出脚本
 ——————————————————————————————————
 ==================================" && echo
         if [[ -e ${BINARY_PATH} ]]; then
             check_status
             if [[ "$status" == "running" ]]; then
-                echo -e " 当前状态：${Green_font_prefix}已安装${Font_color_suffix} 并 ${Green_font_prefix}已启动${Font_color_suffix}"
+                echo -e " 当前状态：${GREEN}已安装${RESET} 并 ${GREEN}已启动${RESET}"
             else
-                echo -e " 当前状态：${Green_font_prefix}已安装${Font_color_suffix} 但 ${Red_font_prefix}未启动${Font_color_suffix}"
+                echo -e " 当前状态：${GREEN}已安装${RESET} 但 ${RED}未启动${RESET}"
             fi
         else
-            echo -e " 当前状态：${Red_font_prefix}未安装${Font_color_suffix}"
+            echo -e " 当前状态：${RED}未安装${RESET}"
         fi
         echo
         read -e -p " 请输入数字 [0-12]：" num
@@ -1382,7 +1378,7 @@ Start_Menu() {
                 ;;
             8)
                 View
-                echo && echo -n -e "${Yellow_font_prefix}* 按回车返回主菜单 *${Font_color_suffix}" && read temp
+                echo && echo -n -e "${YELLOW}* 按回车返回主菜单 *${RESET}" && read temp
                 ;;
             9)
                 Status
@@ -1394,11 +1390,11 @@ Start_Menu() {
                 mainland_block_menu
                 ;;
             12)
-                echo -e "${Info} 退出脚本..."
+                echo -e "${GREEN}[信息]${RESET} 退出脚本..."
                 exit 0
                 ;;
             *)
-                echo -e "${Error} 请输入正确数字 [0-12]"
+                echo -e "${RED}[错误]${RESET} 请输入正确数字 [0-12]"
                 sleep 2
                 ;;
         esac
