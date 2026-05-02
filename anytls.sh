@@ -108,7 +108,10 @@ close_wall() {
     fi
     for svc in firewalld nftables ufw; do
         if has_cmd systemctl && systemctl list-unit-files 2>/dev/null | grep -q "^${svc}.service"; then
-            if systemctl is-active --quiet "$svc"; then
+            if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                print_warn "检测到防火墙 ${svc} 正在运行。脚本将关闭并禁用防火墙以放行端口。"
+                print_warn "如不希望禁用防火墙，请按 Ctrl+C 取消，手动放行端口后重试。"
+                sleep 2
                 systemctl stop "$svc" 2>/dev/null || true
                 systemctl disable "$svc" 2>/dev/null || true
                 print_ok "已关闭并禁用防火墙: $svc"
@@ -150,16 +153,16 @@ read_port_interactive() {
 
 get_ip() {
     local ip4 ip6
-    ip4=$(curl -s -4 http://www.cloudflare.com/cdn-cgi/trace | awk -F= '/^ip=/{print $2}') || true
+    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip4}" ]] && { echo "${ip4}"; return; }
-    ip6=$(curl -s -6 http://www.cloudflare.com/cdn-cgi/trace | awk -F= '/^ip=/{print $2}') || true
+    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip6}" ]] && { echo "${ip6}"; return; }
-    curl -s https://api.ipify.org || echo "未知IP"
+    curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
 }
 
 get_latest_version() {
     local version
-    version=$(curl -s https://api.github.com/repos/anytls/anytls-go/releases/latest \
+    version=$(curl -s --connect-timeout 10 --max-time 30 https://api.github.com/repos/anytls/anytls-go/releases/latest \
         | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     [[ -z "$version" ]] && { print_error "无法获取AnyTLS最新版本号"; return 1; }
     echo "$version"
@@ -307,7 +310,7 @@ install_anytls() {
     mkdir -p "${SNAP_DIR}"
 
     print_info "正在下载 AnyTLS..."
-    curl -L -o "$out" "$url"
+    curl -L --connect-timeout 10 --max-time 120 -o "$out" "$url"
     judge "下载AnyTLS"
 
     unzip -o "$out" -d "$SNAP_DIR" >/dev/null

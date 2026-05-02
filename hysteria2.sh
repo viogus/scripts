@@ -1,0 +1,600 @@
+#!/usr/bin/env bash
+# =========================================
+# 作者: viogus (基于 flame1ce/hysteria2-install 重构)
+# 日期: 2026年5月
+# 网站：github.com/viogus
+# 描述: Hysteria 2 一键管理脚本（安装/卸载/配置/启停/Surge输出）
+# 适配: Debian/Ubuntu (apt) / RHEL系 (dnf/yum) / Fedora
+# =========================================
+set -euo pipefail
+
+# ============================================
+# 常量
+# ============================================
+CONFIG_DIR="/etc/hysteria"
+CONFIG_FILE="${CONFIG_DIR}/config.yaml"
+CLIENT_DIR="/root/hy"
+CLIENT_YAML="${CLIENT_DIR}/hy-client.yaml"
+CLIENT_JSON="${CLIENT_DIR}/hy-client.json"
+URL_FILE="${CLIENT_DIR}/url.txt"
+SERVICE_NAME="hysteria-server"
+SYSTEMD_UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
+SCRIPT_VERSION="1.0.0"
+
+# ============================================
+# 颜色
+# ============================================
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BLUE='\033[0;34m'
+RESET='\033[0m'
+
+OK="${GREEN}[OK]${RESET}"
+ERROR="${RED}[ERROR]${RESET}"
+WARN="${YELLOW}[WARN]${RESET}"
+INFO="${CYAN}[INFO]${RESET}"
+
+print_ok(){ echo -e "${OK}${BLUE} $1 ${RESET}"; }
+print_info(){ echo -e "${INFO}${CYAN} $1 ${RESET}"; }
+print_error(){ echo -e "${ERROR} $1 ${RESET}"; }
+print_warn(){ echo -e "${WARN} $1 ${RESET}"; }
+trap 'echo -e "\n${WARN} 已中断"; exit 1' INT
+
+# ============================================
+# 工具函数
+# ============================================
+
+ensure_root() {
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+        print_error "必须使用 root 运行本脚本!"
+        exit 1
+    fi
+}
+
+has_cmd(){ command -v "$1" >/dev/null 2>&1; }
+
+detect_os() {
+    if grep -qi "debian\|ubuntu" /etc/os-release 2>/dev/null; then
+        echo "debian"
+    elif grep -qi "centos\|red hat\|rhel\|alma\|rocky\|fedora\|amazon" /etc/os-release 2>/dev/null; then
+        echo "rhel"
+    else
+        echo "unknown"
+    fi
+}
+
+get_ip() {
+    local ip4 ip6
+    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    [[ -n "${ip4}" ]] && { echo "${ip4}"; return; }
+    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    [[ -n "${ip6}" ]] && { echo "${ip6}"; return; }
+    curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
+}
+
+is_installed() {
+    [[ -f "/usr/local/bin/hysteria" ]] && [[ -f "${CONFIG_FILE}" ]]
+}
+
+# ============================================
+# 安装依赖
+# ============================================
+
+install_deps() {
+    local os_type; os_type=$(detect_os)
+    print_info "检测到系统类型: ${os_type}"
+
+    if [[ "$os_type" == "debian" ]]; then
+        apt-get update -y
+        apt-get install -y curl wget sudo qrencode procps iptables-persistent netfilter-persistent openssl
+    elif [[ "$os_type" == "rhel" ]]; then
+        yum -y update || dnf -y update
+        yum -y install curl wget sudo qrencode procps iptables-persistent netfilter-persistent openssl || \
+            dnf -y install curl wget sudo qrencode procps iptables-persistent netfilter-persistent openssl
+    else
+        print_error "不支持的操作系统"; exit 1
+    fi
+}
+
+install_hysteria_binary() {
+    local tmp; tmp=$(mktemp)
+    print_info "正在下载 Hysteria 2 安装脚本..."
+    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/Misaka-blog/hysteria-install/main/hy2/install_server.sh -o "$tmp"; then
+        bash "$tmp"
+        rm -f "$tmp"
+    else
+        print_error "下载安装脚本失败"; rm -f "$tmp"; exit 1
+    fi
+
+    if [[ -f "/usr/local/bin/hysteria" ]]; then
+        print_ok "Hysteria 2 二进制安装成功"
+    else
+        print_error "Hysteria 2 安装失败"; exit 1
+    fi
+}
+
+# ============================================
+# 证书
+# ============================================
+
+setup_cert() {
+    echo ""
+    print_info "Hysteria 2 证书申请方式："
+    echo -e " ${GREEN}1.${RESET} 自签证书 ${YELLOW}（默认，bing.com）${RESET}"
+    echo -e " ${GREEN}2.${RESET} ACME 自动申请 Let's Encrypt 证书"
+    echo -e " ${GREEN}3.${RESET} 自定义证书路径"
+    echo ""
+    read -rp "请选择 [1-3]: " cert_choice
+
+    case "${cert_choice:-1}" in
+        2)
+            print_info "ACME 证书申请"
+            read -p "请输入域名：" domain
+            [[ -z "$domain" ]] && { print_error "未输入域名"; exit 1; }
+
+            local ip; ip=$(get_ip)
+            local domain_ip; domain_ip=$(curl -s --connect-timeout 5 --max-time 10 ipget.net/?ip="${domain}" 2>/dev/null || true)
+
+            if [[ "$domain_ip" != "$ip" ]]; then
+                print_error "域名 ${domain} 解析的 IP (${domain_ip}) 与 VPS IP (${ip}) 不匹配"
+                print_warn "请确认 DNS 解析正确后再试"; exit 1
+            fi
+
+            install_deps
+            curl -s https://get.acme.sh | sh -s email=$(date +%s%N | md5sum | cut -c 1-16)@gmail.com
+            source ~/.bashrc 2>/dev/null || true
+            bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
+            bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+
+            if [[ -n $(echo "$ip" | grep ":") ]]; then
+                bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --listen-v6 --insecure
+            else
+                bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --insecure
+            fi
+
+            cert_path="/root/cert.crt"
+            key_path="/root/private.key"
+            bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$key_path" --fullchain-file "$cert_path" --ecc
+
+            if [[ -f "$cert_path" && -f "$key_path" ]]; then
+                echo "$domain" > /root/ca.log
+                sed -i '/--cron/d' /etc/crontab >/dev/null 2>&1 || true
+                echo "0 0 * * * root bash /root/.acme.sh/acme.sh --cron -f >/dev/null 2>&1" >> /etc/crontab
+                hy_domain="$domain"
+                print_ok "证书申请成功: ${domain}"
+            else
+                print_error "证书申请失败"; exit 1
+            fi
+            ;;
+        3)
+            read -p "请输入公钥 crt 文件路径：" cert_path
+            read -p "请输入密钥 key 文件路径：" key_path
+            read -p "请输入证书域名：" hy_domain
+            print_info "cert: ${cert_path}, key: ${key_path}, domain: ${hy_domain}"
+            ;;
+        *)
+            print_info "使用自签证书 (bing.com)"
+            cert_path="${CONFIG_DIR}/cert.crt"
+            key_path="${CONFIG_DIR}/private.key"
+            mkdir -p "${CONFIG_DIR}"
+            openssl ecparam -genkey -name prime256v1 -out "$key_path"
+            openssl req -new -x509 -days 36500 -key "$key_path" -out "$cert_path" -subj "/CN=www.bing.com"
+            chmod 644 "$cert_path" "$key_path"
+            hy_domain="www.bing.com"
+            print_ok "自签证书生成完毕"
+            ;;
+    esac
+}
+
+# ============================================
+# 端口 / 密码 / 伪装站
+# ============================================
+
+setup_port() {
+    local port
+    while true; do
+        read -p "设置 Hysteria 2 UDP 端口 [1-65535]，回车随机：" port
+        [[ -z "$port" ]] && port=$(shuf -i 2000-65535 -n 1)
+        if [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )); then
+            if ss -tunlp 2>/dev/null | grep -q ":${port} "; then
+                print_warn "端口 ${port} 已被占用"
+            else
+                break
+            fi
+        else
+            print_warn "端口不合法: ${port}"
+        fi
+    done
+    echo "$port"
+}
+
+setup_port_hopping() {
+    echo ""
+    print_info "Hysteria 2 端口模式："
+    echo -e " ${GREEN}1.${RESET} 单端口 ${YELLOW}（默认）${RESET}"
+    echo -e " ${GREEN}2.${RESET} 端口跳跃"
+    echo ""
+    read -rp "请选择 [1-2]: " jump_choice
+    if [[ "${jump_choice}" == "2" ]]; then
+        local firstport endport
+        while true; do
+            read -p "起始端口 (10000-65535)：" firstport
+            read -p "末尾端口 (大于起始端口)：" endport
+            if [[ "$firstport" =~ ^[0-9]+$ ]] && [[ "$endport" =~ ^[0-9]+$ ]] && (( firstport < endport )); then
+                iptables -t nat -A PREROUTING -p udp --dport "$firstport:$endport" -j DNAT --to-destination ":${1}"
+                ip6tables -t nat -A PREROUTING -p udp --dport "$firstport:$endport" -j DNAT --to-destination ":${1}" 2>/dev/null || true
+                netfilter-persistent save >/dev/null 2>&1 || true
+                print_ok "端口跳跃已配置: ${firstport}-${endport}"
+                echo "${firstport}-${endport}"
+                return
+            else
+                print_warn "端口范围不合法，请重新输入"
+            fi
+        done
+    fi
+}
+
+setup_password() {
+    local pwd
+    read -p "设置 Hysteria 2 密码，回车随机：" pwd
+    [[ -z "$pwd" ]] && pwd=$(date +%s%N | md5sum | cut -c 1-8)
+    echo "$pwd"
+}
+
+setup_masquerade() {
+    local site
+    read -p "伪装网站域名 (去除 https://)，回车默认 en.snu.ac.kr：" site
+    [[ -z "$site" ]] && site="en.snu.ac.kr"
+    echo "$site"
+}
+
+# ============================================
+# 配置生成
+# ============================================
+
+write_config() {
+    local port="$1" pwd="$2" cert="$3" key="$4" site="$5"
+
+    mkdir -p "${CONFIG_DIR}" "${CLIENT_DIR}"
+
+    cat > "${CONFIG_FILE}" <<EOF
+listen: :${port}
+
+tls:
+  cert: ${cert}
+  key: ${key}
+
+quic:
+  initStreamReceiveWindow: 16777216
+  maxStreamReceiveWindow: 16777216
+  initConnReceiveWindow: 33554432
+  maxConnReceiveWindow: 33554432
+
+auth:
+  type: password
+  password: ${pwd}
+
+masquerade:
+  type: proxy
+  proxy:
+    url: https://${site}
+    rewriteHost: true
+EOF
+
+    local ip; ip=$(get_ip)
+    local last_ip="$ip"
+    [[ -n $(echo "$ip" | grep ":") ]] && last_ip="[$ip]"
+
+    local last_port="$port"
+    [[ -n "${hop_range:-}" ]] && last_port="${port},${hop_range}"
+
+    cat > "${CLIENT_YAML}" <<EOF
+server: ${last_ip}:${last_port}
+
+auth: ${pwd}
+
+tls:
+  sni: ${hy_domain}
+  insecure: true
+
+quic:
+  initStreamReceiveWindow: 16777216
+  maxStreamReceiveWindow: 16777216
+  initConnReceiveWindow: 33554432
+  maxConnReceiveWindow: 33554432
+
+fastOpen: true
+
+socks5:
+  listen: 127.0.0.1:5678
+
+transport:
+  udp:
+    hopInterval: 30s
+EOF
+
+    cat > "${CLIENT_JSON}" <<EOF
+{
+  "server": "${last_ip}:${last_port}",
+  "auth": "${pwd}",
+  "tls": {
+    "sni": "${hy_domain}",
+    "insecure": true
+  },
+  "quic": {
+    "initStreamReceiveWindow": 16777216,
+    "maxStreamReceiveWindow": 16777216,
+    "initConnReceiveWindow": 33554432,
+    "maxConnReceiveWindow": 33554432
+  },
+  "transport": {
+    "udp": {
+      "hopInterval": "30s"
+    }
+  },
+  "socks5": {
+    "listen": "127.0.0.1:5678"
+  }
+}
+EOF
+
+    local url="hysteria2://${pwd}@${last_ip}:${port}/?insecure=1&sni=${hy_domain}#Hysteria2"
+    echo "$url" > "${URL_FILE}"
+}
+
+reload_service() {
+    systemctl daemon-reload
+    systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
+    systemctl restart "${SERVICE_NAME}"
+    if systemctl is-active --quiet "${SERVICE_NAME}"; then
+        print_ok "Hysteria 2 服务已启动"
+    else
+        print_error "Hysteria 2 服务启动失败，请运行 systemctl status ${SERVICE_NAME} 检查"
+        return 1
+    fi
+}
+
+# ============================================
+# 配置导出（含 Surge 格式）
+# ============================================
+
+show_config() {
+    if ! is_installed; then
+        print_error "Hysteria 2 未安装"
+        return
+    fi
+
+    local ip; ip=$(get_ip)
+    local port pwd sni
+    port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${CONFIG_FILE}" 2>/dev/null || true)
+    pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
+    sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+
+    echo ""
+    echo -e "${CYAN}========== Hysteria 2 客户端配置 ==========${RESET}"
+    echo ""
+
+    if [[ -f "${URL_FILE}" ]]; then
+        echo -e "${GREEN}分享链接：${RESET}$(cat ${URL_FILE})"
+    fi
+
+    echo ""
+    echo -e "${GREEN}Surge 格式：${RESET}"
+    echo "Proxy-Hysteria = hysteria2, ${ip}, ${port}, password=${pwd}, sni=${sni}"
+    echo ""
+    echo -e "${CYAN}========================================${RESET}"
+    echo -e "${YELLOW}完整配置已保存至：${RESET}"
+    echo -e "  YAML: ${CLIENT_YAML}"
+    echo -e "  JSON: ${CLIENT_JSON}"
+    echo -e "  URL:  ${URL_FILE}"
+}
+
+# ============================================
+# 安装 / 卸载
+# ============================================
+
+install_hysteria() {
+    if is_installed; then
+        read -p "Hysteria 2 已安装，是否重装？(y/N): " ans
+        [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
+        systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+    fi
+
+    print_info "安装依赖..."
+    install_deps
+
+    print_info "安装 Hysteria 2 二进制..."
+    install_hysteria_binary
+
+    print_info "配置证书..."
+    setup_cert
+
+    local port pwd site hop_range
+    port=$(setup_port)
+    hop_range=$(setup_port_hopping "$port" || true)
+    pwd=$(setup_password)
+    site=$(setup_masquerade)
+
+    print_info "生成配置..."
+    write_config "$port" "$pwd" "$cert_path" "$key_path" "$site"
+
+    reload_service
+    print_ok "Hysteria 2 安装完成！"
+    show_config
+}
+
+uninstall_hysteria() {
+    if ! is_installed; then
+        print_error "Hysteria 2 未安装"
+        return
+    fi
+    read -p "确认卸载 Hysteria 2？(y/N): " ans
+    [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
+
+    systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+    systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+    rm -f "/lib/systemd/system/${SERVICE_NAME}.service"
+    rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+    rm -f "/usr/local/bin/hysteria"
+    rm -rf "${CONFIG_DIR}" "${CLIENT_DIR}"
+    iptables -t nat -F PREROUTING >/dev/null 2>&1 || true
+    netfilter-persistent save >/dev/null 2>&1 || true
+    systemctl daemon-reload
+
+    print_ok "Hysteria 2 卸载完成。"
+}
+
+# ============================================
+# 状态 / 启停
+# ============================================
+
+show_status() {
+    echo -e "\n${CYAN}=== Hysteria 2 状态 ===${RESET}"
+    if is_installed; then
+        if systemctl is-active --quiet "${SERVICE_NAME}"; then
+            local pid=$(systemctl show -p MainPID "${SERVICE_NAME}" | cut -d'=' -f2)
+            echo -e "${GREEN}状态: 运行中${RESET}  ${YELLOW}PID: ${pid:-N/A}${RESET}"
+        else
+            echo -e "${RED}状态: 已停止${RESET}"
+        fi
+
+        local port pwd
+        port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${CONFIG_FILE}" 2>/dev/null || true)
+        pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
+        echo -e "${YELLOW}端口: ${port:-N/A}${RESET}"
+        echo -e "${YELLOW}密码: ${pwd:-N/A}${RESET}"
+    else
+        echo -e "${YELLOW}Hysteria 2 未安装${RESET}"
+    fi
+    echo -e "${CYAN}===================${RESET}\n"
+}
+
+start_service() {
+    systemctl start "${SERVICE_NAME}" && print_ok "已启动" || print_error "启动失败"
+}
+
+stop_service() {
+    systemctl stop "${SERVICE_NAME}" && print_ok "已停止" || print_error "停止失败"
+}
+
+restart_service() {
+    systemctl restart "${SERVICE_NAME}" && print_ok "已重启" || print_error "重启失败"
+}
+
+# ============================================
+# 修改配置
+# ============================================
+
+change_port() {
+    if ! is_installed; then print_error "未安装"; return; fi
+    local old_port new_port
+    old_port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${CONFIG_FILE}" 2>/dev/null || true)
+    new_port=$(setup_port)
+
+    sed -i "s/:${old_port}/:${new_port}/" "${CONFIG_FILE}"
+    sed -i "s/:${old_port}/:${new_port}/" "${CLIENT_YAML}" 2>/dev/null || true
+    sed -i "s/:${old_port}/:${new_port}/" "${CLIENT_JSON}" 2>/dev/null || true
+
+    # 更新 URL
+    local ip; ip=$(get_ip)
+    local sni; sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+    local pwd; pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
+    echo "hysteria2://${pwd}@${ip}:${new_port}/?insecure=1&sni=${sni}#Hysteria2" > "${URL_FILE}"
+
+    restart_service
+    print_ok "端口已更新为: ${new_port}"
+    show_config
+}
+
+change_password() {
+    if ! is_installed; then print_error "未安装"; return; fi
+    local old_pwd new_pwd
+    old_pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
+    new_pwd=$(setup_password)
+
+    sed -i "s/${old_pwd}/${new_pwd}/" "${CONFIG_FILE}"
+    sed -i "s/${old_pwd}/${new_pwd}/" "${CLIENT_YAML}" 2>/dev/null || true
+    sed -i "s/${old_pwd}/${new_pwd}/" "${CLIENT_JSON}" 2>/dev/null || true
+
+    # 更新 URL
+    local ip; ip=$(get_ip)
+    local port; port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${CONFIG_FILE}" 2>/dev/null || true)
+    local sni; sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+    echo "hysteria2://${new_pwd}@${ip}:${port}/?insecure=1&sni=${sni}#Hysteria2" > "${URL_FILE}"
+
+    restart_service
+    print_ok "密码已更新"
+    show_config
+}
+
+change_conf() {
+    if ! is_installed; then print_error "未安装"; return; fi
+    echo ""
+    echo -e " ${GREEN}1.${RESET} 修改端口"
+    echo -e " ${GREEN}2.${RESET} 修改密码"
+    echo ""
+    read -rp "请选择 [1-2]: " conf_choice
+    case "${conf_choice}" in
+        1) change_port ;;
+        2) change_password ;;
+        *) print_error "无效选项" ;;
+    esac
+}
+
+# ============================================
+# 菜单
+# ============================================
+
+hr(){ printf '%*s\n' 44 '' | tr ' ' '='; }
+pause(){ read -rp "按回车返回菜单..." _; }
+
+show_menu() {
+    clear
+    hr
+    echo -e "${CYAN} Hysteria 2 一键管理脚本  v${SCRIPT_VERSION}${RESET}"
+    echo -e "${CYAN} https://github.com/viogus/scripts${RESET}"
+    echo -e "${CYAN} 系统: $(detect_os)  |  架构: $(uname -m)${RESET}"
+    hr
+
+    show_status
+
+    echo -e "${GREEN}1.${RESET} 安装/重装 Hysteria 2"
+    echo -e "${GREEN}2.${RESET} 卸载 Hysteria 2"
+    echo -e "${GREEN}3.${RESET} 查看配置 (输出 Surge 格式)"
+    echo -e "---"
+    echo -e "${GREEN}4.${RESET} 启动服务"
+    echo -e "${GREEN}5.${RESET} 停止服务"
+    echo -e "${GREEN}6.${RESET} 重启服务"
+    echo -e "---"
+    echo -e "${GREEN}7.${RESET} 修改配置"
+    echo -e "${GREEN}0.${RESET} 退出"
+    hr
+    read -rp "请输入选项 [0-7]: " choice
+
+    case "${choice}" in
+        1) install_hysteria; pause ;;
+        2) uninstall_hysteria; pause ;;
+        3) show_config; pause ;;
+        4) start_service; pause ;;
+        5) stop_service; pause ;;
+        6) restart_service; pause ;;
+        7) change_conf; pause ;;
+        0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
+        *) echo -e "${RED}无效选项${RESET}"; pause ;;
+    esac
+}
+
+# ============================================
+# 主程序
+# ============================================
+
+main() {
+    ensure_root
+    while true; do
+        show_menu
+    done
+}
+
+main

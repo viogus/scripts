@@ -27,8 +27,16 @@ ANYTLS_SYSTEMD_UNIT="/etc/systemd/system/${ANYTLS_SERVICE_NAME}.service"
 ANYTLS_OPENRC_INIT="/etc/init.d/${ANYTLS_SERVICE_NAME}"
 ANYTLS_CONFIG_FILE="${ANYTLS_CONFIG_DIR}/config.yaml"
 ANYTLS_CLIENT_FILE="${ANYTLS_CONFIG_DIR}/anytls.txt"
-ANYTLS_SNAP_DIR="/tmp/anytls_install_$$"
 ANYTLS_TZ="Asia/Shanghai"
+ANYTLS_SNAP_DIR="/tmp/anytls_install_$$"
+
+# ============================================
+# Hysteria 2 常量
+# ============================================
+HY2_SERVICE_NAME="hysteria-server"
+HY2_CONFIG_FILE="/etc/hysteria/config.yaml"
+HY2_CLIENT_YAML="/root/hy/hy-client.yaml"
+HY2_URL_FILE="/root/hy/url.txt"
 
 # ============================================
 # 通用工具函数
@@ -37,13 +45,19 @@ ANYTLS_TZ="Asia/Shanghai"
 # 安装全局命令
 install_global_command() {
     echo -e "${CYAN}正在安装全局命令...${RESET}"
-    curl -L -s https://raw.githubusercontent.com/viogus/scripts/main/menu.sh -o "/usr/local/bin/menu.sh"
-    chmod +x "/usr/local/bin/menu.sh"
-    if [ -f "/usr/local/bin/menu" ]; then
-        rm -f "/usr/local/bin/menu"
+    local tmp; tmp=$(mktemp)
+    if curl -L --connect-timeout 10 --max-time 30 -s https://raw.githubusercontent.com/viogus/scripts/main/menu.sh -o "$tmp"; then
+        mv "$tmp" "/usr/local/bin/menu.sh"
+        chmod +x "/usr/local/bin/menu.sh"
+        if [ -f "/usr/local/bin/menu" ]; then
+            rm -f "/usr/local/bin/menu"
+        fi
+        ln -s "/usr/local/bin/menu.sh" "/usr/local/bin/menu"
+        echo -e "${GREEN}安装成功！现在您可以在任何位置使用 'menu' 命令来启动管理脚本${RESET}"
+    else
+        rm -f "$tmp"
+        echo -e "${YELLOW}安装全局命令失败（网络不可达），脚本继续运行${RESET}"
     fi
-    ln -s "/usr/local/bin/menu.sh" "/usr/local/bin/menu"
-    echo -e "${GREEN}安装成功！现在您可以在任何位置使用 'menu' 命令来启动管理脚本${RESET}"
 }
 
 # 检查并安装依赖
@@ -242,6 +256,23 @@ check_and_show_status() {
         echo -e "${YELLOW}AnyTLS 未安装${RESET}"
     fi
 
+    # --- Hysteria 2 ---
+    if [[ -f "/usr/local/bin/hysteria" ]] && [[ -f "${HY2_CONFIG_FILE}" ]]; then
+        local hy2_memory=0 hy2_cpu=0 hy2_running=0
+        if systemctl is-active "${HY2_SERVICE_NAME}" &> /dev/null; then
+            hy2_running=1
+            local hy2_pid=$(systemctl show -p MainPID "${HY2_SERVICE_NAME}" | cut -d'=' -f2)
+            if [ ! -z "$hy2_pid" ] && [ "$hy2_pid" != "0" ]; then
+                hy2_memory=$(ps -o rss= -p $hy2_pid 2>/dev/null || echo 0)
+                hy2_cpu=$(get_cpu_usage "$hy2_pid")
+            fi
+        fi
+        local hy2_memory_mb=$(echo "scale=2; $hy2_memory/1024" | bc 2>/dev/null || echo "0")
+        printf "${GREEN}Hysteria2 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${hy2_running}/1${RESET}\n" "$hy2_cpu" "$hy2_memory_mb"
+    else
+        echo -e "${YELLOW}Hysteria2 未安装${RESET}"
+    fi
+
     echo -e "${CYAN}====================${RESET}\n"
 }
 
@@ -253,7 +284,7 @@ update_script() {
     echo -e "${CYAN}正在检查脚本更新...${RESET}"
     TMP_SCRIPT=$(mktemp)
 
-    if curl -sL https://raw.githubusercontent.com/viogus/scripts/main/menu.sh -o "$TMP_SCRIPT"; then
+    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/menu.sh -o "$TMP_SCRIPT"; then
         new_version=$(grep "current_version=" "$TMP_SCRIPT" | cut -d'"' -f2)
 
         if [ -z "$new_version" ]; then
@@ -296,19 +327,39 @@ update_script() {
 # ============================================
 
 manage_snell() {
-    bash <(curl -sL https://raw.githubusercontent.com/viogus/scripts/main/snell.sh)
+    local tmp; tmp=$(mktemp)
+    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/snell.sh -o "$tmp"; then
+        bash "$tmp"; rm -f "$tmp"
+    else
+        echo -e "${RED}下载 Snell 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
+    fi
 }
 
 manage_ss_rust() {
-    bash <(curl -sL https://raw.githubusercontent.com/viogus/scripts/main/ss-2022.sh)
+    local tmp; tmp=$(mktemp)
+    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/ss-2022.sh -o "$tmp"; then
+        bash "$tmp"; rm -f "$tmp"
+    else
+        echo -e "${RED}下载 SS-2022 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
+    fi
 }
 
 manage_shadowtls() {
-    bash <(curl -sL https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh)
+    local tmp; tmp=$(mktemp)
+    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh -o "$tmp"; then
+        bash "$tmp"; rm -f "$tmp"
+    else
+        echo -e "${RED}下载 ShadowTLS 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
+    fi
 }
 
 manage_vless() {
-    bash <(curl -sL https://raw.githubusercontent.com/viogus/scripts/main/vless.sh)
+    local tmp; tmp=$(mktemp)
+    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/vless.sh -o "$tmp"; then
+        bash "$tmp"; rm -f "$tmp"
+    else
+        echo -e "${RED}下载 VLESS 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
+    fi
 }
 
 # ============================================
@@ -369,7 +420,21 @@ uninstall_shadowtls() {
 # ============================================
 
 manage_anytls() {
-    bash <(curl -sL https://raw.githubusercontent.com/viogus/scripts/main/anytls.sh)
+    local tmp; tmp=$(mktemp)
+    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/anytls.sh -o "$tmp"; then
+        bash "$tmp"; rm -f "$tmp"
+    else
+        echo -e "${RED}下载 AnyTLS 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
+    fi
+}
+
+manage_hysteria() {
+    local tmp; tmp=$(mktemp)
+    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/hysteria2.sh -o "$tmp"; then
+        bash "$tmp"; rm -f "$tmp"
+    else
+        echo -e "${RED}下载 Hysteria 2 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
+    fi
 }
 
 uninstall_anytls() {
@@ -396,14 +461,34 @@ uninstall_anytls() {
     fi
 }
 
+uninstall_hysteria() {
+    echo -e "${CYAN}正在卸载 Hysteria 2...${RESET}"
+    if [[ -f "/usr/local/bin/hysteria" ]] || [[ -f "${HY2_CONFIG_FILE}" ]]; then
+        read -p "确认卸载并删除 Hysteria 2 配置？(y/N): " ans
+        [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
+        systemctl stop "${HY2_SERVICE_NAME}" 2>/dev/null || true
+        systemctl disable "${HY2_SERVICE_NAME}" 2>/dev/null || true
+        rm -f "/lib/systemd/system/${HY2_SERVICE_NAME}.service"
+        rm -f "/etc/systemd/system/${HY2_SERVICE_NAME}.service"
+        rm -f "/usr/local/bin/hysteria"
+        rm -rf "/etc/hysteria" "/root/hy"
+        iptables -t nat -F PREROUTING 2>/dev/null || true
+        netfilter-persistent save 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+        echo -e "${GREEN}Hysteria 2 卸载完成！${RESET}"
+    else
+        echo -e "${YELLOW}Hysteria 2 未安装${RESET}"
+    fi
+}
+
 # IP 检测（供 surge_export_all 使用）
 at_get_ip() {
     local ip4 ip6
-    ip4=$(curl -s -4 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}') || true
+    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip4}" ]] && { echo "${ip4}"; return; }
-    ip6=$(curl -s -6 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}') || true
+    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip6}" ]] && { echo "${ip6}"; return; }
-    curl -s https://api.ipify.org 2>/dev/null || echo "服务器IP"
+    curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
 }
 
 # ============================================
@@ -482,21 +567,37 @@ surge_export_all() {
     # 从 systemd 服务提取密码，提示用户附加到其他代理
     if systemctl list-units --type=service 2>/dev/null | grep -q "shadowtls-"; then
         echo -e "${CYAN}[ShadowTLS - Surge 中需附加到其他代理]${RESET}"
+        echo -e "${YELLOW}将 shadow-tls-password 参数附加到 Snell/SS 代理即可：${RESET}"
+        local stls_count=0
         while IFS= read -r service; do
             local stls_exec=$(systemctl cat "$service" 2>/dev/null | grep "ExecStart=" | head -1 || true)
             if [[ -n "$stls_exec" ]]; then
-                # 尝试从 ExecStart 提取端口和密码
                 local stls_port=$(echo "$stls_exec" | sed -n 's/.*--tls[[:space:]]\+[^[:space:]]*:\([0-9]\+\).*/\1/p' | head -1 || true)
                 [[ -z "$stls_port" ]] && stls_port=$(echo "$stls_exec" | sed -n 's/.*0\.0\.0\.0:\([0-9]\+\).*/\1/p' | head -1 || true)
                 local stls_pass=$(echo "$stls_exec" | sed -n 's/.*--password[[:space:]]\+\([^[:space:]]\+\).*/\1/p' || true)
                 if [[ -n "${stls_pass}" ]]; then
-                    echo -e "${YELLOW}示例 (附加到 Snell/SS):${RESET}"
-                    echo "# Proxy-STLS = snell, ${ip}, ${stls_port:-8443}, psk=YOUR_PSK, version=4, shadow-tls-password=${stls_pass}, shadow-tls-version=3"
-                    break
+                    stls_count=$((stls_count + 1))
+                    echo "# STLS-${stls_count}: shadow-tls-password=${stls_pass}, shadow-tls-version=3, shadow-tls-port=${stls_port:-?}"
                 fi
             fi
         done < <(systemctl list-units --type=service --all --no-legend 2>/dev/null | grep "shadowtls-" | awk '{print $1}')
+        if [[ $stls_count -eq 0 ]]; then
+            echo -e "${YELLOW}  (无法自动提取配置，请查看 systemd 服务文件)${RESET}"
+        fi
         echo ""
+    fi
+
+    # --- Hysteria 2 ---
+    if [[ -f "${HY2_CONFIG_FILE}" ]]; then
+        local hy2_port hy2_pwd hy2_sni
+        hy2_port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${HY2_CONFIG_FILE}" 2>/dev/null | head -1 || true)
+        hy2_pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${HY2_CONFIG_FILE}" 2>/dev/null | head -1 || true)
+        hy2_sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${HY2_CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+        if [[ -n "${hy2_port}" && -n "${hy2_pwd}" ]]; then
+            echo -e "${GREEN}[Hysteria2]${RESET}"
+            echo "Proxy-Hysteria = hysteria2, ${ip}, ${hy2_port}, password=${hy2_pwd}, sni=${hy2_sni}"
+            echo ""
+        fi
     fi
 
     # --- VLESS Reality ---
@@ -531,22 +632,24 @@ show_menu() {
     echo -e "${GREEN}3.${RESET} VLESS Reality 安装管理"
     echo -e "${GREEN}4.${RESET} ShadowTLS 安装管理"
     echo -e "${GREEN}5.${RESET} AnyTLS 安装管理"
+    echo -e "${GREEN}6.${RESET} Hysteria 2 安装管理"
 
     echo -e "\n${YELLOW}=== 卸载功能 ===${RESET}"
-    echo -e "${GREEN}6.${RESET} 卸载 Snell"
-    echo -e "${GREEN}7.${RESET} 卸载 SS-2022"
-    echo -e "${GREEN}8.${RESET} 卸载 ShadowTLS"
-    echo -e "${GREEN}9.${RESET} 卸载 AnyTLS"
+    echo -e "${GREEN}7.${RESET} 卸载 Snell"
+    echo -e "${GREEN}8.${RESET} 卸载 SS-2022"
+    echo -e "${GREEN}9.${RESET} 卸载 ShadowTLS"
+    echo -e "${GREEN}10.${RESET} 卸载 AnyTLS"
+    echo -e "${GREEN}11.${RESET} 卸载 Hysteria 2"
 
     echo -e "\n${YELLOW}=== 系统功能 ===${RESET}"
-    echo -e "${GREEN}10.${RESET} 更新脚本"
-    echo -e "${GREEN}11.${RESET} 输出 Surge 配置"
+    echo -e "${GREEN}12.${RESET} 更新脚本"
+    echo -e "${GREEN}13.${RESET} 输出 Surge 配置"
     echo -e "${GREEN}0.${RESET} 退出"
 
     echo -e "${CYAN}============================================${RESET}"
     echo -e "${GREEN}退出脚本后，输入 menu 可重新进入${RESET}"
     echo -e "${CYAN}============================================${RESET}"
-    read -rp "请输入选项 [0-11]: " num
+    read -rp "请输入选项 [0-13]: " num
 }
 
 # ============================================
@@ -565,14 +668,16 @@ while true; do
         3) manage_vless ;;
         4) manage_shadowtls ;;
         5) manage_anytls ;;
-        6) uninstall_snell ;;
-        7) uninstall_ss_rust ;;
-        8) uninstall_shadowtls ;;
-        9) uninstall_anytls ;;
-        10) update_script ;;
-        11) surge_export_all ;;
+        6) manage_hysteria ;;
+        7) uninstall_snell ;;
+        8) uninstall_ss_rust ;;
+        9) uninstall_shadowtls ;;
+        10) uninstall_anytls ;;
+        11) uninstall_hysteria ;;
+        12) update_script ;;
+        13) surge_export_all ;;
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
-        *) echo -e "${RED}请输入正确的选项 [0-11]${RESET}" ;;
+        *) echo -e "${RED}请输入正确的选项 [0-13]${RESET}" ;;
     esac
     echo -e "\n${CYAN}按任意键返回主菜单...${RESET}"
     read -n 1 -s -r
