@@ -59,14 +59,41 @@ ensure_root() {
 
 has_cmd(){ command -v "$1" >/dev/null 2>&1; }
 
+# 优先加载共享库
+LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
+[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+
+# Init 检测（结果缓存在 _INIT_TYPE）
+_INIT_TYPE=""
 detect_init() {
+    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
     if has_cmd systemctl && [[ -d /run/systemd/system ]]; then
-        echo "systemd"; return
+        _INIT_TYPE="systemd"
+    elif has_cmd rc-service; then
+        _INIT_TYPE="openrc"
+    else
+        _INIT_TYPE="systemd"
     fi
-    if has_cmd rc-service; then
-        echo "openrc"; return
+    echo "$_INIT_TYPE"
+}
+
+# 服务操作包装器
+svc_start()   { [[ "$(detect_init)" == "openrc" ]] && { rc-service "$1" start; return; }; systemctl start "$1"; }
+svc_stop()    { [[ "$(detect_init)" == "openrc" ]] && { rc-service "$1" stop 2>/dev/null || true; return; }; systemctl stop "$1" 2>/dev/null || true; }
+svc_restart() { [[ "$(detect_init)" == "openrc" ]] && { rc-service "$1" restart; return; }; systemctl restart "$1"; }
+svc_enable()  { [[ "$(detect_init)" == "openrc" ]] && { rc-update add "$1" default >/dev/null 2>&1 || true; return; }; systemctl enable "$1" >/dev/null 2>&1 || true; }
+svc_disable() { [[ "$(detect_init)" == "openrc" ]] && { rc-update del "$1" default >/dev/null 2>&1 || true; return; }; systemctl disable "$1" 2>/dev/null || true; }
+svc_is_active() {
+    if [[ "$(detect_init)" == "openrc" ]]; then
+        if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi
+    else
+        if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi
     fi
-    echo "unknown"
+}
+svc_reload()  { [[ "$(detect_init)" != "openrc" ]] && systemctl daemon-reload; }
+svc_main_pid() {
+    if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"
+    else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi
 }
 
 get_arch() {
@@ -101,28 +128,20 @@ os_install() {
 }
 
 close_wall() {
-    local init; init="$(detect_init)"
-    if [[ "$init" == "openrc" ]]; then
-        print_info "检测到 OpenRC (Alpine)。脚本不自动关闭防火墙，请自行放行端口。"
-        return 0
-    fi
+    local found=false
     for svc in firewalld nftables ufw; do
-        if has_cmd systemctl && systemctl list-unit-files 2>/dev/null | grep -q "^${svc}.service"; then
-            if systemctl is-active --quiet "$svc" 2>/dev/null; then
-                print_warn "检测到防火墙 ${svc} 正在运行。脚本将关闭并禁用防火墙以放行端口。"
-                print_warn "如不希望禁用防火墙，请按 Ctrl+C 取消，手动放行端口后重试。"
-                sleep 2
-                systemctl stop "$svc" 2>/dev/null || true
-                systemctl disable "$svc" 2>/dev/null || true
-                print_ok "已关闭并禁用防火墙: $svc"
-            else
-                if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-                    systemctl disable "$svc" 2>/dev/null || true
-                    print_ok "已禁用开机自启: $svc"
-                fi
-            fi
+        if { [[ -f "/etc/systemd/system/${svc}.service" ]] || [[ -f "/etc/init.d/${svc}" ]]; }; then
+            found=true
+            break
         fi
     done
+    if $found; then
+        print_warn "检测到防火墙，请手动放行端口。示例："
+        print_warn "  ufw:        ufw allow <端口>"
+        print_warn "  firewalld:  firewall-cmd --add-port=<端口>/tcp --permanent && firewall-cmd --reload"
+        print_warn "  nftables:   nft add rule inet filter input tcp dport <端口> accept"
+        echo ""
+    fi
 }
 
 random_port(){ shuf -i 2000-65000 -n 1; }
@@ -153,9 +172,9 @@ read_port_interactive() {
 
 get_ip() {
     local ip4 ip6
-    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip4}" ]] && { echo "${ip4}"; return; }
-    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip6}" ]] && { echo "${ip6}"; return; }
     curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
 }
@@ -230,7 +249,8 @@ X-AT-Version=${version}
 
 [Service]
 Type=simple
-User=root
+User=nobody
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Environment=TZ=${TZ_DEFAULT}
 ExecStart="${BINARY}" -l 0.0.0.0:${port} -p "${pass}"
 Restart=on-failure
@@ -263,22 +283,14 @@ EOF
 }
 
 restart_service() {
-    local init; init="$(detect_init)"
-    if [[ "$init" == "systemd" ]]; then
-        systemctl daemon-reload || true
-        systemctl enable "${SERVICE_NAME}" || true
-        systemctl restart "${SERVICE_NAME}"
-        systemctl status --no-pager "${SERVICE_NAME}" | sed -n '1,8p' || true
-        return
+    svc_reload
+    svc_enable "${SERVICE_NAME}"
+    svc_restart "${SERVICE_NAME}"
+    if [[ "$(detect_init)" == "systemd" ]]; then
+        systemctl status --no-pager "${SERVICE_NAME}" 2>/dev/null | sed -n '1,8p' || true
+    else
+        rc-service "${SERVICE_NAME}" status 2>/dev/null || true
     fi
-    if [[ "$init" == "openrc" ]]; then
-        rc-update add "${SERVICE_NAME}" default >/dev/null 2>&1 || true
-        rc-service "${SERVICE_NAME}" restart || rc-service "${SERVICE_NAME}" start
-        rc-service "${SERVICE_NAME}" status || true
-        return
-    fi
-    print_error "未知 init 系统，无法管理服务"
-    exit 1
 }
 
 # ============================================
@@ -399,17 +411,10 @@ uninstall_anytls() {
     read -p "确认卸载并删除 AnyTLS 配置？(y/N): " ans
     [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
 
-    local init; init="$(detect_init)"
-    if [[ "$init" == "systemd" ]]; then
-        systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
-        systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
-        rm -f "${SYSTEMD_UNIT}" || true
-        systemctl daemon-reload || true
-    elif [[ "$init" == "openrc" ]]; then
-        rc-service "${SERVICE_NAME}" stop 2>/dev/null || true
-        rc-update del "${SERVICE_NAME}" default >/dev/null 2>&1 || true
-        rm -f "${OPENRC_INIT}" || true
-    fi
+    svc_stop "${SERVICE_NAME}"
+    svc_disable "${SERVICE_NAME}"
+    rm -f "${SYSTEMD_UNIT}" "${OPENRC_INIT}"
+    svc_reload
 
     rm -rf "${CONFIG_DIR}" || true
     print_ok "AnyTLS 卸载完成。"
@@ -478,18 +483,12 @@ set_password() {
 show_status() {
     echo -e "\n${CYAN}=== AnyTLS 状态 ===${RESET}"
     if is_installed; then
-        if [[ -f "${SYSTEMD_UNIT}" ]]; then
-            if systemctl is-active --quiet "${SERVICE_NAME}"; then
-                local pid=$(systemctl show -p MainPID "${SERVICE_NAME}" | cut -d'=' -f2)
-                echo -e "${GREEN}状态: 运行中${RESET}  ${YELLOW}PID: ${pid:-N/A}${RESET}"
-                systemctl status --no-pager "${SERVICE_NAME}" | sed -n '1,8p' || true
-            else
-                echo -e "${RED}状态: 已停止${RESET}"
-            fi
-        elif [[ -f "${OPENRC_INIT}" ]]; then
-            rc-service "${SERVICE_NAME}" status 2>/dev/null || echo -e "${RED}状态: 已停止${RESET}"
+        local status; status="$(svc_is_active "${SERVICE_NAME}")"
+        if [[ "$status" == "active" ]]; then
+            local pid; pid=$(svc_main_pid "${SERVICE_NAME}")
+            echo -e "${GREEN}状态: 运行中${RESET}  ${YELLOW}PID: ${pid:-N/A}${RESET}"
         else
-            echo -e "${GREEN}状态: 已安装${RESET}"
+            echo -e "${RED}状态: 已停止${RESET}"
         fi
 
         if [[ -f "${CONFIG_FILE}" ]]; then
