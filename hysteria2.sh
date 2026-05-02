@@ -4,7 +4,8 @@
 # 日期: 2026年5月
 # 网站：github.com/viogus
 # 描述: Hysteria 2 一键管理脚本（安装/卸载/配置/启停/Surge输出）
-# 适配: Debian/Ubuntu (apt) / RHEL系 (dnf/yum) / Fedora
+# 适配: Debian/Ubuntu (apt) / RHEL系 (dnf/yum) / Alpine (apk)
+# init: systemd / openrc
 # =========================================
 set -euo pipefail
 
@@ -43,6 +44,10 @@ trap 'echo -e "\n${WARN} 已中断"; exit 1' INT
 
 # ============================================
 # 工具函数
+
+# 优先加载共享库
+LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
+[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
 # ============================================
 
 ensure_root() {
@@ -55,7 +60,9 @@ ensure_root() {
 has_cmd(){ command -v "$1" >/dev/null 2>&1; }
 
 detect_os() {
-    if grep -qi "debian\|ubuntu" /etc/os-release 2>/dev/null; then
+    if grep -qi "alpine" /etc/os-release 2>/dev/null; then
+        echo "alpine"
+    elif grep -qi "debian\|ubuntu" /etc/os-release 2>/dev/null; then
         echo "debian"
     elif grep -qi "centos\|red hat\|rhel\|alma\|rocky\|fedora\|amazon" /etc/os-release 2>/dev/null; then
         echo "rhel"
@@ -64,11 +71,21 @@ detect_os() {
     fi
 }
 
+detect_init() {
+    if has_cmd systemctl && [[ -d /run/systemd/system ]]; then
+        echo "systemd"; return
+    fi
+    if has_cmd rc-service; then
+        echo "openrc"; return
+    fi
+    echo "unknown"
+}
+
 get_ip() {
     local ip4 ip6
-    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip4}" ]] && { echo "${ip4}"; return; }
-    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip6}" ]] && { echo "${ip6}"; return; }
     curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
 }
@@ -92,19 +109,44 @@ install_deps() {
         yum -y update || dnf -y update
         yum -y install curl wget sudo procps iptables-services openssl || \
             dnf -y install curl wget sudo procps iptables-services openssl
+    elif [[ "$os_type" == "alpine" ]]; then
+        apk update
+        apk add --no-cache curl wget sudo procps iptables openssl openrc
     else
         print_error "不支持的操作系统"; exit 1
     fi
 }
 
 install_hysteria_binary() {
-    local tmp; tmp=$(mktemp)
-    print_info "正在下载 Hysteria 2 安装脚本..."
-    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/Misaka-blog/hysteria-install/main/hy2/install_server.sh -o "$tmp"; then
-        bash "$tmp"
-        rm -f "$tmp"
+    local os_type; os_type=$(detect_os)
+    local arch; arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) print_error "不支持的架构: $arch"; exit 1 ;;
+    esac
+
+    if [[ "$os_type" == "alpine" ]]; then
+        # Alpine: 直接从官方 GitHub 下载二进制
+        local latest_ver; latest_ver=$(curl -s --connect-timeout 10 --max-time 30 https://api.github.com/repos/apernet/hysteria/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [[ -z "$latest_ver" ]]; then
+            print_error "无法获取 Hysteria 最新版本号"; exit 1
+        fi
+        print_info "Hysteria 最新版本: ${latest_ver}"
+        local url="https://github.com/apernet/hysteria/releases/download/${latest_ver}/hysteria-linux-${arch}"
+        print_info "正在下载 Hysteria..."
+        curl -L --connect-timeout 10 --max-time 120 -o /usr/local/bin/hysteria "$url"
+        chmod +x /usr/local/bin/hysteria
     else
-        print_error "下载安装脚本失败"; rm -f "$tmp"; exit 1
+        # Debian/RHEL: 使用 Misaka-blog 安装脚本
+        local tmp; tmp=$(mktemp)
+        print_info "正在下载 Hysteria 2 安装脚本..."
+        if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/Misaka-blog/hysteria-install/main/hy2/install_server.sh -o "$tmp"; then
+            bash "$tmp"
+            rm -f "$tmp"
+        else
+            print_error "下载安装脚本失败"; rm -f "$tmp"; exit 1
+        fi
     fi
 
     if [[ -f "/usr/local/bin/hysteria" ]]; then
@@ -342,7 +384,36 @@ EOF
     echo "$url" > "${URL_FILE}"
 }
 
+write_openrc_init() {
+    cat > "/etc/init.d/${SERVICE_NAME}" <<'OPENRCEOF'
+#!/sbin/openrc-run
+name="hysteria-server"
+description="Hysteria 2 server"
+command="/usr/local/bin/hysteria"
+command_args="server -c /usr/local/etc/hysteria/config.yaml"
+command_background="yes"
+pidfile="/run/hysteria.pid"
+output_log="/var/log/hysteria.log"
+error_log="/var/log/hysteria.err"
+OPENRCEOF
+    chmod +x "/etc/init.d/${SERVICE_NAME}"
+}
+
 reload_service() {
+    local init; init=$(detect_init)
+    if [[ "$init" == "openrc" ]]; then
+        write_openrc_init
+        rc-update add "${SERVICE_NAME}" default >/dev/null 2>&1 || true
+        rc-service "${SERVICE_NAME}" restart || rc-service "${SERVICE_NAME}" start
+        if rc-service "${SERVICE_NAME}" status 2>/dev/null; then
+            print_ok "Hysteria 2 服务已启动"
+        else
+            print_error "Hysteria 2 服务启动失败"
+            return 1
+        fi
+        return
+    fi
+
     systemctl daemon-reload
     systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
     systemctl restart "${SERVICE_NAME}"
@@ -397,7 +468,11 @@ install_hysteria() {
     if is_installed; then
         read -p "Hysteria 2 已安装，是否重装？(y/N): " ans
         [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
-        systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+        if [[ "$(detect_init)" == "openrc" ]]; then
+            rc-service "${SERVICE_NAME}" stop 2>/dev/null || true
+        else
+            systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+        fi
     fi
 
     mkdir -p "${CONFIG_DIR}"
@@ -433,10 +508,18 @@ uninstall_hysteria() {
     read -p "确认卸载 Hysteria 2？(y/N): " ans
     [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
 
-    systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
-    systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
-    rm -f "/lib/systemd/system/${SERVICE_NAME}.service"
-    rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+    local init; init=$(detect_init)
+    if [[ "$init" == "openrc" ]]; then
+        rc-service "${SERVICE_NAME}" stop 2>/dev/null || true
+        rc-update del "${SERVICE_NAME}" default >/dev/null 2>&1 || true
+        rm -f "/etc/init.d/${SERVICE_NAME}"
+    else
+        systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+        systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+        rm -f "/lib/systemd/system/${SERVICE_NAME}.service"
+        rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+        systemctl daemon-reload
+    fi
     rm -f "/usr/local/bin/hysteria"
 
     # 清理端口跳跃规则（精确删除，不影响其他服务）
@@ -451,7 +534,6 @@ uninstall_hysteria() {
     rm -f /root/cert.crt /root/private.key /root/ca.log 2>/dev/null || true
 
     rm -rf "${CONFIG_DIR}"
-    systemctl daemon-reload
 
     print_ok "Hysteria 2 卸载完成。"
 }
@@ -463,11 +545,20 @@ uninstall_hysteria() {
 show_status() {
     echo -e "\n${CYAN}=== Hysteria 2 状态 ===${RESET}"
     if is_installed; then
-        if systemctl is-active --quiet "${SERVICE_NAME}"; then
-            local pid=$(systemctl show -p MainPID "${SERVICE_NAME}" | cut -d'=' -f2)
-            echo -e "${GREEN}状态: 运行中${RESET}  ${YELLOW}PID: ${pid:-N/A}${RESET}"
+        local init; init=$(detect_init)
+        if [[ "$init" == "openrc" ]]; then
+            if rc-service "${SERVICE_NAME}" status 2>/dev/null; then
+                echo -e "${GREEN}状态: 运行中${RESET}"
+            else
+                echo -e "${RED}状态: 已停止${RESET}"
+            fi
         else
-            echo -e "${RED}状态: 已停止${RESET}"
+            if systemctl is-active --quiet "${SERVICE_NAME}"; then
+                local pid=$(systemctl show -p MainPID "${SERVICE_NAME}" | cut -d'=' -f2)
+                echo -e "${GREEN}状态: 运行中${RESET}  ${YELLOW}PID: ${pid:-N/A}${RESET}"
+            else
+                echo -e "${RED}状态: 已停止${RESET}"
+            fi
         fi
 
         local port pwd
@@ -482,15 +573,30 @@ show_status() {
 }
 
 start_service() {
-    systemctl start "${SERVICE_NAME}" && print_ok "已启动" || print_error "启动失败"
+    local init; init=$(detect_init)
+    if [[ "$init" == "openrc" ]]; then
+        rc-service "${SERVICE_NAME}" start && print_ok "已启动" || print_error "启动失败"
+    else
+        systemctl start "${SERVICE_NAME}" && print_ok "已启动" || print_error "启动失败"
+    fi
 }
 
 stop_service() {
-    systemctl stop "${SERVICE_NAME}" && print_ok "已停止" || print_error "停止失败"
+    local init; init=$(detect_init)
+    if [[ "$init" == "openrc" ]]; then
+        rc-service "${SERVICE_NAME}" stop && print_ok "已停止" || print_error "停止失败"
+    else
+        systemctl stop "${SERVICE_NAME}" && print_ok "已停止" || print_error "停止失败"
+    fi
 }
 
 restart_service() {
-    systemctl restart "${SERVICE_NAME}" && print_ok "已重启" || print_error "重启失败"
+    local init; init=$(detect_init)
+    if [[ "$init" == "openrc" ]]; then
+        rc-service "${SERVICE_NAME}" restart && print_ok "已重启" || print_error "重启失败"
+    else
+        systemctl restart "${SERVICE_NAME}" && print_ok "已重启" || print_error "重启失败"
+    fi
 }
 
 # ============================================

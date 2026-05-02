@@ -69,21 +69,65 @@ check_root() {
     fi
 }
 
+# ============================================
+# Init 系统检测 & 服务操作包装器
+LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
+[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+# ============================================
+
+_INIT_TYPE=""
+detect_init() {
+    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        _INIT_TYPE="systemd"
+    elif command -v rc-service >/dev/null 2>&1; then
+        _INIT_TYPE="openrc"
+    else
+        _INIT_TYPE="systemd"
+    fi
+    echo "$_INIT_TYPE"
+}
+
+svc_start()   { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" start; else systemctl start "$1"; fi; }
+svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
+svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
+svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
+svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
+svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; fi; else systemctl is-active "$1" 2>/dev/null || echo "inactive"; fi; }
+svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
+svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
+svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d'=' -f2; fi; }
+
+write_openrc_init_ss() {
+    cat > "/etc/init.d/ss-rust" << OPENRCEOF
+#!/sbin/openrc-run
+name="ss-rust"
+description="Shadowsocks Rust Service"
+command="${BINARY_PATH}"
+command_args="-c ${CONFIG_PATH}"
+command_background="yes"
+pidfile="/run/ss-rust.pid"
+OPENRCEOF
+    chmod +x "/etc/init.d/ss-rust"
+}
+
 # 检测操作系统
 detect_os() {
-    if [[ -f /etc/redhat-release ]]; then
+    if grep -qi "alpine" /etc/os-release 2>/dev/null; then
+        OS_TYPE="alpine"
+    elif [[ -f /etc/redhat-release ]]; then
         OS_TYPE="centos"
-    elif grep -q -E -i "debian" /etc/issue; then
+    elif grep -q -E -i "debian" /etc/issue 2>/dev/null; then
         OS_TYPE="debian"
-    elif grep -q -E -i "ubuntu" /etc/issue; then
+    elif grep -q -E -i "ubuntu" /etc/issue 2>/dev/null; then
         OS_TYPE="ubuntu"
-    elif grep -q -E -i "centos|red hat|redhat" /etc/issue; then
+    elif grep -q -E -i "centos|red hat|redhat" /etc/issue 2>/dev/null; then
         OS_TYPE="centos"
-    elif grep -q -E -i "debian" /proc/version; then
+    elif grep -q -E -i "debian" /proc/version 2>/dev/null; then
         OS_TYPE="debian"
-    elif grep -q -E -i "ubuntu" /proc/version; then
+    elif grep -q -E -i "ubuntu" /proc/version 2>/dev/null; then
         OS_TYPE="ubuntu"
-    elif grep -q -E -i "centos|red hat|redhat" /proc/version; then
+    elif grep -q -E -i "centos|red hat|redhat" /proc/version 2>/dev/null; then
         OS_TYPE="centos"
     else
         error_exit "不支持的操作系统"
@@ -150,7 +194,7 @@ check_installation() {
 
 # 检查服务状态
 check_service_status() {
-    local status=$(systemctl is-active ss-rust)
+    local status=$(svc_is_active ss-rust)
     echo "${status}"
 }
 
@@ -183,7 +227,7 @@ check_installed_status() {
 }
 
 check_status() {
-    if systemctl is-active ss-rust >/dev/null 2>&1; then
+    if svc_is_active ss-rust >/dev/null 2>&1; then
         status="running"
     else
         status="stopped"
@@ -350,7 +394,10 @@ download() {
 # 安装系统服务
 install_service() {
     echo -e "${INFO} 开始安装系统服务..."
-    cat > /etc/systemd/system/ss-rust.service << EOF
+    if [[ "$(detect_init)" == "openrc" ]]; then
+        write_openrc_init_ss
+    else
+        cat > /etc/systemd/system/ss-rust.service << EOF
 [Unit]
 Description=Shadowsocks Rust Service
 After=network-online.target
@@ -358,7 +405,8 @@ Wants=network-online.target systemd-networkd-wait-online.service
 
 [Service]
 Type=simple
-User=root
+User=nobody
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 ExecStart=${BINARY_PATH} -c ${CONFIG_PATH}
 Restart=on-failure
 RestartSec=3s
@@ -367,13 +415,14 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
+    fi
 
-    echo -e "${INFO} 重新加载 systemd 配置..."
-    systemctl daemon-reload
-    
+    echo -e "${INFO} 重新加载服务配置..."
+    svc_reload
+
     echo -e "${INFO} 启用 ss-rust 服务..."
-    systemctl enable ss-rust
-    
+    svc_enable ss-rust
+
     echo -e "${SUCCESS} Shadowsocks Rust 服务配置完成！"
 }
 
@@ -382,8 +431,11 @@ install_dependencies() {
     echo -e "${INFO} 开始安装系统依赖..."
     
     if [[ ${OS_TYPE} == "centos" ]]; then
-        yum update -y
-        yum install -y jq gzip wget curl unzip xz openssl qrencode tar
+        yum update -y || dnf update -y
+        yum install -y jq gzip wget curl unzip xz openssl qrencode tar || \
+            dnf install -y jq gzip wget curl unzip xz openssl qrencode tar
+    elif [ -x "$(command -v apk)" ]; then
+        apk update && apk add --no-cache jq gzip wget curl unzip xz openssl qrencode tar
     else
         apt-get update
         apt-get install -y jq gzip wget curl unzip xz-utils openssl qrencode tar
@@ -770,7 +822,7 @@ Install() {
     else
         echo -e "${Error} Shadowsocks Rust 启动失败，请检查日志！"
         echo -e "${Info} 您可以使用以下命令查看详细日志："
-        echo -e " - systemctl status ss-rust"
+        echo -e " - svc_status ss-rust"
         echo -e " - journalctl -xe --unit ss-rust"
         Before_Start_Menu
     fi
@@ -788,13 +840,13 @@ start_service() {
     fi
     
     echo -e "${INFO} 正在启动 Shadowsocks Rust..."
-    systemctl start ss-rust
+    svc_start ss-rust
     
     # 等待服务启动
     sleep 2
     
     # 检查服务状态和日志
-    if ! systemctl is-active ss-rust >/dev/null 2>&1; then
+    if ! svc_is_active ss-rust >/dev/null 2>&1; then
         echo -e "${ERROR} Shadowsocks Rust 启动失败！"
         echo -e "${INFO} 查看服务日志："
         journalctl -xe --unit ss-rust
@@ -812,14 +864,14 @@ Stop() {
         echo -e "${Error} Shadowsocks Rust 没有运行，请检查！"
         return 1
     fi
-    systemctl stop ss-rust
+    svc_stop ss-rust
     echo -e "${Info} Shadowsocks Rust 已停止！"
 }
 
 # 重启
 Restart() {
     check_installed_status || return 1
-    systemctl restart ss-rust
+    svc_restart ss-rust
     echo -e "${Info} Shadowsocks Rust 重启完毕！"
 }
 
@@ -844,7 +896,7 @@ Update() {
             echo -e "${Info} 开始更新 Shadowsocks Rust..."
             detect_arch
             download_ss "${new_ver#v}" "${OS_ARCH}"
-            systemctl restart ss-rust
+            svc_restart ss-rust
             echo -e "${Success} Shadowsocks Rust 已更新到最新版本 [ ${new_ver} ]"
         else
             echo -e "${Info} 已取消更新"
@@ -866,8 +918,9 @@ Uninstall() {
     [[ -z ${unyn} ]] && unyn="n"
     if [[ ${unyn} == [Yy] ]]; then
         check_status
-        [[ "$status" == "running" ]] && systemctl stop ss-rust
-        systemctl disable ss-rust
+        [[ "$status" == "running" ]] && svc_stop ss-rust
+        svc_disable ss-rust
+        rm -f "/etc/systemd/system/ss-rust.service" "/etc/init.d/ss-rust" "/etc/init.d/ss-rust"
         rm -rf "${INSTALL_DIR}"
         rm -rf "${BINARY_PATH}"
         rm -f "/usr/local/bin/ssrust"
@@ -1002,11 +1055,17 @@ View() {
         echo -e "SS-${ipv6} = ss, ${ipv6}, ${config_port}, encrypt-method=${config_method}, password=${config_password}, tfo=${config_tfo}, udp-relay=true"
     fi
 
-    # 检查 ShadowTLS 是否安装并获取配置
+    # 检查 ShadowTLS 是否安装并获取配置（兼容 systemd + openrc）
+    local stls_svc_file=""
     if [ -f "/etc/systemd/system/shadowtls-ss.service" ]; then
-        local stls_listen_port=$(grep -oP '(?<=--listen ::0:)\d+' /etc/systemd/system/shadowtls-ss.service)
-        local stls_password=$(grep -oP '(?<=--password )\S+' /etc/systemd/system/shadowtls-ss.service)
-        local stls_sni=$(grep -oP '(?<=--tls )\S+' /etc/systemd/system/shadowtls-ss.service)
+        stls_svc_file="/etc/systemd/system/shadowtls-ss.service"
+    elif [ -f "/etc/init.d/shadowtls-ss" ]; then
+        stls_svc_file="/etc/init.d/shadowtls-ss"
+    fi
+    if [ -n "$stls_svc_file" ]; then
+        local stls_listen_port; stls_listen_port=$(sed -n 's/.*--listen ::0:\([0-9]*\).*/\1/p' "$stls_svc_file")
+        local stls_password; stls_password=$(sed -n 's/.*--password \([^ ]*\).*/\1/p' "$stls_svc_file")
+        local stls_sni; stls_sni=$(sed -n 's/.*--tls \([^ ]*\).*/\1/p' "$stls_svc_file")
 
         echo -e "\n${Yellow_font_prefix}=== ShadowTLS 配置 ===${Font_color_suffix}"
         echo -e " 监听端口：${Green_font_prefix}${stls_listen_port}${Font_color_suffix}"
@@ -1046,7 +1105,7 @@ View() {
 Status() {
     echo -e "${Info} 获取 Shadowsocks Rust 活动日志 ……"
     echo -e "${Tip} 返回主菜单请按 q ！"
-    systemctl status ss-rust
+    svc_status ss-rust
     Start_Menu
 }
 

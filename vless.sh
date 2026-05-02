@@ -19,11 +19,54 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+# ================= Init 系统检测 =================
+
+_INIT_TYPE=""
+detect_init() {
+  if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
+  if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+    _INIT_TYPE="systemd"
+  elif command -v rc-service >/dev/null 2>&1; then
+    _INIT_TYPE="openrc"
+  else
+    _INIT_TYPE="systemd"
+  fi
+  echo "$_INIT_TYPE"
+}
+
+svc_start()   { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" start; else systemctl start "$1"; fi; }
+svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
+svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
+svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
+svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
+svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
+svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
+
+write_openrc_xray() {
+  cat > "/etc/init.d/xray" << 'OPENRCEOF'
+#!/sbin/openrc-run
+name="xray"
+description="Xray Service"
+command="/usr/local/bin/xray"
+command_args="run -config /usr/local/etc/xray/config.json"
+command_background="yes"
+pidfile="/run/xray.pid"
+OPENRCEOF
+  chmod +x "/etc/init.d/xray"
+}
+
 # ================= 基础工具函数 =================
 
 ensure_deps() {
-  apt update -y
-  apt install -y curl qrencode || true
+  if [ -x "$(command -v apt)" ]; then
+    apt update -y && apt install -y curl qrencode || true
+  elif [ -x "$(command -v dnf)" ]; then
+    dnf install -y curl qrencode || true
+  elif [ -x "$(command -v yum)" ]; then
+    yum install -y curl qrencode || true
+  elif [ -x "$(command -v apk)" ]; then
+    apk update && apk add --no-cache curl qrencode || true
+  fi
 }
 
 get_ips() {
@@ -34,7 +77,9 @@ get_ips() {
 # ================= Reality Key 解析 =================
 
 parse_x25519() {
-  KEY_OUTPUT=$(xray x25519 2>&1)
+  local tmp_keyfile; tmp_keyfile=$(mktemp) && chmod 600 "$tmp_keyfile"
+  xray x25519 > "$tmp_keyfile" 2>&1
+  KEY_OUTPUT=$(cat "$tmp_keyfile")
 
   PRIVATE_KEY=$(echo "$KEY_OUTPUT" | grep -i 'private' | awk -F': *' '{print $2}' | head -n1)
   PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -i 'public' | awk -F': *' '{print $2}' | head -n1)
@@ -46,7 +91,7 @@ parse_x25519() {
     PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -i 'hash32' | awk -F': *' '{print $2}' | head -n1)
   fi
 
-  echo "$KEY_OUTPUT" > /tmp/x25519-raw.txt
+  rm -f "$tmp_keyfile"
 }
 
 # ================= 写入 Xray 配置 =================
@@ -159,14 +204,17 @@ install_action() {
 
   if [[ -z "$PRIVATE_KEY" || -z "$PUBLIC_KEY" ]]; then
     echo "❌ Reality Key 解析失败"
-    cat /tmp/x25519-raw.txt
+    echo "$KEY_OUTPUT"
     exit 1
   fi
 
   write_config
 
-  systemctl enable xray
-  systemctl restart xray
+  if [[ "$(detect_init)" == "openrc" ]]; then
+    write_openrc_xray
+  fi
+  svc_enable xray
+  svc_restart xray
 
   # ===== 保存 Reality 元信息（关键）=====
   get_ips
@@ -243,7 +291,7 @@ show_config_action() {
 
 update_action() {
   bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) install
-  systemctl restart xray || true
+  svc_restart xray || true
   xray -version | head -n 3
 }
 
@@ -251,26 +299,24 @@ uninstall_action() {
   read -p "⚠️ 将彻底删除 Xray 与所有配置，是否继续？(y/N): " yn
   [[ ! "$yn" =~ ^[Yy]$ ]] && return
 
-  systemctl stop xray 2>/dev/null || true
-  systemctl disable xray 2>/dev/null || true
+  svc_stop xray
+  svc_disable xray
   pkill -9 xray 2>/dev/null || true
 
-  rm -f /etc/systemd/system/xray.service
-  rm -f /etc/systemd/system/xray@.service
+  rm -f /etc/systemd/system/xray.service /etc/systemd/system/xray@.service /etc/init.d/xray
   rm -rf /etc/systemd/system/xray*.d
 
   rm -rf /usr/local/etc/xray /etc/xray /usr/local/etc/xray-reality /etc/xray-reality
   rm -f /usr/local/bin/xray /usr/bin/xray /bin/xray
   rm -f "$VLESS_CMD"
 
-  systemctl daemon-reexec
-  systemctl daemon-reload
+  svc_reload
 
   echo "✅ 已彻底卸载 VLESS Reality"
 }
 
 status_action() {
-  systemctl status xray --no-pager || true
+  svc_status xray
   ss -lntp || true
 }
 

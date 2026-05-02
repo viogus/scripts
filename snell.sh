@@ -202,8 +202,12 @@ check_bc() {
         if [ -x "$(command -v apt)" ]; then
             wait_for_apt
             apt update && apt install -y bc
+        elif [ -x "$(command -v dnf)" ]; then
+            dnf install -y bc
         elif [ -x "$(command -v yum)" ]; then
             yum install -y bc
+        elif [ -x "$(command -v apk)" ]; then
+            apk update && apk add --no-cache bc
         else
             echo -e "${RED}未支持的包管理器，无法安装 bc。请手动安装 bc。${RESET}"
             exit 1
@@ -218,8 +222,12 @@ check_curl() {
         if [ -x "$(command -v apt)" ]; then
             wait_for_apt
             apt update && apt install -y curl
+        elif [ -x "$(command -v dnf)" ]; then
+            dnf install -y curl
         elif [ -x "$(command -v yum)" ]; then
             yum install -y curl
+        elif [ -x "$(command -v apk)" ]; then
+            apk update && apk add --no-cache curl
         else
             echo -e "${RED}未支持的包管理器，无法安装 curl。请手动安装 curl。${RESET}"
             exit 1
@@ -269,7 +277,7 @@ check_and_migrate_config() {
             echo -e "${CYAN}开始迁移配置文件...${RESET}"
             
             # 停止服务
-            systemctl stop snell 2>/dev/null
+            svc_stop snell 2>/dev/null
             
             # 迁移配置文件
             if [ -f "$OLD_SNELL_CONF_FILE" ]; then
@@ -298,15 +306,15 @@ check_and_migrate_config() {
             fi
             
             # 重新加载服务
-            systemctl daemon-reload
-            systemctl start snell
+            svc_reload
+            svc_start snell
             
             # 验证服务状态
-            if systemctl is-active --quiet snell; then
+            if svc_is_active snell; then
                 echo -e "${GREEN}配置迁移完成，服务已成功启动${RESET}"
             else
                 echo -e "${RED}警告：服务启动失败，请检查配置文件和权限${RESET}"
-                systemctl status snell
+                svc_status snell
             fi
         else
             echo -e "${YELLOW}跳过配置迁移${RESET}"
@@ -369,18 +377,73 @@ check_root() {
         exit 1
     fi
 }
+
+# ============================================
+# Init 系统检测 & 服务操作包装器
+LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
+[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+# ============================================
+
+_INIT_TYPE=""
+detect_init() {
+    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        _INIT_TYPE="systemd"
+    elif command -v rc-service >/dev/null 2>&1; then
+        _INIT_TYPE="openrc"
+    else
+        _INIT_TYPE="systemd"
+    fi
+    echo "$_INIT_TYPE"
+}
+
+detect_os() {
+    if grep -qi "alpine" /etc/os-release 2>/dev/null; then echo "alpine"
+    elif grep -qi "debian\|ubuntu" /etc/os-release 2>/dev/null; then echo "debian"
+    elif grep -qi "centos\|red hat\|rhel\|alma\|rocky\|fedora\|amazon" /etc/os-release 2>/dev/null; then echo "rhel"
+    else echo "unknown"; fi
+}
+
+svc_start()   { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" start; else systemctl start "$1"; fi; }
+svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
+svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
+svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
+svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
+svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; fi; else systemctl is-active "$1" 2>/dev/null || echo "inactive"; fi; }
+svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
+svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
+svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null; fi; }
+svc_list_match() { if [[ "$(detect_init)" == "openrc" ]]; then rc-status -s 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; else systemctl list-units --type=service --all --no-legend 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; fi; }
+
+write_openrc_snell() {
+    local name="$1" port="$2" conf="$3"
+    cat > "/etc/init.d/${name}" << OPENRCEOF
+#!/sbin/openrc-run
+name="${name}"
+description="Snell Proxy Service"
+command="/usr/local/bin/snell-server"
+command_args="-c ${conf}"
+command_background="yes"
+pidfile="/run/${name}.pid"
+OPENRCEOF
+    chmod +x "/etc/init.d/${name}"
+}
+
 check_root
 
 # 检查 jq 是否安装
 check_jq() {
     if ! command -v jq &> /dev/null; then
         echo -e "${YELLOW}未检测到 jq，正在安装...${RESET}"
-        # 根据系统类型安装 jq
         if [ -x "$(command -v apt)" ]; then
             wait_for_apt
             apt update && apt install -y jq
+        elif [ -x "$(command -v dnf)" ]; then
+            dnf install -y jq
         elif [ -x "$(command -v yum)" ]; then
             yum install -y jq
+        elif [ -x "$(command -v apk)" ]; then
+            apk update && apk add --no-cache jq
         else
             echo -e "${RED}未支持的包管理器，无法安装 jq。请手动安装 jq。${RESET}"
             exit 1
@@ -519,8 +582,17 @@ install_snell() {
     # 选择 Snell 版本
     select_snell_version
 
-    wait_for_apt
-    apt update && apt install -y wget unzip
+    local os; os=$(detect_os)
+    if [[ "$os" == "debian" ]]; then
+        wait_for_apt
+        apt update && apt install -y wget unzip
+    elif [[ "$os" == "rhel" ]]; then
+        yum install -y wget unzip || dnf install -y wget unzip
+    elif [[ "$os" == "alpine" ]]; then
+        apk update && apk add --no-cache wget unzip
+    else
+        echo -e "${RED}不支持的系统类型: ${os}${RESET}"; exit 1
+    fi
 
     get_latest_snell_version
     ARCH=$(uname -m)
@@ -561,7 +633,10 @@ ipv6 = true
 dns = ${DNS}
 EOF
 
-    cat > ${SYSTEMD_SERVICE_FILE} << EOF
+    if [[ "$(detect_init)" == "openrc" ]]; then
+        write_openrc_snell "snell" "${PORT}" "${SNELL_CONF_FILE}"
+    else
+        cat > ${SYSTEMD_SERVICE_FILE} << EOF
 [Unit]
 Description=Snell Proxy Service (Main)
 After=network.target
@@ -580,20 +655,17 @@ SyslogIdentifier=snell-server
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    systemctl daemon-reload
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}重载 Systemd 配置失败。${RESET}"
-        exit 1
     fi
 
-    systemctl enable snell
+    svc_reload
+
+    svc_enable snell
     if [ $? -ne 0 ]; then
         echo -e "${RED}开机自启动 Snell 失败。${RESET}"
         exit 1
     fi
 
-    systemctl start snell
+    svc_start snell
     if [ $? -ne 0 ]; then
         echo -e "${RED}启动 Snell 服务失败。${RESET}"
         exit 1
@@ -736,11 +808,11 @@ update_snell_binary() {
 
     echo -e "${CYAN}正在重启 Snell 服务...${RESET}"
     # 重启主服务
-    systemctl restart snell
+    svc_restart snell
     if [ $? -ne 0 ]; then
         echo -e "${RED}主服务重启失败，尝试恢复配置...${RESET}"
         restore_snell_config "$backup_dir"
-        systemctl restart snell
+        svc_restart snell
     fi
 
     # 重启所有多用户服务
@@ -749,7 +821,7 @@ update_snell_binary() {
             if [ -f "$user_conf" ] && [[ "$user_conf" != *"snell-main.conf" ]]; then
                 local port=$(grep -E '^listen' "$user_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
                 if [ ! -z "$port" ]; then
-                    systemctl restart "snell-${port}" 2>/dev/null
+                    svc_restart "snell-${port}" 2>/dev/null
                 fi
             fi
         done
@@ -769,8 +841,8 @@ uninstall_snell() {
     echo -e "${CYAN}正在卸载 Snell${RESET}"
 
     # 停止并禁用主服务
-    systemctl stop snell
-    systemctl disable snell
+    svc_stop snell
+    svc_disable snell
 
     # 停止并禁用所有多用户服务
     if [ -d "${SNELL_CONF_DIR}/users" ]; then
@@ -779,24 +851,24 @@ uninstall_snell() {
                 local port=$(grep -E '^listen' "$user_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
                 if [ ! -z "$port" ]; then
                     echo -e "${YELLOW}正在停止用户服务 (端口: $port)${RESET}"
-                    systemctl stop "snell-${port}" 2>/dev/null
-                    systemctl disable "snell-${port}" 2>/dev/null
-                    rm -f "${SYSTEMD_DIR}/snell-${port}.service"
+                    svc_stop "snell-${port}" 2>/dev/null
+                    svc_disable "snell-${port}" 2>/dev/null
+                    rm -f "/etc/systemd/system/snell-${port}.service" "/etc/init.d/snell-${port}"
                 fi
             fi
         done
     fi
 
-    # 删除服务文件
-    rm -f /lib/systemd/system/snell.service
+    # 删除服务文件（systemd + openrc）
+    rm -f "/lib/systemd/system/snell.service" "/etc/systemd/system/snell.service" "/etc/init.d/snell"
 
     # 删除可执行文件和配置目录
     rm -f /usr/local/bin/snell-server
     rm -rf ${SNELL_CONF_DIR}
     rm -f /usr/local/bin/snell  # 删除管理脚本
-    
-    # 重载 systemd 配置
-    systemctl daemon-reload
+
+    # 重载服务配置
+    svc_reload
     
     echo -e "${GREEN}Snell 及其所有多用户配置已成功卸载${RESET}"
 }
@@ -806,7 +878,7 @@ restart_snell() {
     echo -e "${YELLOW}正在重启所有 Snell 服务...${RESET}"
     
     # 重启主服务
-    systemctl restart snell
+    svc_restart snell
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}主 Snell 服务已成功重启。${RESET}"
     else
@@ -820,7 +892,7 @@ restart_snell() {
                 local port=$(grep -E '^listen' "$user_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
                 if [ ! -z "$port" ]; then
                     echo -e "${YELLOW}正在重启用户服务 (端口: $port)${RESET}"
-                    systemctl restart "snell-${port}" 2>/dev/null
+                    svc_restart "snell-${port}" 2>/dev/null
                     if [ $? -eq 0 ]; then
                         echo -e "${GREEN}用户服务 (端口: $port) 已成功重启。${RESET}"
                     else
@@ -844,12 +916,12 @@ check_and_show_status() {
         local total_snell_cpu=0
         
         # 检查主服务状态
-        if systemctl is-active snell &> /dev/null; then
+        if svc_is_active snell &> /dev/null; then
             user_count=$((user_count + 1))
             running_count=$((running_count + 1))
             
             # 获取主服务资源使用情况
-            local main_pid=$(systemctl show -p MainPID snell | cut -d'=' -f2)
+            local main_pid=$(svc_main_pid snell)
             if [ ! -z "$main_pid" ] && [ "$main_pid" != "0" ]; then
                 local mem=$(ps -o rss= -p $main_pid 2>/dev/null)
                 local cpu=$(ps -o %cpu= -p $main_pid 2>/dev/null)
@@ -871,11 +943,11 @@ check_and_show_status() {
                     local port=$(grep -E '^listen' "$user_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
                     if [ ! -z "$port" ]; then
                         user_count=$((user_count + 1))
-                        if systemctl is-active --quiet "snell-${port}"; then
+                        if svc_is_active "snell-${port}"; then
                             running_count=$((running_count + 1))
                             
                             # 获取用户服务资源使用情况
-                            local user_pid=$(systemctl show -p MainPID "snell-${port}" | cut -d'=' -f2)
+                            local user_pid=$(svc_main_pid "snell-${port}")
                             if [ ! -z "$user_pid" ] && [ "$user_pid" != "0" ]; then
                                 local mem=$(ps -o rss= -p $user_pid 2>/dev/null)
                                 local cpu=$(ps -o %cpu= -p $user_pid 2>/dev/null)
@@ -909,7 +981,7 @@ check_and_show_status() {
         declare -A processed_ports
         
         # 检查 Snell 的 ShadowTLS 服务
-        local snell_services=$(find /etc/systemd/system -name "shadowtls-snell-*.service" 2>/dev/null | sort -u)
+        local snell_services=$(find /etc/systemd/system /etc/init.d -maxdepth 1 -name "shadowtls-snell-*" 2>/dev/null 2>/dev/null | sort -u)
         if [ ! -z "$snell_services" ]; then
             while IFS= read -r service_file; do
                 local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
@@ -918,11 +990,11 @@ check_and_show_status() {
                 if [ -z "${processed_ports[$port]}" ]; then
                     processed_ports[$port]=1
                     stls_total=$((stls_total + 1))
-                    if systemctl is-active "shadowtls-snell-${port}" &> /dev/null; then
+                    if svc_is_active "shadowtls-snell-${port}" &> /dev/null; then
                         stls_running=$((stls_running + 1))
                         
                         # 获取 ShadowTLS 服务资源使用情况
-                        local stls_pid=$(systemctl show -p MainPID "shadowtls-snell-${port}" | cut -d'=' -f2)
+                        local stls_pid=$(svc_main_pid "shadowtls-snell-${port}")
                         if [ ! -z "$stls_pid" ] && [ "$stls_pid" != "0" ]; then
                             local mem=$(ps -o rss= -p $stls_pid 2>/dev/null)
                             local cpu=$(ps -o %cpu= -p $stls_pid 2>/dev/null)
@@ -1035,16 +1107,16 @@ view_snell_config() {
     
     # 如果 ShadowTLS 已安装，显示组合配置
     local snell_version=$(detect_installed_snell_version)
-    local snell_services=$(find /etc/systemd/system -name "shadowtls-snell-*.service" 2>/dev/null | sort -u)
+    local snell_services=$(find /etc/systemd/system /etc/init.d -maxdepth 1 -name "shadowtls-snell-*" 2>/dev/null 2>/dev/null | sort -u)
     if [ ! -z "$snell_services" ]; then
         echo -e "\n${YELLOW}=== ShadowTLS 组合配置 ===${RESET}"
         declare -A processed_ports
         while IFS= read -r service_file; do
             local exec_line=$(grep "ExecStart=" "$service_file")
-            local stls_port=$(echo "$exec_line" | grep -oP '(?<=--listen ::0:)\d+')
-            local stls_password=$(echo "$exec_line" | grep -oP '(?<=--password )[^ ]+')
-            local stls_domain=$(echo "$exec_line" | grep -oP '(?<=--tls )[^ ]+')
-            local snell_port=$(echo "$exec_line" | grep -oP '(?<=--server 127.0.0.1:)\d+')
+            local stls_port=$(echo "$exec_line" | sed -n 's/.*--listen ::0:\([0-9]*\).*/\1/p')
+            local stls_password=$(echo "$exec_line" | sed -n 's/.*--password \([^ ]*\).*/\1/p')
+            local stls_domain=$(echo "$exec_line" | sed -n 's/.*--tls \([^ ]*\).*/\1/p')
+            local snell_port=$(echo "$exec_line" | sed -n 's/.*--server 127.0.0.1:\([0-9]*\).*/\1/p')
             # 查找 psk
             local psk=""
             if [ -f "${SNELL_CONF_DIR}/users/snell-${snell_port}.conf" ]; then
@@ -1267,7 +1339,7 @@ update_script() {
 # 检查是否安装的函数
 check_installation() {
     local service=$1
-    if systemctl list-unit-files | grep -q "^$service.service"; then
+    if [[ -f "/etc/init.d/${service}" ]] || [[ -f "/etc/systemd/system/${service}.service" ]]; then
         echo -e "${GREEN}已安装${RESET}"
     else
         echo -e "${RED}未安装${RESET}"
@@ -1284,11 +1356,11 @@ get_shadowtls_config() {
     
     # 检查对应端口的 ShadowTLS 服务
     local service_name="shadowtls-snell-${main_port}"
-    if ! systemctl is-active --quiet "$service_name"; then
+    if ! svc_is_active "$service_name"; then
         return 1
     fi
     
-    local service_file="/etc/systemd/system/${service_name}.service"
+    local service_file; if [[ -f "/etc/init.d/${service_name}" ]]; then service_file="/etc/init.d/${service_name}"; else service_file="/etc/systemd/system/${service_name}.service"; fi
     if [ ! -f "$service_file" ]; then
         return 1
     fi

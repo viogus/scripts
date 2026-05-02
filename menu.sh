@@ -141,6 +141,38 @@ check_root() {
 }
 
 # ============================================
+# Init 系统检测 & 服务操作包装器
+# 优先加载共享库（本地开发时使用）
+LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
+[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+# ============================================
+
+_INIT_TYPE=""
+detect_init() {
+    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        _INIT_TYPE="systemd"
+    elif command -v rc-service >/dev/null 2>&1; then
+        _INIT_TYPE="openrc"
+    else
+        _INIT_TYPE="systemd"
+    fi
+    echo "$_INIT_TYPE"
+}
+
+svc_start()   { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" start; else systemctl start "$1"; fi; }
+svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
+svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
+svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
+svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
+svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; fi; else systemctl is-active "$1" 2>/dev/null || echo "inactive"; fi; }
+svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
+svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
+svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi; }
+svc_list()    { ls /etc/systemd/system/$1*.service /etc/init.d/$1* 2>/dev/null | sed 's|.*/||; s/\.service$//' | sort -u; }
+svc_cat()     { if [[ "$(detect_init)" == "openrc" ]]; then cat "/etc/init.d/$1" 2>/dev/null; else systemctl cat "$1" 2>/dev/null; fi; }
+
+# ============================================
 # 服务状态检查
 # ============================================
 
@@ -153,9 +185,9 @@ check_and_show_status() {
     # --- Snell ---
     if command -v snell-server &> /dev/null; then
         local user_count=0 running_count=0 total_snell_memory=0 total_snell_cpu=0
-        if systemctl is-active snell &> /dev/null; then
+        if svc_is_active snell &> /dev/null; then
             user_count=$((user_count + 1)); running_count=$((running_count + 1))
-            local main_pid=$(systemctl show -p MainPID snell | cut -d'=' -f2)
+            local main_pid=$(svc_main_pid snell)
             if [ ! -z "$main_pid" ] && [ "$main_pid" != "0" ]; then
                 local mem=$(ps -o rss= -p $main_pid 2>/dev/null || echo 0)
                 local cpu=$(get_cpu_usage "$main_pid")
@@ -173,9 +205,9 @@ check_and_show_status() {
                     local port=$(grep -E '^listen' "$user_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
                     if [ ! -z "$port" ]; then
                         user_count=$((user_count + 1))
-                        if systemctl is-active --quiet "snell-${port}"; then
+                        if svc_is_active "snell-${port}"; then
                             running_count=$((running_count + 1))
-                            local user_pid=$(systemctl show -p MainPID "snell-${port}" | cut -d'=' -f2)
+                            local user_pid=$(svc_main_pid "snell-${port}")
                             if [ ! -z "$user_pid" ] && [ "$user_pid" != "0" ]; then
                                 local mem=$(ps -o rss= -p $user_pid 2>/dev/null || echo 0)
                                 local cpu=$(get_cpu_usage "$user_pid")
@@ -199,9 +231,9 @@ check_and_show_status() {
     # --- SS-2022 ---
     if [[ -e "/usr/local/bin/ss-rust" ]]; then
         local ss_memory=0 ss_cpu=0 ss_running=0
-        if systemctl is-active ss-rust &> /dev/null; then
+        if svc_is_active ss-rust &> /dev/null; then
             ss_running=1
-            local ss_pid=$(systemctl show -p MainPID ss-rust | cut -d'=' -f2)
+            local ss_pid=$(svc_main_pid ss-rust)
             if [ ! -z "$ss_pid" ] && [ "$ss_pid" != "0" ]; then
                 ss_memory=$(ps -o rss= -p $ss_pid 2>/dev/null || echo 0)
                 ss_cpu=$(get_cpu_usage "$ss_pid")
@@ -214,13 +246,13 @@ check_and_show_status() {
     fi
 
     # --- ShadowTLS ---
-    if systemctl list-units --type=service 2>/dev/null | grep -q "shadowtls-"; then
+    if svc_list "shadowtls-" 2>/dev/null | grep -q .; then
         local stls_total=0 stls_running=0 total_stls_memory=0 total_stls_cpu=0
         while IFS= read -r service; do
             stls_total=$((stls_total + 1))
-            if systemctl is-active "$service" &> /dev/null; then
+            if svc_is_active "$service" &> /dev/null; then
                 stls_running=$((stls_running + 1))
-                local stls_pid=$(systemctl show -p MainPID "$service" | cut -d'=' -f2)
+                local stls_pid=$(svc_main_pid "$service")
                 if [ ! -z "$stls_pid" ] && [ "$stls_pid" != "0" ]; then
                     local mem=$(ps -o rss= -p $stls_pid 2>/dev/null || echo 0)
                     local cpu=$(get_cpu_usage "$stls_pid")
@@ -228,7 +260,7 @@ check_and_show_status() {
                     total_stls_cpu=$(echo "$total_stls_cpu + $cpu" | bc -l 2>/dev/null || echo "0")
                 fi
             fi
-        done < <(systemctl list-units --type=service --all --no-legend 2>/dev/null | grep "shadowtls-" | awk '{print $1}')
+        done < <(svc_list "shadowtls-" 2>/dev/null | awk '{print $1}')
         if [ $stls_total -gt 0 ]; then
             local total_stls_memory_mb=$(echo "scale=2; $total_stls_memory/1024" | bc 2>/dev/null || echo "0")
             printf "${GREEN}ShadowTLS 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${stls_running}/${stls_total}${RESET}\n" "$total_stls_cpu" "$total_stls_memory_mb"
@@ -242,9 +274,9 @@ check_and_show_status() {
     # --- AnyTLS ---
     if [[ -x "${ANYTLS_BINARY}" ]] || [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]]; then
         local at_memory=0 at_cpu=0 at_running=0
-        if [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]] && systemctl is-active "${ANYTLS_SERVICE_NAME}" &> /dev/null; then
+        if [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]] && svc_is_active "${ANYTLS_SERVICE_NAME}" &> /dev/null; then
             at_running=1
-            local at_pid=$(systemctl show -p MainPID "${ANYTLS_SERVICE_NAME}" | cut -d'=' -f2)
+            local at_pid=$(svc_main_pid "${ANYTLS_SERVICE_NAME}")
             if [ ! -z "$at_pid" ] && [ "$at_pid" != "0" ]; then
                 at_memory=$(ps -o rss= -p $at_pid 2>/dev/null || echo 0)
                 at_cpu=$(get_cpu_usage "$at_pid")
@@ -259,9 +291,9 @@ check_and_show_status() {
     # --- Hysteria 2 ---
     if [[ -f "/usr/local/bin/hysteria" ]] && [[ -f "${HY2_CONFIG_FILE}" ]]; then
         local hy2_memory=0 hy2_cpu=0 hy2_running=0
-        if systemctl is-active "${HY2_SERVICE_NAME}" &> /dev/null; then
+        if svc_is_active "${HY2_SERVICE_NAME}" &> /dev/null; then
             hy2_running=1
-            local hy2_pid=$(systemctl show -p MainPID "${HY2_SERVICE_NAME}" | cut -d'=' -f2)
+            local hy2_pid=$(svc_main_pid "${HY2_SERVICE_NAME}")
             if [ ! -z "$hy2_pid" ] && [ "$hy2_pid" != "0" ]; then
                 hy2_memory=$(ps -o rss= -p $hy2_pid 2>/dev/null || echo 0)
                 hy2_cpu=$(get_cpu_usage "$hy2_pid")
@@ -368,50 +400,50 @@ manage_vless() {
 
 uninstall_snell() {
     echo -e "${CYAN}正在卸载 Snell${RESET}"
-    systemctl stop snell 2>/dev/null
-    systemctl disable snell 2>/dev/null
+    svc_stop snell 2>/dev/null
+    svc_disable snell 2>/dev/null
     if [ -d "/usr/local/etc/snell/users" ]; then
         for user_conf in "/usr/local/etc/snell/users"/*; do
             if [ -f "$user_conf" ]; then
                 local port=$(grep -E '^listen' "$user_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
                 if [ ! -z "$port" ]; then
                     echo -e "${YELLOW}正在停止用户服务 (端口: $port)${RESET}"
-                    systemctl stop "snell-${port}" 2>/dev/null
-                    systemctl disable "snell-${port}" 2>/dev/null
-                    rm -f "/etc/systemd/system/snell-${port}.service"
+                    svc_stop "snell-${port}" 2>/dev/null
+                    svc_disable "snell-${port}" 2>/dev/null
+                    rm -f "/etc/systemd/system/snell-${port}.service" "/etc/init.d/snell-${port}"
                 fi
             fi
         done
     fi
-    rm -f "/lib/systemd/system/snell.service"
-    rm -f "/etc/systemd/system/snell.service"
+    rm -f "/lib/systemd/system/snell.service" "/etc/init.d/snell"
+    rm -f "/etc/systemd/system/snell.service" "/etc/init.d/snell"
     rm -f /usr/local/bin/snell-server
     rm -rf /usr/local/etc/snell
     rm -f /usr/local/bin/snell
-    systemctl daemon-reload
+    svc_reload
     echo -e "${GREEN}Snell 及其所有多用户配置已成功卸载${RESET}"
 }
 
 uninstall_ss_rust() {
     echo -e "${CYAN}正在卸载 SS-2022...${RESET}"
-    systemctl stop ss-rust 2>/dev/null
-    systemctl disable ss-rust 2>/dev/null
-    rm -f "/etc/systemd/system/ss-rust.service"
+    svc_stop ss-rust 2>/dev/null
+    svc_disable ss-rust 2>/dev/null
+    rm -f "/etc/systemd/system/ss-rust.service" "/etc/init.d/ss-rust"
     rm -f "/usr/local/bin/ss-rust"
     rm -rf "/usr/local/etc/ss-rust"
-    systemctl daemon-reload
+    svc_reload
     echo -e "${GREEN}SS-2022 卸载完成！${RESET}"
 }
 
 uninstall_shadowtls() {
     echo -e "${CYAN}正在卸载 ShadowTLS...${RESET}"
     while IFS= read -r service; do
-        systemctl stop "$service" 2>/dev/null
-        systemctl disable "$service" 2>/dev/null
+        svc_stop "$service" 2>/dev/null
+        svc_disable "$service" 2>/dev/null
         rm -f "/etc/systemd/system/${service}"
-    done < <(systemctl list-units --type=service --all --no-legend 2>/dev/null | grep "shadowtls-" | awk '{print $1}')
+    done < <(svc_list "shadowtls-" 2>/dev/null | awk '{print $1}')
     rm -f "/usr/local/bin/shadow-tls"
-    systemctl daemon-reload
+    svc_reload
     echo -e "${GREEN}ShadowTLS 卸载完成！${RESET}"
 }
 
@@ -442,11 +474,11 @@ uninstall_anytls() {
     if [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]]; then
         read -p "确认卸载并删除 AnyTLS 配置？(y/N): " ans
         [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
-        systemctl stop "${ANYTLS_SERVICE_NAME}" 2>/dev/null || true
-        systemctl disable "${ANYTLS_SERVICE_NAME}" 2>/dev/null || true
+        svc_stop "${ANYTLS_SERVICE_NAME}" 2>/dev/null || true
+        svc_disable "${ANYTLS_SERVICE_NAME}" 2>/dev/null || true
         rm -f "${ANYTLS_SYSTEMD_UNIT}" || true
         rm -rf "${ANYTLS_CONFIG_DIR}" || true
-        systemctl daemon-reload 2>/dev/null || true
+        svc_reload 2>/dev/null || true
         echo -e "${GREEN}AnyTLS 卸载完成！${RESET}"
     elif [[ -f "${ANYTLS_OPENRC_INIT}" ]]; then
         read -p "确认卸载并删除 AnyTLS 配置？(y/N): " ans
@@ -466,10 +498,10 @@ uninstall_hysteria() {
     if [[ -f "/usr/local/bin/hysteria" ]] || [[ -f "${HY2_CONFIG_FILE}" ]]; then
         read -p "确认卸载并删除 Hysteria 2 配置？(y/N): " ans
         [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
-        systemctl stop "${HY2_SERVICE_NAME}" 2>/dev/null || true
-        systemctl disable "${HY2_SERVICE_NAME}" 2>/dev/null || true
-        rm -f "/lib/systemd/system/${HY2_SERVICE_NAME}.service"
-        rm -f "/etc/systemd/system/${HY2_SERVICE_NAME}.service"
+        svc_stop "${HY2_SERVICE_NAME}" 2>/dev/null || true
+        svc_disable "${HY2_SERVICE_NAME}" 2>/dev/null || true
+        rm -f "/lib/systemd/system/${HY2_SERVICE_NAME}.service" "/etc/init.d/${HY2_SERVICE_NAME}"
+        rm -f "/etc/systemd/system/${HY2_SERVICE_NAME}.service" "/etc/init.d/${HY2_SERVICE_NAME}"
         rm -f "/usr/local/bin/hysteria"
         if [[ -f "/usr/local/etc/hysteria/port_hop" ]]; then
             local hop_range; hop_range=$(cat "/usr/local/etc/hysteria/port_hop")
@@ -479,7 +511,7 @@ uninstall_hysteria() {
         fi
         rm -f /root/cert.crt /root/private.key /root/ca.log 2>/dev/null || true
         rm -rf "/usr/local/etc/hysteria"
-        systemctl daemon-reload 2>/dev/null || true
+        svc_reload 2>/dev/null || true
         echo -e "${GREEN}Hysteria 2 卸载完成！${RESET}"
     else
         echo -e "${YELLOW}Hysteria 2 未安装${RESET}"
@@ -489,9 +521,9 @@ uninstall_hysteria() {
 # IP 检测（供 surge_export_all 使用）
 at_get_ip() {
     local ip4 ip6
-    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip4}" ]] && { echo "${ip4}"; return; }
-    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 http://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
     [[ -n "${ip6}" ]] && { echo "${ip6}"; return; }
     curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
 }
@@ -579,12 +611,12 @@ surge_export_all() {
     # --- ShadowTLS ---
     # ShadowTLS 在 Surge 中不是独立代理，而是附加参数
     # 从 systemd 服务提取密码，提示用户附加到其他代理
-    if systemctl list-units --type=service 2>/dev/null | grep -q "shadowtls-"; then
+    if svc_list "shadowtls-" 2>/dev/null | grep -q .; then
         echo -e "${CYAN}[ShadowTLS - Surge 中需附加到其他代理]${RESET}"
         echo -e "${YELLOW}将 shadow-tls-password 参数附加到 Snell/SS 代理即可：${RESET}"
         local stls_count=0
         while IFS= read -r service; do
-            local stls_exec=$(systemctl cat "$service" 2>/dev/null | grep "ExecStart=" | head -1 || true)
+            local stls_exec=$(svc_cat "$service" 2>/dev/null | grep "ExecStart=" | head -1 || true)
             if [[ -n "$stls_exec" ]]; then
                 local stls_port=$(echo "$stls_exec" | sed -n 's/.*--tls[[:space:]]\+[^[:space:]]*:\([0-9]\+\).*/\1/p' | head -1 || true)
                 [[ -z "$stls_port" ]] && stls_port=$(echo "$stls_exec" | sed -n 's/.*0\.0\.0\.0:\([0-9]\+\).*/\1/p' | head -1 || true)
@@ -594,7 +626,7 @@ surge_export_all() {
                     echo "# STLS-${stls_count}: shadow-tls-password=${stls_pass}, shadow-tls-version=3, shadow-tls-port=${stls_port:-?}"
                 fi
             fi
-        done < <(systemctl list-units --type=service --all --no-legend 2>/dev/null | grep "shadowtls-" | awk '{print $1}')
+        done < <(svc_list "shadowtls-" 2>/dev/null | awk '{print $1}')
         if [[ $stls_count -eq 0 ]]; then
             echo -e "${YELLOW}  (无法自动提取配置，请查看 systemd 服务文件)${RESET}"
         fi
