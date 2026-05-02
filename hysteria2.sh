@@ -88,6 +88,7 @@ detect_os() {
 }
 
 detect_init() {
+    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
     if has_cmd systemctl && [[ -d /run/systemd/system ]]; then
         echo "systemd"; return
     fi
