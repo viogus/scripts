@@ -53,9 +53,9 @@ select_snell_version() {
 
 # 获取 Snell v4 最新版本
 get_latest_snell_v4_version() {
-    latest_version=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K4\.[0-9]+\.[0-9]+' | head -n 1) || true || true
+    latest_version=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K4\.[0-9]+\.[0-9]+' | head -n 1) || true
     if [ -z "$latest_version" ]; then
-        latest_version=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K4\.[0-9]+\.[0-9]+' | head -n 1) || true || true
+        latest_version=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K4\.[0-9]+\.[0-9]+' | head -n 1) || true
     fi
     if [ -n "$latest_version" ]; then
         echo "v${latest_version}"
@@ -67,18 +67,18 @@ get_latest_snell_v4_version() {
 # 获取 Snell v5 最新版本
 get_latest_snell_v5_version() {
     # 先抓 beta 版
-    v5_beta=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+b[0-9]+' | head -n 1) || true || true
+    v5_beta=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+b[0-9]+' | head -n 1) || true
     if [ -z "$v5_beta" ]; then
-        v5_beta=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+b[0-9]+' | head -n 1) || true || true
+        v5_beta=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+b[0-9]+' | head -n 1) || true
     fi
     if [ -n "$v5_beta" ]; then
         echo "v${v5_beta}"
         return
     fi
     # 再抓正式版，过滤掉带 b 的 beta 版本
-    v5_release=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' | grep -v b | head -n 1) || true || true
+    v5_release=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' | grep -v b | head -n 1) || true
     if [ -z "$v5_release" ]; then
-        v5_release=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' | grep -v b | head -n 1) || true || true
+        v5_release=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' | grep -v b | head -n 1) || true
     fi
     if [ -n "$v5_release" ]; then
         echo "v${v5_release}"
@@ -327,47 +327,6 @@ ${YELLOW}是否要迁移旧的配置文件？[y/N]${RESET}"
         fi
     fi
 }
-
-# 自动更新脚本
-auto_update_script() {
-    echo -e "${CYAN}正在检查脚本更新...${RESET}"
-    
-    # 创建临时文件
-    TMP_SCRIPT=$(mktemp)
-    
-    # 下载最新版本
-    if curl -sL https://raw.githubusercontent.com/viogus/scripts/main/snell.sh -o "$TMP_SCRIPT"; then
-        # 获取新版本号
-        new_version=$(grep "current_version=" "$TMP_SCRIPT" | cut -d'"' -f2)
-        
-        # 比较版本号
-        if [ "$new_version" != "$current_version" ]; then
-            echo -e "${GREEN}发现新版本：${new_version}${RESET}"
-            echo -e "${YELLOW}当前版本：${current_version}${RESET}"
-            
-            # 备份当前脚本
-            cp "$0" "${0}.backup"
-            
-            # 更新脚本
-            mv "$TMP_SCRIPT" "$0"
-            chmod +x "$0"
-            
-            echo -e "${GREEN}脚本已更新到最新版本${RESET}"
-            echo -e "${YELLOW}已备份原脚本到：${0}.backup${RESET}"
-            
-            # 提示用户重新运行脚本
-            echo -e "${CYAN}请重新运行脚本以使用新版本${RESET}"
-            exit 0
-        else
-            echo -e "${GREEN}当前已是最新版本 (${current_version})${RESET}"
-            rm -f "$TMP_SCRIPT"
-        fi
-    else
-        echo -e "${RED}检查更新失败，请检查网络连接${RESET}"
-        rm -f "$TMP_SCRIPT"
-    fi
-}
-
 # 等待其他 apt 进程完成
 wait_for_apt() {
     while fuser /var/lib/dpkg/lock >/dev/null 2>&1; do
