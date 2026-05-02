@@ -106,6 +106,7 @@ write_openrc_init_ss() {
 name="ss-rust"
 description="Shadowsocks Rust Service"
 command="${BINARY_PATH}"
+command_user="nobody"
 command_args="-c ${CONFIG_PATH}"
 command_background="yes"
 pidfile="/run/ss-rust.pid"

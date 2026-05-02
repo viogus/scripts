@@ -51,6 +51,7 @@ write_openrc_xray() {
 name="xray"
 description="Xray Service"
 command="/usr/local/bin/xray"
+command_user="nobody"
 command_args="run -config /usr/local/etc/xray/config.json"
 command_background="yes"
 pidfile="/run/xray.pid"

@@ -428,6 +428,7 @@ write_openrc_snell() {
 name="${name}"
 description="Snell Proxy Service"
 command="/usr/local/bin/snell-server"
+command_user="nobody"
 command_args="-c ${conf}"
 command_background="yes"
 pidfile="/run/${name}.pid"

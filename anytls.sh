@@ -275,6 +275,7 @@ write_openrc() {
 name="AnyTLS"
 description="AnyTLS server"
 command="/usr/local/bin/anytls-server"
+command_user="nobody"
 command_background="yes"
 pidfile="/run/anytls.pid"
 output_log="/var/log/anytls.log"

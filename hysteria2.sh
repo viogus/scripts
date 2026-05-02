@@ -394,6 +394,7 @@ write_openrc_init() {
 name="hysteria-server"
 description="Hysteria 2 server"
 command="/usr/local/bin/hysteria"
+command_user="nobody"
 command_args="server -c /usr/local/etc/hysteria/config.yaml"
 command_background="yes"
 pidfile="/run/hysteria.pid"
