@@ -267,10 +267,10 @@ get_server_ip() {
     local ipv6
     
     # 获取IPv4地址
-    ipv4=$(curl -s -4 ip.sb 2>/dev/null)
+    ipv4=$(curl -s4 --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null)
     
     # 获取IPv6地址
-    ipv6=$(curl -s -6 ip.sb 2>/dev/null)
+    ipv6=$(curl -s6 --connect-timeout 5 --max-time 10 https://api64.ipify.org 2>/dev/null)
     
     # 判断IP类型并返回
     if [ -n "$ipv4" ] && [ -n "$ipv6" ]; then

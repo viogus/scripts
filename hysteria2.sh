@@ -78,7 +78,7 @@ detect_init() {
     if has_cmd rc-service; then
         echo "openrc"; return
     fi
-    echo "unknown"
+    echo "systemd"
 }
 
 get_ip() {
@@ -176,7 +176,7 @@ setup_cert() {
             [[ -z "$domain" ]] && { print_error "未输入域名"; exit 1; }
 
             local ip; ip=$(get_ip)
-            local domain_ip; domain_ip=$(curl -s --connect-timeout 5 --max-time 10 ipget.net/?ip="${domain}" 2>/dev/null || true)
+            local domain_ip; domain_ip=$(curl -s --connect-timeout 5 --max-time 10 https://ipget.net/?ip="${domain}" 2>/dev/null || true)
 
             if [[ "$domain_ip" != "$ip" ]]; then
                 print_error "域名 ${domain} 解析的 IP (${domain_ip}) 与 VPS IP (${ip}) 不匹配"
@@ -515,14 +515,14 @@ uninstall_hysteria() {
     if [[ "$init" == "openrc" ]]; then
         rc-service "${SERVICE_NAME}" stop 2>/dev/null || true
         rc-update del "${SERVICE_NAME}" default >/dev/null 2>&1 || true
-        rm -f "/etc/init.d/${SERVICE_NAME}"
     else
         systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
         systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
-        rm -f "/lib/systemd/system/${SERVICE_NAME}.service"
-        rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
         systemctl daemon-reload
     fi
+    rm -f "/lib/systemd/system/${SERVICE_NAME}.service" \
+          "/etc/systemd/system/${SERVICE_NAME}.service" \
+          "/etc/init.d/${SERVICE_NAME}"
     rm -f "/usr/local/bin/hysteria"
 
     # 清理端口跳跃规则（精确删除，不影响其他服务）

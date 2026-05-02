@@ -1386,14 +1386,6 @@ get_shadowtls_config() {
     return 0
 }
 
-# 检查是否以 root 权限运行
-check_root() {
-    if [ "$(id -u)" != "0" ]; then
-        echo -e "${RED}请以 root 权限运行此脚本${RESET}"
-        exit 1
-    fi
-}
-
 # 初始检查
 initial_check() {
     check_root

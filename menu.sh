@@ -470,22 +470,14 @@ manage_hysteria() {
 
 uninstall_anytls() {
     echo -e "${CYAN}正在卸载 AnyTLS...${RESET}"
-    if [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]]; then
+    if [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]] || [[ -f "${ANYTLS_OPENRC_INIT}" ]]; then
         read -p "确认卸载并删除 AnyTLS 配置？(y/N): " ans
         [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
         svc_stop "${ANYTLS_SERVICE_NAME}" 2>/dev/null || true
         svc_disable "${ANYTLS_SERVICE_NAME}" 2>/dev/null || true
-        rm -f "${ANYTLS_SYSTEMD_UNIT}" || true
+        rm -f "${ANYTLS_SYSTEMD_UNIT}" "${ANYTLS_OPENRC_INIT}"
         rm -rf "${ANYTLS_CONFIG_DIR}" || true
         svc_reload 2>/dev/null || true
-        echo -e "${GREEN}AnyTLS 卸载完成！${RESET}"
-    elif [[ -f "${ANYTLS_OPENRC_INIT}" ]]; then
-        read -p "确认卸载并删除 AnyTLS 配置？(y/N): " ans
-        [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
-        rc-service "${ANYTLS_SERVICE_NAME}" stop 2>/dev/null || true
-        rc-update del "${ANYTLS_SERVICE_NAME}" default >/dev/null 2>&1 || true
-        rm -f "${ANYTLS_OPENRC_INIT}" || true
-        rm -rf "${ANYTLS_CONFIG_DIR}" || true
         echo -e "${GREEN}AnyTLS 卸载完成！${RESET}"
     else
         echo -e "${YELLOW}AnyTLS 未安装${RESET}"
