@@ -300,7 +300,7 @@ setup_port_hopping() {
 setup_password() {
     local pwd
     read -p "设置 Hysteria 2 密码，回车随机：" pwd
-    [[ -z "$pwd" ]] && pwd=$(date +%s%N | md5sum | cut -c 1-8)
+    [[ -z "$pwd" ]] && pwd=$(date +%s%N | md5sum | cut -c 1-8) || true
     echo "$pwd"
 }
 
