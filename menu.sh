@@ -382,39 +382,13 @@ update_script() {
 # 外部服务管理（委托到对应脚本）
 # ============================================
 
-manage_snell() {
+run_service_script() {
+    local name="$1" url="$2"
     local tmp; tmp=$(mktemp)
-    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/snell.sh -o "$tmp"; then
+    if curl -sL --connect-timeout 10 --max-time 30 "$url" -o "$tmp"; then
         bash "$tmp"; rm -f "$tmp"
     else
-        echo -e "${RED}下载 Snell 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
-    fi
-}
-
-manage_ss_rust() {
-    local tmp; tmp=$(mktemp)
-    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/ss-2022.sh -o "$tmp"; then
-        bash "$tmp"; rm -f "$tmp"
-    else
-        echo -e "${RED}下载 SS-2022 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
-    fi
-}
-
-manage_shadowtls() {
-    local tmp; tmp=$(mktemp)
-    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh -o "$tmp"; then
-        bash "$tmp"; rm -f "$tmp"
-    else
-        echo -e "${RED}下载 ShadowTLS 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
-    fi
-}
-
-manage_vless() {
-    local tmp; tmp=$(mktemp)
-    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/vless.sh -o "$tmp"; then
-        bash "$tmp"; rm -f "$tmp"
-    else
-        echo -e "${RED}下载 VLESS 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
+        echo -e "${RED}下载 ${name} 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
     fi
 }
 
@@ -470,27 +444,6 @@ uninstall_shadowtls() {
     echo -e "${GREEN}ShadowTLS 卸载完成！${RESET}"
 }
 
-# ============================================
-# AnyTLS 管理（委托到 anytls.sh）
-# ============================================
-
-manage_anytls() {
-    local tmp; tmp=$(mktemp)
-    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/anytls.sh -o "$tmp"; then
-        bash "$tmp"; rm -f "$tmp"
-    else
-        echo -e "${RED}下载 AnyTLS 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
-    fi
-}
-
-manage_hysteria() {
-    local tmp; tmp=$(mktemp)
-    if curl -sL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/viogus/scripts/main/hysteria2.sh -o "$tmp"; then
-        bash "$tmp"; rm -f "$tmp"
-    else
-        echo -e "${RED}下载 Hysteria 2 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
-    fi
-}
 
 uninstall_anytls() {
     echo -e "${CYAN}正在卸载 AnyTLS...${RESET}"
@@ -728,12 +681,12 @@ install_global_command
 while true; do
     show_menu
     case "$num" in
-        1) manage_snell ;;
-        2) manage_ss_rust ;;
-        3) manage_vless ;;
-        4) manage_shadowtls ;;
-        5) manage_anytls ;;
-        6) manage_hysteria ;;
+        1) run_service_script "Snell" "https://raw.githubusercontent.com/viogus/scripts/main/snell.sh" ;;
+        2) run_service_script "SS-2022" "https://raw.githubusercontent.com/viogus/scripts/main/ss-2022.sh" ;;
+        3) run_service_script "VLESS" "https://raw.githubusercontent.com/viogus/scripts/main/vless.sh" ;;
+        4) run_service_script "ShadowTLS" "https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh" ;;
+        5) run_service_script "AnyTLS" "https://raw.githubusercontent.com/viogus/scripts/main/anytls.sh" ;;
+        6) run_service_script "Hysteria 2" "https://raw.githubusercontent.com/viogus/scripts/main/hysteria2.sh" ;;
         7) uninstall_snell ;;
         8) uninstall_ss_rust ;;
         9) uninstall_shadowtls ;;
