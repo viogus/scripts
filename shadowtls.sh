@@ -878,7 +878,7 @@ view_config() {
     
     # 检查服务是否安装
     local ss_service="$(svc_file_path shadowtls-ss)"
-    local snell_services=$(svc_find_services "shadowtls-snell-*.service" 2>/dev/null | sort -u)
+    local snell_services=$(svc_find_services "shadowtls-snell-*" 2>/dev/null | sort -u)
     
     if [ ! -f "$ss_service" ] && [ -z "$snell_services" ]; then
         echo -e "${RED}ShadowTLS 未安装${RESET}"
@@ -1233,7 +1233,7 @@ restart_shadowtls_services() {
     fi
     
     # 重启所有 Snell 服务
-    local snell_services=$(svc_find_services "shadowtls-snell-*.service" 2>/dev/null)
+    local snell_services=$(svc_find_services "shadowtls-snell-*" 2>/dev/null)
     if [ ! -z "$snell_services" ]; then
         has_services=true
         echo -e "\n${YELLOW}重启 Snell 的 ShadowTLS 服务...${RESET}"

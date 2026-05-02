@@ -277,7 +277,7 @@ check_and_show_status() {
     fi
 
     # --- AnyTLS ---
-    if [[ -x "${ANYTLS_BINARY}" ]] || [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]]; then
+    if [[ -x "${ANYTLS_BINARY}" ]] || [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]] || [[ -f "${ANYTLS_OPENRC_INIT}" ]]; then
         local at_memory=0 at_cpu=0 at_running=0
         if [[ -f "${ANYTLS_SYSTEMD_UNIT}" ]] && svc_is_active "${ANYTLS_SERVICE_NAME}" &> /dev/null; then
             at_running=1

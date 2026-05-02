@@ -556,7 +556,8 @@ show_status() {
         local init; init=$(detect_init)
         if [[ "$init" == "openrc" ]]; then
             if rc-service "${SERVICE_NAME}" status 2>/dev/null; then
-                echo -e "${GREEN}状态: 运行中${RESET}"
+                local pid; pid=$(cat /run/${SERVICE_NAME}.pid 2>/dev/null || echo "N/A")
+                echo -e "${GREEN}状态: 运行中${RESET}  ${YELLOW}PID: ${pid}${RESET}"
             else
                 echo -e "${RED}状态: 已停止${RESET}"
             fi

@@ -924,7 +924,7 @@ Uninstall() {
         svc_disable ss-rust
         rm -f "/etc/systemd/system/ss-rust.service" "/etc/init.d/ss-rust"
         rm -rf "${INSTALL_DIR}"
-        rm -rf "${BINARY_PATH}"
+        rm -f "${BINARY_PATH}"
         rm -f "/usr/local/bin/ssrust"
         rm -f "/usr/local/bin/ss-2022.sh"
         echo && echo "Shadowsocks Rust 卸载完成！" && echo
@@ -1172,7 +1172,7 @@ install_shadowtls() {
     echo -e "${GREEN}[信息]${RESET} 开始下载 ShadowTLS 安装脚本..."
     
     # 下载 ShadowTLS 脚本
-    wget -N --no-check-certificate https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh
+    wget -N --no-check-certificate -O /tmp/shadowtls-$$.sh https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}[错误]${RESET} ShadowTLS 脚本下载失败！"
@@ -1180,15 +1180,15 @@ install_shadowtls() {
     fi
     
     # 添加执行权限
-    chmod +x shadowtls.sh
+    chmod +x /tmp/shadowtls-$$.sh
     
     echo -e "${GREEN}[信息]${RESET} 开始安装 ShadowTLS..."
     
     # 执行 ShadowTLS 安装脚本
-    bash shadowtls.sh
+    bash /tmp/shadowtls-$$.sh
     
     # 清理下载的脚本
-    rm -f shadowtls.sh
+    rm -f /tmp/shadowtls-$$.sh
     
     Before_Start_Menu
 }
