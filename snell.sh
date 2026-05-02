@@ -385,6 +385,7 @@ check_root() {
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
 [ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
 # ============================================
+if ! command -v svc_start >/dev/null 2>&1; then
 
 _INIT_TYPE=""
 detect_init() {
@@ -417,6 +418,7 @@ svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-rel
 svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi; }
 svc_list_match() { if [[ "$(detect_init)" == "openrc" ]]; then rc-status -s 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; else systemctl list-units --type=service --all --no-legend 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; fi; }
 
+fi  # end inline svc fallback
 write_openrc_snell() {
     local name="$1" port="$2" conf="$3"
     cat > "/etc/init.d/${name}" << OPENRCEOF

@@ -64,6 +64,7 @@ LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
 [ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
 
 # Init 检测（结果缓存在 _INIT_TYPE）
+if ! command -v svc_start >/dev/null 2>&1; then
 _INIT_TYPE=""
 detect_init() {
     if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
@@ -95,6 +96,7 @@ svc_main_pid() {
     if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"
     else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi
 }
+fi  # end inline svc fallback
 
 get_arch() {
     local arch_raw; arch_raw=$(uname -m)

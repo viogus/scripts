@@ -59,6 +59,7 @@ ensure_root() {
 
 has_cmd(){ command -v "$1" >/dev/null 2>&1; }
 
+if ! command -v detect_init >/dev/null 2>&1; then
 detect_os() {
     if grep -qi "alpine" /etc/os-release 2>/dev/null; then
         echo "alpine"
@@ -80,6 +81,7 @@ detect_init() {
     fi
     echo "systemd"
 }
+fi  # end inline fallback
 
 get_ip() {
     local ip4 ip6

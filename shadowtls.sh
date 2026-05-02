@@ -40,6 +40,7 @@ check_root() {
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
 [ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
 # ============================================
+if ! command -v svc_start >/dev/null 2>&1; then
 
 _INIT_TYPE=""
 detect_init() {
@@ -72,6 +73,7 @@ svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stat
 svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
 svc_list_match() { if [[ "$(detect_init)" == "openrc" ]]; then rc-status -s 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; else systemctl list-units --type=service --all --no-legend 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; fi; }
 svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d'=' -f2; fi; }
+fi  # end inline svc fallback
 svc_unit_file() { if [[ "$(detect_init)" == "openrc" ]]; then [[ -f "/etc/init.d/$1" ]]; else [[ -f "/etc/systemd/system/$1.service" ]]; fi; }
 svc_cat() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/etc/init.d/$1" 2>/dev/null; else systemctl cat "$1" 2>/dev/null; fi; }
 svc_file_path() {

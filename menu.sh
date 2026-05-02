@@ -147,6 +147,7 @@ check_root() {
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
 [ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
 # ============================================
+if ! command -v svc_start >/dev/null 2>&1; then
 
 _INIT_TYPE=""
 detect_init() {
@@ -177,6 +178,7 @@ svc_cat()     { if [[ "$(detect_init)" == "openrc" ]]; then cat "/etc/init.d/$1"
 # 服务状态检查
 # ============================================
 
+fi  # end inline svc fallback
 check_and_show_status() {
     local cpu_cores=$(nproc)
 
