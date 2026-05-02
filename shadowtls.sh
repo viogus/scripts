@@ -989,7 +989,7 @@ view_config() {
     # 显示 SS 服务状态
     if [ -f "$ss_service" ]; then
         echo -e "\n${YELLOW}SS 服务状态：${RESET}"
-        svc_status shadowtls-ss --no-pager
+        svc_status shadowtls-ss
         
         # 如果服务未运行，显示重启命令
         if [ "$(svc_is_active shadowtls-ss)" != "active" ]; then
@@ -1007,7 +1007,7 @@ view_config() {
             if [ -z "${shown_services[$port]}" ]; then
                 shown_services[$port]=1
                 echo -e "\n${GREEN}Snell 端口 ${port} 的 ShadowTLS 服务状态：${RESET}"
-                svc_status "shadowtls-snell-${port}" --no-pager
+                svc_status "shadowtls-snell-${port}"
                 
                 # 如果服务未运行，显示重启命令
                 if [ "$(svc_is_active shadowtls-snell-${port})" != "active" ]; then
@@ -1260,14 +1260,14 @@ restart_shadowtls_services() {
     echo -e "\n${YELLOW}服务状态：${RESET}"
     if [ -f "$(svc_file_path shadowtls-ss)" ]; then
         echo -e "\n${CYAN}Shadowsocks ShadowTLS 服务状态：${RESET}"
-        svc_status shadowtls-ss --no-pager
+        svc_status shadowtls-ss
     fi
     
     if [ ! -z "$snell_services" ]; then
         while IFS= read -r service_file; do
             local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
             echo -e "\n${CYAN}Snell 端口 ${port} 的 ShadowTLS 服务状态：${RESET}"
-            svc_status "shadowtls-snell-${port}" --no-pager
+            svc_status "shadowtls-snell-${port}"
         done <<< "$snell_services"
     fi
 }

@@ -953,30 +953,6 @@ getipv6() {
     set -e
 }
 
-# 生成安全的Base64编码
-urlsafe_base64() {
-    date=$(echo -n "$1"|base64|sed ':a;N;s/\n/ /g;ta'|sed 's/ //g;s/=//g;s/+/-/g;s/\//_/g')
-    echo -e "${date}"
-}
-
-# 生成链接和二维码
-Link_QR() {
-    if [[ "${ipv4}" != "IPv4_Error" ]]; then
-        SSbase64=$(urlsafe_base64 "${SS_METHOD}:${SS_PASSWORD}@${ipv4}:${SS_PORT}")
-        SSurl="ss://${SSbase64}"
-        link_ipv4=" 链接  [IPv4]：${GREEN}${SSurl}${RESET}"
-        echo -e "\n IPv4 二维码:"
-        echo "${SSurl}" | qrencode -t utf8
-    fi
-    if [[ "${ipv6}" != "IPv6_Error" ]]; then
-        SSbase64=$(urlsafe_base64 "${SS_METHOD}:${SS_PASSWORD}@${ipv6}:${SS_PORT}")
-        SSurl="ss://${SSbase64}"
-        link_ipv6=" 链接  [IPv6]：${GREEN}${SSurl}${RESET}"
-        echo -e "\n IPv6 二维码:"
-        echo "${SSurl}" | qrencode -t utf8
-    fi
-}
-
 # 查看配置信息
 View() {
     check_installed_status
