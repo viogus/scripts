@@ -1,5 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =========================================
+set -euo pipefail
 # 作者: jinqians + viogus
 # 日期: 2026年5月
 # 网站：jinqians.com / github.com/viogus
