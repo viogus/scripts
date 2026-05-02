@@ -21,6 +21,21 @@ fi
 
 # ================= Init 系统检测 =================
 
+LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
+if [ -f "$LIB_DIR/svc-utils.sh" ]; then
+    . "$LIB_DIR/svc-utils.sh"
+elif [ -f /usr/local/lib/svc-utils.sh ]; then
+    . /usr/local/lib/svc-utils.sh
+else
+    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
+    if curl -fsSL --connect-timeout 5 --max-time 15 \
+        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
+        -o "$TMP_LIB" 2>/dev/null; then
+        . "$TMP_LIB"
+    fi
+    rm -f "$TMP_LIB"
+fi
+
 if ! command -v svc_start >/dev/null 2>&1; then
 _INIT_TYPE=""
 detect_init() {
@@ -271,7 +286,8 @@ show_config_action() {
   echo "端口     : $PORT"
   echo "dest     : $DEST"
   echo "serverNames:"
-  echo "$SERVER_NAMES" | tr ',' '\n' | sed 's/^/  - /'
+  echo "$SERVER_NAMES" | tr ',' '
+' | sed 's/^/  - /'
   echo
 
   get_ips

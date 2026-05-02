@@ -10,11 +10,11 @@ set -euo pipefail
 
 # 定义颜色代码
 [ -z "${RED:-}" ] && {
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-RESET='\033[0m'
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[0;33m'
+CYAN='[0;36m'
+RESET='[0m'
 }
 
 #当前版本号
@@ -258,7 +258,8 @@ check_and_migrate_config() {
     # 检查旧的配置文件是否存在
     if [ -f "$OLD_SNELL_CONF_FILE" ] || [ -f "$OLD_SYSTEMD_SERVICE_FILE" ]; then
         old_files_exist=true
-        echo -e "\n${YELLOW}检测到旧版本的 Snell 配置文件${RESET}"
+        echo -e "
+${YELLOW}检测到旧版本的 Snell 配置文件${RESET}"
         echo -e "旧配置位置："
         [ -f "$OLD_SNELL_CONF_FILE" ] && echo -e "- 配置文件：${OLD_SNELL_CONF_FILE}"
         [ -f "$OLD_SYSTEMD_SERVICE_FILE" ] && echo -e "- 服务文件：${OLD_SYSTEMD_SERVICE_FILE}"
@@ -275,7 +276,8 @@ check_and_migrate_config() {
 
     # 如果需要迁移，询问用户
     if [ "$old_files_exist" = true ]; then
-        echo -e "\n${YELLOW}是否要迁移旧的配置文件？[y/N]${RESET}"
+        echo -e "
+${YELLOW}是否要迁移旧的配置文件？[y/N]${RESET}"
         read -r choice
         if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
             echo -e "${CYAN}开始迁移配置文件...${RESET}"
@@ -385,7 +387,19 @@ check_root() {
 # ============================================
 # Init 系统检测 & 服务操作包装器
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+if [ -f "$LIB_DIR/svc-utils.sh" ]; then
+    . "$LIB_DIR/svc-utils.sh"
+elif [ -f /usr/local/lib/svc-utils.sh ]; then
+    . /usr/local/lib/svc-utils.sh
+else
+    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
+    if curl -fsSL --connect-timeout 5 --max-time 15 \
+        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
+        -o "$TMP_LIB" 2>/dev/null; then
+        . "$TMP_LIB"
+    fi
+    rm -f "$TMP_LIB"
+fi
 # ============================================
 if ! command -v svc_start >/dev/null 2>&1; then
 
@@ -535,7 +549,8 @@ get_user_port() {
 get_system_dns() {
     # 尝试从resolv.conf获取系统DNS
     if [ -f "/etc/resolv.conf" ]; then
-        system_dns=$(grep -E '^nameserver' /etc/resolv.conf | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
+        system_dns=$(grep -E '^nameserver' /etc/resolv.conf | awk '{print $2}' | tr '
+' ',' | sed 's/,$//')
         if [ ! -z "$system_dns" ]; then
             echo "$system_dns"
             return 0
@@ -682,7 +697,8 @@ EOF
     open_port "$PORT"
 
     # 在安装完成后输出配置信息
-    echo -e "\n${GREEN}安装完成！以下是您的配置信息：${RESET}"
+    echo -e "
+${GREEN}安装完成！以下是您的配置信息：${RESET}"
     echo -e "${CYAN}--------------------------------${RESET}"
     echo -e "${YELLOW}监听端口: ${PORT}${RESET}"
     echo -e "${YELLOW}PSK 密钥: ${PSK}${RESET}"
@@ -691,7 +707,8 @@ EOF
     echo -e "${CYAN}--------------------------------${RESET}"
 
     # 获取并显示服务器IP地址
-    echo -e "\n${GREEN}服务器地址信息：${RESET}"
+    echo -e "
+${GREEN}服务器地址信息：${RESET}"
     
     # 获取 IPv4 地址
     IPV4_ADDR=$(curl -s4 https://api.ipify.org)
@@ -708,7 +725,8 @@ EOF
     fi
 
     # 输出 Surge 配置格式
-    echo -e "\n${GREEN}Surge 配置格式：${RESET}"
+    echo -e "
+${GREEN}Surge 配置格式：${RESET}"
     local installed_version=$(detect_installed_snell_version)
     if [ ! -z "$IPV4_ADDR" ]; then
         generate_surge_config "$IPV4_ADDR" "$PORT" "$PSK" "$SNELL_VERSION_CHOICE" "$IP_COUNTRY_IPV4" "$installed_version"
@@ -731,11 +749,11 @@ EOF
 
 # 定义颜色代码
 [ -z "${RED:-}" ] && {
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-RESET='\033[0m'
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[0;33m'
+CYAN='[0;36m'
+RESET='[0m'
 }
 
 # 检查是否以 root 权限运行
@@ -760,16 +778,22 @@ EOFSCRIPT
     if [ $? -eq 0 ]; then
         chmod +x /usr/local/bin/snell
         if [ $? -eq 0 ]; then
-            echo -e "\n${GREEN}管理脚本安装成功！${RESET}"
+            echo -e "
+${GREEN}管理脚本安装成功！${RESET}"
             echo -e "${YELLOW}您可以在终端输入 'snell' 进入管理菜单。${RESET}"
-            echo -e "${YELLOW}注意：需要使用 sudo snell 或以 root 身份运行。${RESET}\n"
+            echo -e "${YELLOW}注意：需要使用 sudo snell 或以 root 身份运行。${RESET}
+"
         else
-            echo -e "\n${RED}设置脚本执行权限失败。${RESET}"
-            echo -e "${YELLOW}您可以通过直接运行原脚本来管理 Snell。${RESET}\n"
+            echo -e "
+${RED}设置脚本执行权限失败。${RESET}"
+            echo -e "${YELLOW}您可以通过直接运行原脚本来管理 Snell。${RESET}
+"
         fi
     else
-        echo -e "\n${RED}创建管理脚本失败。${RESET}"
-        echo -e "${YELLOW}您可以通过直接运行原脚本来管理 Snell。${RESET}\n"
+        echo -e "
+${RED}创建管理脚本失败。${RESET}"
+        echo -e "${YELLOW}您可以通过直接运行原脚本来管理 Snell。${RESET}
+"
     fi
 }
 
@@ -914,7 +938,8 @@ restart_snell() {
 }
 # 检查服务状态并显示
 check_and_show_status() {
-    echo -e "\n${CYAN}=============== 服务状态检查 ===============${RESET}"
+    echo -e "
+${CYAN}=============== 服务状态检查 ===============${RESET}"
     
     # 检查 Snell 状态
     if command -v snell-server &> /dev/null; then
@@ -975,7 +1000,8 @@ check_and_show_status() {
         
         # 显示 Snell 状态
         local total_snell_memory_mb=$(echo "scale=2; $total_snell_memory/1024" | bc)
-        printf "${GREEN}Snell 已安装${RESET}  ${YELLOW}CPU：%.2f%%${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${running_count}/${user_count}${RESET}\n" "$total_snell_cpu" "$total_snell_memory_mb"
+        printf "${GREEN}Snell 已安装${RESET}  ${YELLOW}CPU：%.2f%%${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${running_count}/${user_count}${RESET}
+" "$total_snell_cpu" "$total_snell_memory_mb"
     else
         echo -e "${YELLOW}Snell 未安装${RESET}"
     fi
@@ -1022,7 +1048,8 @@ check_and_show_status() {
         # 显示 ShadowTLS 状态
         if [ $stls_total -gt 0 ]; then
             local total_stls_memory_mb=$(echo "scale=2; $total_stls_memory/1024" | bc)
-            printf "${GREEN}ShadowTLS 已安装${RESET}  ${YELLOW}CPU：%.2f%%${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${stls_running}/${stls_total}${RESET}\n" "$total_stls_cpu" "$total_stls_memory_mb"
+            printf "${GREEN}ShadowTLS 已安装${RESET}  ${YELLOW}CPU：%.2f%%${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${stls_running}/${stls_total}${RESET}
+" "$total_stls_cpu" "$total_stls_memory_mb"
         else
             echo -e "${YELLOW}ShadowTLS 未安装${RESET}"
         fi
@@ -1030,7 +1057,8 @@ check_and_show_status() {
         echo -e "${YELLOW}ShadowTLS 未安装${RESET}"
     fi
     
-    echo -e "${CYAN}============================================${RESET}\n"
+    echo -e "${CYAN}============================================${RESET}
+"
 }
 
 # 查看配置
@@ -1064,12 +1092,14 @@ view_snell_config() {
         return
     fi
     
-    echo -e "\n${YELLOW}=== 用户配置列表 ===${RESET}"
+    echo -e "
+${YELLOW}=== 用户配置列表 ===${RESET}"
     
     # 显示主用户配置
     local main_conf="${SNELL_CONF_DIR}/users/snell-main.conf"
     if [ -f "$main_conf" ]; then
-        echo -e "\n${GREEN}主用户配置：${RESET}"
+        echo -e "
+${GREEN}主用户配置：${RESET}"
         local main_port=$(grep -E '^listen' "$main_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
         local main_psk=$(grep -E '^psk' "$main_conf" | awk -F'=' '{print $2}' | tr -d ' ')
         local main_ipv6=$(grep -E '^ipv6' "$main_conf" | awk -F'=' '{print $2}' | tr -d ' ')
@@ -1080,7 +1110,8 @@ view_snell_config() {
         echo -e "${YELLOW}IPv6: ${main_ipv6}${RESET}"
         echo -e "${YELLOW}DNS: ${main_dns}${RESET}"
         
-        echo -e "\n${GREEN}Surge 配置格式：${RESET}"
+        echo -e "
+${GREEN}Surge 配置格式：${RESET}"
         if [ ! -z "$IPV4_ADDR" ]; then
             generate_surge_config "$IPV4_ADDR" "$main_port" "$main_psk" "$installed_version" "$IP_COUNTRY_IPV4" "$installed_version"
         fi
@@ -1098,12 +1129,14 @@ view_snell_config() {
                 local user_ipv6=$(grep -E '^ipv6' "$user_conf" | awk -F'=' '{print $2}' | tr -d ' ')
                 local user_dns=$(grep -E '^dns' "$user_conf" | awk -F'=' '{print $2}' | tr -d ' ')
                 
-                echo -e "\n${GREEN}用户配置 (端口: ${user_port}):${RESET}"
+                echo -e "
+${GREEN}用户配置 (端口: ${user_port}):${RESET}"
                 echo -e "${YELLOW}PSK: ${user_psk}${RESET}"
                 echo -e "${YELLOW}IPv6: ${user_ipv6}${RESET}"
                 echo -e "${YELLOW}DNS: ${user_dns}${RESET}"
                 
-                echo -e "\n${GREEN}Surge 配置格式：${RESET}"
+                echo -e "
+${GREEN}Surge 配置格式：${RESET}"
                 if [ ! -z "$IPV4_ADDR" ]; then
                     generate_surge_config "$IPV4_ADDR" "$user_port" "$user_psk" "$installed_version" "$IP_COUNTRY_IPV4" "$installed_version"
                 fi
@@ -1118,7 +1151,8 @@ view_snell_config() {
     local snell_version=$(detect_installed_snell_version)
     local snell_services=$(find /etc/systemd/system /etc/init.d -maxdepth 1 -name "shadowtls-snell-*" 2>/dev/null 2>/dev/null | sort -u)
     if [ ! -z "$snell_services" ]; then
-        echo -e "\n${YELLOW}=== ShadowTLS 组合配置 ===${RESET}"
+        echo -e "
+${YELLOW}=== ShadowTLS 组合配置 ===${RESET}"
         declare -A processed_ports
         while IFS= read -r service_file; do
             local exec_line=$(grep "ExecStart=" "$service_file")
@@ -1139,9 +1173,11 @@ view_snell_config() {
             fi
             processed_ports[$snell_port]=1
             if [ "$snell_port" = "$(get_snell_port)" ]; then
-                echo -e "\n${GREEN}主用户 ShadowTLS 配置：${RESET}"
+                echo -e "
+${GREEN}主用户 ShadowTLS 配置：${RESET}"
             else
-                echo -e "\n${GREEN}用户 ShadowTLS 配置 (端口: ${snell_port})：${RESET}"
+                echo -e "
+${GREEN}用户 ShadowTLS 配置 (端口: ${snell_port})：${RESET}"
             fi
             echo -e "  - Snell 端口：${snell_port}"
             echo -e "  - PSK：${psk}"
@@ -1149,7 +1185,8 @@ view_snell_config() {
             echo -e "  - ShadowTLS 密码：${stls_password}"
             echo -e "  - ShadowTLS SNI：${stls_domain}"
             echo -e "  - 版本：3"
-            echo -e "\n${GREEN}Surge 配置格式：${RESET}"
+            echo -e "
+${GREEN}Surge 配置格式：${RESET}"
             if [ ! -z "$IPV4_ADDR" ]; then
                 if [ "$snell_version" = "v5" ]; then
                     echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
@@ -1169,7 +1206,8 @@ view_snell_config() {
         done <<< "$snell_services"
     fi
     
-    echo -e "\n${YELLOW}注意：${RESET}"
+    echo -e "
+${YELLOW}注意：${RESET}"
     echo -e "1. Snell 仅支持 Surge 客户端"
     echo -e "2. 请将配置中的服务器地址替换为实际可用的地址"
     read -p "按任意键返回主菜单..."
@@ -1199,7 +1237,8 @@ get_current_snell_version() {
 
 # 检查 Snell 更新
 check_snell_update() {
-    echo -e "\n${CYAN}=============== 检查 Snell 更新 ===============${RESET}"
+    echo -e "
+${CYAN}=============== 检查 Snell 更新 ===============${RESET}"
     
     # 检测当前安装的 Snell 版本
     local current_installed_version=$(detect_installed_snell_version)
@@ -1213,7 +1252,8 @@ check_snell_update() {
     # 根据当前版本确定更新策略
     if [ "$current_installed_version" = "v4" ]; then
         # v4 用户：询问是否升级到 v5
-        echo -e "\n${CYAN}检测到您当前使用的是 Snell v4，是否要升级到 v5？${RESET}"
+        echo -e "
+${CYAN}检测到您当前使用的是 Snell v4，是否要升级到 v5？${RESET}"
         echo -e "${YELLOW}注意：v5 为测试版本，可能存在兼容性问题${RESET}"
         echo -e "${GREEN}1.${RESET} 升级到 Snell v5"
         echo -e "${GREEN}2.${RESET} 继续使用 Snell v4（检查 v4 更新）"
@@ -1256,7 +1296,8 @@ check_snell_update() {
 
     # 检查是否需要更新
     if ! version_greater_equal "$CURRENT_VERSION" "$SNELL_VERSION"; then
-        echo -e "\n${CYAN}发现新版本，更新说明：${RESET}"
+        echo -e "
+${CYAN}发现新版本，更新说明：${RESET}"
         echo -e "${GREEN}✓ 这是更新操作，不是重新安装${RESET}"
         echo -e "${GREEN}✓ 所有现有配置将被保留（端口、密码、用户配置）${RESET}"
         echo -e "${GREEN}✓ 服务会自动重启${RESET}"
@@ -1435,12 +1476,14 @@ show_menu() {
     echo -e "${GREEN}3.${RESET} 查看配置"
     echo -e "${GREEN}4.${RESET} 重启服务"
     
-    echo -e "\n${YELLOW}=== 增强功能 ===${RESET}"
+    echo -e "
+${YELLOW}=== 增强功能 ===${RESET}"
     echo -e "${GREEN}5.${RESET} ShadowTLS 管理"
     echo -e "${GREEN}6.${RESET} BBR 管理"
     echo -e "${GREEN}7.${RESET} 多用户管理"
     
-    echo -e "\n${YELLOW}=== 系统功能 ===${RESET}"
+    echo -e "
+${YELLOW}=== 系统功能 ===${RESET}"
     echo -e "${GREEN}8.${RESET} 更新Snell"
     echo -e "${GREEN}9.${RESET} 更新脚本"
     echo -e "${GREEN}10.${RESET} 查看服务状态"
@@ -1552,6 +1595,7 @@ while true; do
             echo -e "${RED}请输入正确的选项 [0-10]${RESET}"
             ;;
     esac
-    echo -e "\n${CYAN}按任意键返回主菜单...${RESET}"
+    echo -e "
+${CYAN}按任意键返回主菜单...${RESET}"
     read -n 1 -s -r
 done

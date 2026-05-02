@@ -30,16 +30,16 @@ MAINLAND_EXTRACT_REPO_URL="https://raw.githubusercontent.com/viogus/scripts/main
 
 # 颜色定义
 [ -z "${RED:-}" ] && {
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-PLAIN='\033[0m'
-RESET='\033[0m'
-BOLD='\033[1m'
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[1;33m'
+BLUE='[0;34m'
+CYAN='[0;36m'
+PLAIN='[0m'
+RESET='[0m'
+BOLD='[1m'
 }
-RED_BG='\033[41;37m'
+RED_BG='[41;37m'
 
 # 状态提示
 INFO="${GREEN}[信息]${PLAIN}"
@@ -75,7 +75,19 @@ check_root() {
 # ============================================
 # Init 系统检测 & 服务操作包装器
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+if [ -f "$LIB_DIR/svc-utils.sh" ]; then
+    . "$LIB_DIR/svc-utils.sh"
+elif [ -f /usr/local/lib/svc-utils.sh ]; then
+    . /usr/local/lib/svc-utils.sh
+else
+    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
+    if curl -fsSL --connect-timeout 5 --max-time 15 \
+        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
+        -o "$TMP_LIB" 2>/dev/null; then
+        . "$TMP_LIB"
+    fi
+    rm -f "$TMP_LIB"
+fi
 # ============================================
 if ! command -v svc_start >/dev/null 2>&1; then
 
@@ -469,7 +481,8 @@ write_config() {
 }
 EOF
     if [[ -n "${SS_DNS:-}" ]]; then
-        sed -i 's/"timeout": 300/"timeout": 300,\n    "nameserver": "'"${SS_DNS}"'"/' ${CONFIG_PATH}
+        sed -i 's/"timeout": 300/"timeout": 300,
+    "nameserver": "'"${SS_DNS}"'"/' ${CONFIG_PATH}
     fi
     echo -e "${SUCCESS} 配置文件写入完成！"
 }
@@ -1007,11 +1020,13 @@ View() {
         ss_url_ipv6="ss://${userinfo}@${ipv6}:${config_port}#SS-${ipv6}"
     fi
 
-    echo -e "\n${YELLOW}=== Shadowsocks 链接 ===${RESET}"
+    echo -e "
+${YELLOW}=== Shadowsocks 链接 ===${RESET}"
     [[ ! -z "${ss_url_ipv4}" ]] && echo -e "${GREEN}IPv4 链接：${RESET}${ss_url_ipv4}"
     [[ ! -z "${ss_url_ipv6}" ]] && echo -e "${GREEN}IPv6 链接：${RESET}${ss_url_ipv6}"
 
-    echo -e "\n${YELLOW}=== Shadowsocks 二维码 ===${RESET}"
+    echo -e "
+${YELLOW}=== Shadowsocks 二维码 ===${RESET}"
     if command -v qrencode &> /dev/null; then
         if [[ ! -z "${ss_url_ipv4}" ]]; then
             echo -e "${GREEN}IPv4 二维码：${RESET}"
@@ -1025,7 +1040,8 @@ View() {
         echo -e "${RED}未安装 qrencode，无法生成二维码${RESET}"
     fi
 
-    echo -e "\n${YELLOW}=== Surge 配置 ===${RESET}"
+    echo -e "
+${YELLOW}=== Surge 配置 ===${RESET}"
     if [[ "${ipv4}" != "IPv4_Error" ]]; then
         echo -e "SS-${ipv4} = ss, ${ipv4}, ${config_port}, encrypt-method=${config_method}, password=${config_password}, tfo=${config_tfo}, udp-relay=true"
     fi
@@ -1045,7 +1061,8 @@ View() {
         local stls_password; stls_password=$(sed -n 's/.*--password \([^ ]*\).*/\1/p' "$stls_svc_file")
         local stls_sni; stls_sni=$(sed -n 's/.*--tls \([^ ]*\).*/\1/p' "$stls_svc_file")
 
-        echo -e "\n${YELLOW}=== ShadowTLS 配置 ===${RESET}"
+        echo -e "
+${YELLOW}=== ShadowTLS 配置 ===${RESET}"
         echo -e " 监听端口：${GREEN}${stls_listen_port}${RESET}"
         echo -e " 密码：${GREEN}${stls_password}${RESET}"
         echo -e " SNI：${GREEN}${stls_sni}${RESET}"
@@ -1056,17 +1073,20 @@ View() {
         local shadow_tls_base64=$(echo -n "${shadow_tls_config}" | base64 -w 0)
         local ss_stls_url="ss://${userinfo}@${ipv4}:${config_port}?shadow-tls=${shadow_tls_base64}#SS-${ipv4}"
 
-        echo -e "\n${YELLOW}=== SS + ShadowTLS 链接 ===${RESET}"
+        echo -e "
+${YELLOW}=== SS + ShadowTLS 链接 ===${RESET}"
         [[ "${ipv4}" != "IPv4_Error" ]] && echo -e "${GREEN}合并链接：${RESET}${ss_stls_url}"
 
-        echo -e "\n${YELLOW}=== SS + ShadowTLS 二维码 ===${RESET}"
+        echo -e "
+${YELLOW}=== SS + ShadowTLS 二维码 ===${RESET}"
         if command -v qrencode &> /dev/null; then
             [[ "${ipv4}" != "IPv4_Error" ]] && echo "${ss_stls_url}" | qrencode -t UTF8
         else
             echo -e "${RED}未安装 qrencode，无法生成二维码${RESET}"
         fi
 
-        echo -e "\n${YELLOW}=== Surge Shadowsocks + ShadowTLS 配置 ===${RESET}"
+        echo -e "
+${YELLOW}=== Surge Shadowsocks + ShadowTLS 配置 ===${RESET}"
         if [[ "${ipv4}" != "IPv4_Error" ]]; then
             echo -e "SS-${ipv4} = ss, ${ipv4}, ${stls_listen_port}, encrypt-method=${config_method}, password=${config_password}, shadow-tls-password=${stls_password}, shadow-tls-sni=${stls_sni}, shadow-tls-version=3, udp-relay=true"
         fi

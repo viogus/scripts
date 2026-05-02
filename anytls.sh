@@ -27,12 +27,12 @@ SCRIPT_VERSION="1.0.0"
 # 颜色
 # ============================================
 [ -z "${RED:-}" ] && {
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-BLUE='\033[0;34m'
-RESET='\033[0m'
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[0;33m'
+CYAN='[0;36m'
+BLUE='[0;34m'
+RESET='[0m'
 }
 
 OK="${GREEN}[OK]${RESET}"
@@ -46,7 +46,8 @@ print_error(){ echo -e "${ERROR} $1 ${RESET}"; }
 print_warn(){ echo -e "${WARN} $1 ${RESET}"; }
 
 judge(){ if [[ 0 -eq $? ]]; then print_ok "$1 完成"; else print_error "$1 失败"; exit 1; fi; }
-trap 'echo -e "\n${WARN} 已中断"; exit 1' INT
+trap 'echo -e "
+${WARN} 已中断"; exit 1' INT
 
 # ============================================
 # 工具函数
@@ -61,9 +62,21 @@ ensure_root() {
 
 has_cmd(){ command -v "$1" >/dev/null 2>&1; }
 
-# 优先加载共享库
+# 加载共享库（本地 > 系统 > GitHub > 内联兜底）
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+if [ -f "$LIB_DIR/svc-utils.sh" ]; then
+    . "$LIB_DIR/svc-utils.sh"
+elif [ -f /usr/local/lib/svc-utils.sh ]; then
+    . /usr/local/lib/svc-utils.sh
+else
+    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
+    if curl -fsSL --connect-timeout 5 --max-time 15 \
+        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
+        -o "$TMP_LIB" 2>/dev/null; then
+        . "$TMP_LIB"
+    fi
+    rm -f "$TMP_LIB"
+fi
 
 # Init 检测（结果缓存在 _INIT_TYPE）
 if ! command -v svc_start >/dev/null 2>&1; then
@@ -486,7 +499,8 @@ set_password() {
 # ============================================
 
 show_status() {
-    echo -e "\n${CYAN}=== AnyTLS 状态 ===${RESET}"
+    echo -e "
+${CYAN}=== AnyTLS 状态 ===${RESET}"
     if is_installed; then
         local status; status="$(svc_is_active "${SERVICE_NAME}")"
         if [[ "$status" == "active" ]]; then
@@ -506,14 +520,16 @@ show_status() {
     else
         echo -e "${YELLOW}AnyTLS 未安装${RESET}"
     fi
-    echo -e "${CYAN}===================${RESET}\n"
+    echo -e "${CYAN}===================${RESET}
+"
 }
 
 # ============================================
 # 菜单
 # ============================================
 
-hr(){ printf '%*s\n' 44 '' | tr ' ' '='; }
+hr(){ printf '%*s
+' 44 '' | tr ' ' '='; }
 pause(){ read -rp "按回车返回菜单..." _; }
 
 show_menu() {

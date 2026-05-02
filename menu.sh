@@ -9,12 +9,12 @@ set -euo pipefail
 
 # 定义颜色代码
 [ -z "${RED:-}" ] && {
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-BLUE='\033[0;34m'
-RESET='\033[0m'
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[0;33m'
+CYAN='[0;36m'
+BLUE='[0;34m'
+RESET='[0m'
 }
 
 # 当前版本号
@@ -145,9 +145,21 @@ check_root() {
 
 # ============================================
 # Init 系统检测 & 服务操作包装器
-# 优先加载共享库（本地开发时使用）
+# 加载共享库（本地 > 系统 > GitHub > 内联兜底）
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+if [ -f "$LIB_DIR/svc-utils.sh" ]; then
+    . "$LIB_DIR/svc-utils.sh"
+elif [ -f /usr/local/lib/svc-utils.sh ]; then
+    . /usr/local/lib/svc-utils.sh
+else
+    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
+    if curl -fsSL --connect-timeout 5 --max-time 15 \
+        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
+        -o "$TMP_LIB" 2>/dev/null; then
+        . "$TMP_LIB"
+    fi
+    rm -f "$TMP_LIB"
+fi
 # ============================================
 if ! command -v svc_start >/dev/null 2>&1; then
 
@@ -184,7 +196,8 @@ fi  # end inline svc fallback
 check_and_show_status() {
     local cpu_cores=$(nproc)
 
-    echo -e "\n${CYAN}=== 服务状态检查 ===${RESET}"
+    echo -e "
+${CYAN}=== 服务状态检查 ===${RESET}"
     echo -e "${CYAN}系统 CPU 核心数：${cpu_cores}${RESET}"
 
     # --- Snell ---
@@ -228,7 +241,8 @@ check_and_show_status() {
         fi
         total_snell_memory=${total_snell_memory:-0}; total_snell_cpu=${total_snell_cpu:-0}
         local total_snell_memory_mb=$(echo "scale=2; $total_snell_memory/1024" | bc -l 2>/dev/null || echo "0")
-        printf "${GREEN}Snell 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${running_count}/${user_count}${RESET}\n" "${total_snell_cpu:-0}" "${total_snell_memory_mb:-0}"
+        printf "${GREEN}Snell 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${running_count}/${user_count}${RESET}
+" "${total_snell_cpu:-0}" "${total_snell_memory_mb:-0}"
     else
         echo -e "${YELLOW}Snell 未安装${RESET}"
     fi
@@ -245,7 +259,8 @@ check_and_show_status() {
             fi
         fi
         local ss_memory_mb=$(echo "scale=2; $ss_memory/1024" | bc 2>/dev/null || echo "0")
-        printf "${GREEN}SS-2022 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${ss_running}/1${RESET}\n" "$ss_cpu" "$ss_memory_mb"
+        printf "${GREEN}SS-2022 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${ss_running}/1${RESET}
+" "$ss_cpu" "$ss_memory_mb"
     else
         echo -e "${YELLOW}SS-2022 未安装${RESET}"
     fi
@@ -268,7 +283,8 @@ check_and_show_status() {
         done < <(svc_list "shadowtls-" 2>/dev/null | awk '{print $1}')
         if [ $stls_total -gt 0 ]; then
             local total_stls_memory_mb=$(echo "scale=2; $total_stls_memory/1024" | bc 2>/dev/null || echo "0")
-            printf "${GREEN}ShadowTLS 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${stls_running}/${stls_total}${RESET}\n" "$total_stls_cpu" "$total_stls_memory_mb"
+            printf "${GREEN}ShadowTLS 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${stls_running}/${stls_total}${RESET}
+" "$total_stls_cpu" "$total_stls_memory_mb"
         else
             echo -e "${YELLOW}ShadowTLS 未安装${RESET}"
         fi
@@ -288,7 +304,8 @@ check_and_show_status() {
             fi
         fi
         local at_memory_mb=$(echo "scale=2; $at_memory/1024" | bc 2>/dev/null || echo "0")
-        printf "${GREEN}AnyTLS 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${at_running}/1${RESET}\n" "$at_cpu" "$at_memory_mb"
+        printf "${GREEN}AnyTLS 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${at_running}/1${RESET}
+" "$at_cpu" "$at_memory_mb"
     else
         echo -e "${YELLOW}AnyTLS 未安装${RESET}"
     fi
@@ -305,12 +322,14 @@ check_and_show_status() {
             fi
         fi
         local hy2_memory_mb=$(echo "scale=2; $hy2_memory/1024" | bc 2>/dev/null || echo "0")
-        printf "${GREEN}Hysteria2 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${hy2_running}/1${RESET}\n" "$hy2_cpu" "$hy2_memory_mb"
+        printf "${GREEN}Hysteria2 已安装${RESET}  ${YELLOW}CPU：%.2f%% (每核)${RESET}  ${YELLOW}内存：%.2f MB${RESET}  ${GREEN}运行中：${hy2_running}/1${RESET}
+" "$hy2_cpu" "$hy2_memory_mb"
     else
         echo -e "${YELLOW}Hysteria2 未安装${RESET}"
     fi
 
-    echo -e "${CYAN}====================${RESET}\n"
+    echo -e "${CYAN}====================${RESET}
+"
 }
 
 # ============================================
@@ -535,7 +554,8 @@ surge_export_all() {
     echo -e "${CYAN}============================================${RESET}"
 
     local ip; ip="$(at_get_ip 2>/dev/null || echo "服务器IP")"
-    echo -e "${YELLOW}服务器 IP: ${ip}${RESET}\n"
+    echo -e "${YELLOW}服务器 IP: ${ip}${RESET}
+"
 
     # --- AnyTLS ---
     if [[ -f "${ANYTLS_CONFIG_FILE}" ]]; then
@@ -645,7 +665,8 @@ surge_export_all() {
     # --- VLESS Reality ---
     # Surge 不支持 VLESS 协议，跳过
     if [ -f "/usr/local/etc/xray/config.json" ] || [ -d "/usr/local/etc/xray" ]; then
-        echo -e "${YELLOW}[VLESS] Surge 不支持 VLESS 协议，无法导出。请使用支持 VLESS 的客户端。${RESET}\n"
+        echo -e "${YELLOW}[VLESS] Surge 不支持 VLESS 协议，无法导出。请使用支持 VLESS 的客户端。${RESET}
+"
     fi
 
     echo -e "${CYAN}============================================${RESET}"
@@ -676,14 +697,16 @@ show_menu() {
     echo -e "${GREEN}5.${RESET} AnyTLS 安装管理"
     echo -e "${GREEN}6.${RESET} Hysteria 2 安装管理"
 
-    echo -e "\n${YELLOW}=== 卸载功能 ===${RESET}"
+    echo -e "
+${YELLOW}=== 卸载功能 ===${RESET}"
     echo -e "${GREEN}7.${RESET} 卸载 Snell"
     echo -e "${GREEN}8.${RESET} 卸载 SS-2022"
     echo -e "${GREEN}9.${RESET} 卸载 ShadowTLS"
     echo -e "${GREEN}10.${RESET} 卸载 AnyTLS"
     echo -e "${GREEN}11.${RESET} 卸载 Hysteria 2"
 
-    echo -e "\n${YELLOW}=== 系统功能 ===${RESET}"
+    echo -e "
+${YELLOW}=== 系统功能 ===${RESET}"
     echo -e "${GREEN}12.${RESET} 更新脚本"
     echo -e "${GREEN}13.${RESET} 输出 Surge 配置"
     echo -e "${GREEN}0.${RESET} 退出"
@@ -721,6 +744,7 @@ while true; do
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
         *) echo -e "${RED}请输入正确的选项 [0-13]${RESET}" ;;
     esac
-    echo -e "\n${CYAN}按任意键返回主菜单...${RESET}"
+    echo -e "
+${CYAN}按任意键返回主菜单...${RESET}"
     read -n 1 -s -r
 done

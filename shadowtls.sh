@@ -10,11 +10,11 @@ set -euo pipefail
 
 # 定义颜色代码
 [ -z "${RED:-}" ] && {
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-RESET='\033[0m'
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[0;33m'
+CYAN='[0;36m'
+RESET='[0m'
 }
 
 # 定义系统路径
@@ -40,7 +40,19 @@ check_root() {
 # ============================================
 # Init 系统检测 & 服务操作包装器
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-[ -f "$LIB_DIR/svc-utils.sh" ] && . "$LIB_DIR/svc-utils.sh"
+if [ -f "$LIB_DIR/svc-utils.sh" ]; then
+    . "$LIB_DIR/svc-utils.sh"
+elif [ -f /usr/local/lib/svc-utils.sh ]; then
+    . /usr/local/lib/svc-utils.sh
+else
+    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
+    if curl -fsSL --connect-timeout 5 --max-time 15 \
+        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
+        -o "$TMP_LIB" 2>/dev/null; then
+        . "$TMP_LIB"
+    fi
+    rm -f "$TMP_LIB"
+fi
 # ============================================
 if ! command -v svc_start >/dev/null 2>&1; then
 
@@ -307,7 +319,8 @@ check_shadowtls_command() {
 
 # 生成安全的Base64编码
 urlsafe_base64() {
-    date=$(echo -n "$1"|base64|sed ':a;N;s/\n/ /g;ta'|sed 's/ //g;s/=//g;s/+/-/g;s/\//_/g')
+    date=$(echo -n "$1"|base64|sed ':a;N;s/
+/ /g;ta'|sed 's/ //g;s/=//g;s/+/-/g;s/\//_/g')
     echo -e "${date}"
 }
 
@@ -403,28 +416,34 @@ generate_ss_links() {
     local stls_sni=$6
     local backend_port=$7
     
-    echo -e "\n${YELLOW}=== 服务器配置 ===${RESET}"
+    echo -e "
+${YELLOW}=== 服务器配置 ===${RESET}"
     echo -e "服务器IP：${server_ip}"
-    echo -e "\nShadowsocks 配置："
+    echo -e "
+Shadowsocks 配置："
     echo -e "  - 端口：${backend_port}"
     echo -e "  - 加密方式：${ssrust_method}"
     echo -e "  - 密码：${ssrust_password}"
-    echo -e "\nShadowTLS 配置："
+    echo -e "
+ShadowTLS 配置："
     echo -e "  - 端口：${listen_port}"
     echo -e "  - 密码：${stls_password}"
     echo -e "  - SNI：${stls_sni}"
     echo -e "  - 版本：3"
     
     # 生成 SS + ShadowTLS 合并链接
-    local userinfo=$(echo -n "${ssrust_method}:${ssrust_password}" | base64 | tr -d '\n')
+    local userinfo=$(echo -n "${ssrust_method}:${ssrust_password}" | base64 | tr -d '
+')
     # shadow_tls_config = plugin=shadow-tls;host=${stls_sni};password=${stls_password};version=3
     local shadow_tls_config="plugin=shadow-tls;host=${stls_sni};password=${stls_password};version=3"
     local ss_url="ss://${userinfo}@${server_ip}:${listen_port}?${shadow_tls_config}"
 
-    echo -e "\n${YELLOW}=== Surge 配置 ===${RESET}"
+    echo -e "
+${YELLOW}=== Surge 配置 ===${RESET}"
     echo -e "SS-${server_ip} = ss, ${server_ip}, ${listen_port}, encrypt-method=${ssrust_method}, password=${ssrust_password}, shadow-tls-password=${stls_password}, shadow-tls-sni=${stls_sni}, shadow-tls-version=3, udp-relay=true"
     
-    echo -e "\n${YELLOW}=== Shadowrocket 配置说明 ===${RESET}"
+    echo -e "
+${YELLOW}=== Shadowrocket 配置说明 ===${RESET}"
     echo -e "1. 添加 Shadowsocks 节点："
     echo -e "   - 类型：Shadowsocks"
     echo -e "   - 地址：${server_ip}"
@@ -432,7 +451,8 @@ generate_ss_links() {
     echo -e "   - 加密方法：${ssrust_method}"
     echo -e "   - 密码：${ssrust_password}"
     
-    echo -e "\n2. 添加 ShadowTLS 节点："
+    echo -e "
+2. 添加 ShadowTLS 节点："
     echo -e "   - 类型：ShadowTLS"
     echo -e "   - 地址：${server_ip}"
     echo -e "   - 端口：${listen_port}"
@@ -440,13 +460,16 @@ generate_ss_links() {
     echo -e "   - SNI：${stls_sni}"
     echo -e "   - 版本：3"
 
-    echo -e "\n${YELLOW}=== Shadowrocket分享链接 ===${RESET}"
+    echo -e "
+${YELLOW}=== Shadowrocket分享链接 ===${RESET}"
     echo -e "${GREEN}SS + ShadowTLS 链接：${RESET}${ss_url}"
     
-    echo -e "\n${YELLOW}=== Shadowrocket二维码 ===${RESET}"
+    echo -e "
+${YELLOW}=== Shadowrocket二维码 ===${RESET}"
     qrencode -t UTF8 "${ss_url}"
     
-    echo -e "\n${YELLOW}=== Clash Meta 配置 ===${RESET}"
+    echo -e "
+${YELLOW}=== Clash Meta 配置 ===${RESET}"
     echo -e "proxies:"
     echo -e "  - name: SS-${server_ip}"
     echo -e "    type: ss"
@@ -473,19 +496,23 @@ generate_snell_links() {
     # 获取 Snell 版本
     local snell_version=$(get_snell_version)
     
-    echo -e "\n${YELLOW}=== 服务器配置 ===${RESET}"
+    echo -e "
+${YELLOW}=== 服务器配置 ===${RESET}"
     echo -e "服务器IP：${server_ip}"
-    echo -e "\nSnell 配置："
+    echo -e "
+Snell 配置："
     echo -e "  - 端口：${backend_port}"
     echo -e "  - PSK：${snell_psk}"
     echo -e "  - 版本：${snell_version}"
-    echo -e "\nShadowTLS 配置："
+    echo -e "
+ShadowTLS 配置："
     echo -e "  - 端口：${listen_port}"
     echo -e "  - 密码：${stls_password}"
     echo -e "  - SNI：${stls_sni}"
     echo -e "  - 版本：3"
     
-    echo -e "\n${YELLOW}=== Surge 配置 ===${RESET}"
+    echo -e "
+${YELLOW}=== Surge 配置 ===${RESET}"
     
     # v5 输出 v4/v5 两种格式，v4只输出v4
     if [ "$snell_version" = "5" ]; then
@@ -661,7 +688,8 @@ install_shadowtls() {
     
     # 让用户选择要为哪个协议设置 ShadowTLS
     while true; do
-        echo -e "\n${YELLOW}请选择要配置的协议：${RESET}"
+        echo -e "
+${YELLOW}请选择要配置的协议：${RESET}"
         echo -e "1. 为 Shadowsocks 配置 ShadowTLS"
         echo -e "2. 为 Snell 配置 ShadowTLS"
         echo -e "3. 为两者都配置 ShadowTLS"
@@ -708,7 +736,8 @@ install_shadowtls() {
     
     # 配置 Shadowsocks
     if $configure_ss; then
-        echo -e "\n${YELLOW}配置 Shadowsocks 的 ShadowTLS...${RESET}"
+        echo -e "
+${YELLOW}配置 Shadowsocks 的 ShadowTLS...${RESET}"
         while true; do
             read -rp "请输入 ShadowTLS 监听端口 (1-65535，直接回车随机生成): " ss_listen_port
             
@@ -731,7 +760,8 @@ install_shadowtls() {
     
     # 配置 Snell
     if $configure_snell; then
-        echo -e "\n${YELLOW}配置 Snell 的 ShadowTLS...${RESET}"
+        echo -e "
+${YELLOW}配置 Snell 的 ShadowTLS...${RESET}"
         
         # 获取所有 Snell 用户配置
         local user_configs=$(get_all_snell_users)
@@ -741,7 +771,8 @@ install_shadowtls() {
         fi
         
         # 显示所有 Snell 端口
-        echo -e "\n${YELLOW}当前的 Snell 端口列表：${RESET}"
+        echo -e "
+${YELLOW}当前的 Snell 端口列表：${RESET}"
         local port_list=()
         while IFS='|' read -r port psk; do
             if [ ! -z "$port" ]; then
@@ -755,7 +786,8 @@ install_shadowtls() {
         done <<< "$user_configs"
         
         # 让用户选择要配置的端口
-        echo -e "\n${YELLOW}请选择要配置的端口：${RESET}"
+        echo -e "
+${YELLOW}请选择要配置的端口：${RESET}"
         echo -e "1-${#port_list[@]}. 选择单个端口"
         echo -e "0. 为所有端口配置 ShadowTLS"
         
@@ -764,7 +796,8 @@ install_shadowtls() {
         if [ "$port_choice" = "0" ]; then
             # 为所有端口配置 ShadowTLS
             for port in "${port_list[@]}"; do
-                echo -e "\n${YELLOW}为 Snell 端口 ${port} 配置 ShadowTLS${RESET}"
+                echo -e "
+${YELLOW}为 Snell 端口 ${port} 配置 ShadowTLS${RESET}"
                 while true; do
                     read -rp "请输入 ShadowTLS 监听端口 (1-65535，直接回车随机生成): " stls_port
                     
@@ -786,7 +819,8 @@ install_shadowtls() {
         elif [[ "$port_choice" =~ ^[0-9]+$ ]] && [ "$port_choice" -ge 1 ] && [ "$port_choice" -le ${#port_list[@]} ]; then
             # 为选中的端口配置 ShadowTLS
             local selected_port="${port_list[$((port_choice-1))]}"
-            echo -e "\n${YELLOW}为 Snell 端口 ${selected_port} 配置 ShadowTLS${RESET}"
+            echo -e "
+${YELLOW}为 Snell 端口 ${selected_port} 配置 ShadowTLS${RESET}"
             while true; do
                 read -rp "请输入 ShadowTLS 监听端口 (1-65535，直接回车随机生成): " stls_port
                 
@@ -816,7 +850,8 @@ install_shadowtls() {
     # 获取服务器IP
     local server_ip=$(get_server_ip)
     
-    echo -e "\n${GREEN}=== ShadowTLS 安装成功 ===${RESET}"
+    echo -e "
+${GREEN}=== ShadowTLS 安装成功 ===${RESET}"
     
     # 显示所有可用的配置
     if $configure_ss; then
@@ -838,7 +873,8 @@ install_shadowtls() {
         done <<< "$user_configs"
     fi
 
-    echo -e "\n${GREEN}服务已启动并设置为开机自启${RESET}"
+    echo -e "
+${GREEN}服务已启动并设置为开机自启${RESET}"
 }
 
 # 卸载 ShadowTLS
@@ -890,7 +926,8 @@ view_config() {
     
     # 检查 SS 是否安装并获取配置
     if [ -f "$ss_service" ] && check_ssrust; then
-        echo -e "\n${YELLOW}=== Shadowsocks + ShadowTLS 配置 ===${RESET}"
+        echo -e "
+${YELLOW}=== Shadowsocks + ShadowTLS 配置 ===${RESET}"
         local ss_listen_port=$(sed -n 's/.*--listen ::0:\([0-9]*\).*/\1/p' "$ss_service")
         local tls_domain=$(sed -n 's/.*--tls \([^ ]*\).*/\1/p' "$ss_service")
         local password=$(sed -n 's/.*--password \([^ ]*\).*/\1/p' "$ss_service")
@@ -907,7 +944,8 @@ view_config() {
     
     # 检查 Snell 是否安装并获取配置
     if [ ! -z "$snell_services" ] && check_snell; then
-        echo -e "\n${YELLOW}=== Snell + ShadowTLS 配置 ===${RESET}"
+        echo -e "
+${YELLOW}=== Snell + ShadowTLS 配置 ===${RESET}"
         
         # 获取所有用户配置
         local user_configs=$(get_all_snell_users)
@@ -928,9 +966,11 @@ view_config() {
                         local stls_domain=$(echo "$exec_line" | sed -n 's/.*--tls \([^ ]*\).*/\1/p')
                         
                         if [ "$port" = "$(get_snell_port)" ]; then
-                            echo -e "\n${GREEN}主用户配置：${RESET}"
+                            echo -e "
+${GREEN}主用户配置：${RESET}"
                         else
-                            echo -e "\n${GREEN}用户配置 (Snell 端口: ${port}):${RESET}"
+                            echo -e "
+${GREEN}用户配置 (Snell 端口: ${port}):${RESET}"
                         fi
                         
                         if [ ! -z "$stls_port" ] && [ ! -z "$stls_password" ] && [ ! -z "$stls_domain" ]; then
@@ -938,13 +978,15 @@ view_config() {
                             echo -e "  - 端口：${port}"
                             echo -e "  - PSK：${psk}"
                             
-                            echo -e "\n${YELLOW}ShadowTLS 配置：${RESET}"
+                            echo -e "
+${YELLOW}ShadowTLS 配置：${RESET}"
                             echo -e "  - 监听端口：${stls_port}"
                             echo -e "  - 密码：${stls_password}"
                             echo -e "  - SNI：${stls_domain}"
                             echo -e "  - 版本：3"
                             
-                            echo -e "\n${GREEN}Surge 配置：${RESET}"
+                            echo -e "
+${GREEN}Surge 配置：${RESET}"
                             local snell_version=$(get_snell_version)
                             if [ "$snell_version" = "5" ]; then
                                 echo -e "Snell v4 + ShadowTLS = snell, ${server_ip}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3"
@@ -956,7 +998,8 @@ view_config() {
                             # 检查服务状态
                             local service_status=$(svc_is_active "shadowtls-snell-${port}")
                             if [ "$service_status" = "active" ]; then
-                                echo -e "\n${GREEN}服务状态：正在运行${RESET}"
+                                echo -e "
+${GREEN}服务状态：正在运行${RESET}"
                                 # 检查端口占用情况
                                 local port_usage=$(netstat -tuln | grep ":${stls_port}")
                                 local port_count=$(echo "$port_usage" | wc -l)
@@ -966,7 +1009,8 @@ view_config() {
                                     netstat -tuln | grep ":${stls_port}"
                                 fi
                             else
-                                echo -e "\n${RED}服务状态：未运行${RESET}"
+                                echo -e "
+${RED}服务状态：未运行${RESET}"
                                 echo -e "${YELLOW}请尝试以下命令重启服务：${RESET}"
                                 echo -e "svc_restart shadowtls-snell-${port}"
                             fi
@@ -974,44 +1018,52 @@ view_config() {
                             echo -e "${RED}配置文件不完整或已损坏${RESET}"
                         fi
                     else
-                        echo -e "\n${YELLOW}未找到用户 (端口: ${port}) 的 ShadowTLS 配置${RESET}"
+                        echo -e "
+${YELLOW}未找到用户 (端口: ${port}) 的 ShadowTLS 配置${RESET}"
                     fi
                 fi
             done <<< "$user_configs"
         else
-            echo -e "\n${YELLOW}未找到有效的 Snell 用户配置${RESET}"
+            echo -e "
+${YELLOW}未找到有效的 Snell 用户配置${RESET}"
         fi
     fi
     
     # 显示服务状态
-    echo -e "\n${YELLOW}=== ShadowTLS 服务状态 ===${RESET}"
+    echo -e "
+${YELLOW}=== ShadowTLS 服务状态 ===${RESET}"
     
     # 显示 SS 服务状态
     if [ -f "$ss_service" ]; then
-        echo -e "\n${YELLOW}SS 服务状态：${RESET}"
+        echo -e "
+${YELLOW}SS 服务状态：${RESET}"
         svc_status shadowtls-ss
         
         # 如果服务未运行，显示重启命令
         if [ "$(svc_is_active shadowtls-ss)" != "active" ]; then
-            echo -e "\n${YELLOW}SS 服务未运行，请尝试以下命令重启：${RESET}"
+            echo -e "
+${YELLOW}SS 服务未运行，请尝试以下命令重启：${RESET}"
             echo -e "svc_restart shadowtls-ss"
         fi
     fi
     
     # 显示所有 Snell 服务状态（避免重复显示）
     if [ ! -z "$snell_services" ]; then
-        echo -e "\n${YELLOW}Snell 服务状态：${RESET}"
+        echo -e "
+${YELLOW}Snell 服务状态：${RESET}"
         declare -A shown_services
         while IFS= read -r service_file; do
             local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
             if [ -z "${shown_services[$port]}" ]; then
                 shown_services[$port]=1
-                echo -e "\n${GREEN}Snell 端口 ${port} 的 ShadowTLS 服务状态：${RESET}"
+                echo -e "
+${GREEN}Snell 端口 ${port} 的 ShadowTLS 服务状态：${RESET}"
                 svc_status "shadowtls-snell-${port}"
                 
                 # 如果服务未运行，显示重启命令
                 if [ "$(svc_is_active shadowtls-snell-${port})" != "active" ]; then
-                    echo -e "\n${YELLOW}服务未运行，请尝试以下命令重启：${RESET}"
+                    echo -e "
+${YELLOW}服务未运行，请尝试以下命令重启：${RESET}"
                     echo -e "svc_restart shadowtls-snell-${port}"
                 fi
             fi
@@ -1049,7 +1101,8 @@ add_shadowtls_config() {
     
     # 让用户选择要为哪个协议新增 ShadowTLS 配置
     while true; do
-        echo -e "\n${YELLOW}请选择要新增配置的协议：${RESET}"
+        echo -e "
+${YELLOW}请选择要新增配置的协议：${RESET}"
         if $has_ss && ! $has_ss_stls; then
             echo -e "1. 为 Shadowsocks 新增 ShadowTLS 配置"
         fi
@@ -1122,7 +1175,8 @@ add_shadowtls_config() {
                 fi
                 
                 # 显示所有未配置的 Snell 端口
-                echo -e "\n${YELLOW}未配置 ShadowTLS 的 Snell 端口列表：${RESET}"
+                echo -e "
+${YELLOW}未配置 ShadowTLS 的 Snell 端口列表：${RESET}"
                 local port_list=()
                 local port_count=0
                 while IFS='|' read -r port psk; do
@@ -1142,7 +1196,8 @@ add_shadowtls_config() {
                 fi
                 
                 # 让用户选择要配置的端口
-                echo -e "\n${YELLOW}请选择要配置的端口：${RESET}"
+                echo -e "
+${YELLOW}请选择要配置的端口：${RESET}"
                 echo -e "1-${#port_list[@]}. 选择单个端口"
                 echo -e "0. 为所有未配置端口配置 ShadowTLS"
                 
@@ -1151,7 +1206,8 @@ add_shadowtls_config() {
                 if [ "$port_choice" = "0" ]; then
                     # 为所有未配置端口配置 ShadowTLS
                     for port in "${port_list[@]}"; do
-                        echo -e "\n${YELLOW}为 Snell 端口 ${port} 配置 ShadowTLS${RESET}"
+                        echo -e "
+${YELLOW}为 Snell 端口 ${port} 配置 ShadowTLS${RESET}"
                         while true; do
                             read -rp "请输入 ShadowTLS 监听端口 (1-65535，直接回车随机生成): " stls_port
                             
@@ -1176,7 +1232,8 @@ add_shadowtls_config() {
                 elif [[ "$port_choice" =~ ^[0-9]+$ ]] && [ "$port_choice" -ge 1 ] && [ "$port_choice" -le ${#port_list[@]} ]; then
                     # 为选中的端口配置 ShadowTLS
                     local selected_port="${port_list[$((port_choice-1))]}"
-                    echo -e "\n${YELLOW}为 Snell 端口 ${selected_port} 配置 ShadowTLS${RESET}"
+                    echo -e "
+${YELLOW}为 Snell 端口 ${selected_port} 配置 ShadowTLS${RESET}"
                     while true; do
                         read -rp "请输入 ShadowTLS 监听端口 (1-65535，直接回车随机生成): " stls_port
                         
@@ -1211,7 +1268,8 @@ add_shadowtls_config() {
     
     # 重新加载 systemd 配置
     svc_reload
-    echo -e "\n${GREEN}新增配置完成${RESET}"
+    echo -e "
+${GREEN}新增配置完成${RESET}"
 }
 
 # 重启 ShadowTLS 服务
@@ -1223,7 +1281,8 @@ restart_shadowtls_services() {
     # 重启 SS 服务
     if [ -f "$(svc_file_path shadowtls-ss)" ]; then
         has_services=true
-        echo -e "\n${YELLOW}重启 Shadowsocks 的 ShadowTLS 服务...${RESET}"
+        echo -e "
+${YELLOW}重启 Shadowsocks 的 ShadowTLS 服务...${RESET}"
         svc_restart shadowtls-ss
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}Shadowsocks ShadowTLS 服务重启成功${RESET}"
@@ -1236,7 +1295,8 @@ restart_shadowtls_services() {
     local snell_services=$(svc_find_services "shadowtls-snell-*" 2>/dev/null)
     if [ ! -z "$snell_services" ]; then
         has_services=true
-        echo -e "\n${YELLOW}重启 Snell 的 ShadowTLS 服务...${RESET}"
+        echo -e "
+${YELLOW}重启 Snell 的 ShadowTLS 服务...${RESET}"
         while IFS= read -r service_file; do
             local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
             echo -e "重启端口 ${port} 的服务..."
@@ -1254,19 +1314,23 @@ restart_shadowtls_services() {
         return 1
     fi
     
-    echo -e "\n${GREEN}所有服务重启完成${RESET}"
+    echo -e "
+${GREEN}所有服务重启完成${RESET}"
     
     # 显示所有服务状态
-    echo -e "\n${YELLOW}服务状态：${RESET}"
+    echo -e "
+${YELLOW}服务状态：${RESET}"
     if [ -f "$(svc_file_path shadowtls-ss)" ]; then
-        echo -e "\n${CYAN}Shadowsocks ShadowTLS 服务状态：${RESET}"
+        echo -e "
+${CYAN}Shadowsocks ShadowTLS 服务状态：${RESET}"
         svc_status shadowtls-ss
     fi
     
     if [ ! -z "$snell_services" ]; then
         while IFS= read -r service_file; do
             local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
-            echo -e "\n${CYAN}Snell 端口 ${port} 的 ShadowTLS 服务状态：${RESET}"
+            echo -e "
+${CYAN}Snell 端口 ${port} 的 ShadowTLS 服务状态：${RESET}"
             svc_status "shadowtls-snell-${port}"
         done <<< "$snell_services"
     fi
@@ -1275,7 +1339,8 @@ restart_shadowtls_services() {
 # 主菜单
 main_menu() {
     while true; do
-        echo -e "\n${CYAN}ShadowTLS 管理菜单${RESET}"
+        echo -e "
+${CYAN}ShadowTLS 管理菜单${RESET}"
         echo -e "${YELLOW}1. 安装 ShadowTLS${RESET}"
         echo -e "${YELLOW}2. 卸载 ShadowTLS${RESET}"
         echo -e "${YELLOW}3. 查看配置${RESET}"
