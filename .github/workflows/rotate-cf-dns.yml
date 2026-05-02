@@ -3,7 +3,7 @@ name: Rotate Cloudflare DNS (Beijing Time)
 on:
   schedule:
     - cron: "0 17 * * *"   # 北京时间 01:00 (UTC 17:00)
-    - cron: "3 5 * * *"   # 北京时间 13:03 (UTC 23:03)
+    - cron: "3 5 * * *"   # 北京时间 13:03 (UTC 05:03)
   workflow_dispatch:
 
 jobs:
