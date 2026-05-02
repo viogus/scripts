@@ -347,10 +347,16 @@ update_anytls() {
     fi
 
     local port pass
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        print_error "配置文件 ${CONFIG_FILE} 不存在，无法更新"
+        return
+    fi
     port="$(sed -nE 's/^[[:space:]]*listen:[[:space:]]*.*:([0-9]+)[[:space:]]*$/\1/p' "${CONFIG_FILE}" || true)"
     pass="$(sed -nE 's/^[[:space:]]*password:[[:space:]]*(.*)$/\1/p' "${CONFIG_FILE}" || true)"
-    [[ -z "${port}" ]] && port="$(random_port)"
-    [[ -z "${pass}" ]] && pass="$(gen_password)"
+    if [[ -z "${port}" || -z "${pass}" ]]; then
+        print_error "无法读取配置文件中的端口或密码，取消更新"
+        return
+    fi
 
     local arch latest url filename out
     arch="$(get_arch)" || exit 1
@@ -363,7 +369,7 @@ update_anytls() {
     mkdir -p "${SNAP_DIR}"
 
     print_info "正在下载 AnyTLS..."
-    curl -L -o "$out" "$url"
+    curl -L --connect-timeout 10 --max-time 120 -o "$out" "$url"
     judge "下载AnyTLS"
 
     unzip -o "$out" -d "$SNAP_DIR" >/dev/null

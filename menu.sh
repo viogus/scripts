@@ -471,9 +471,14 @@ uninstall_hysteria() {
         rm -f "/lib/systemd/system/${HY2_SERVICE_NAME}.service"
         rm -f "/etc/systemd/system/${HY2_SERVICE_NAME}.service"
         rm -f "/usr/local/bin/hysteria"
+        if [[ -f "/etc/hysteria/port_hop" ]]; then
+            local hop_range; hop_range=$(cat "/etc/hysteria/port_hop")
+            iptables -t nat -D PREROUTING -p udp --dport "$hop_range" -j DNAT --to-destination ":" 2>/dev/null || true
+            ip6tables -t nat -D PREROUTING -p udp --dport "$hop_range" -j DNAT --to-destination ":" 2>/dev/null || true
+            netfilter-persistent save 2>/dev/null || true
+        fi
+        rm -f /root/cert.crt /root/private.key /root/ca.log 2>/dev/null || true
         rm -rf "/etc/hysteria" "/root/hy"
-        iptables -t nat -F PREROUTING 2>/dev/null || true
-        netfilter-persistent save 2>/dev/null || true
         systemctl daemon-reload 2>/dev/null || true
         echo -e "${GREEN}Hysteria 2 卸载完成！${RESET}"
     else

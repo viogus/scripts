@@ -88,11 +88,11 @@ install_deps() {
 
     if [[ "$os_type" == "debian" ]]; then
         apt-get update -y
-        apt-get install -y curl wget sudo qrencode procps iptables-persistent netfilter-persistent openssl
+        DEBIAN_FRONTEND=noninteractive apt-get install -y curl wget sudo procps iptables-persistent netfilter-persistent openssl
     elif [[ "$os_type" == "rhel" ]]; then
         yum -y update || dnf -y update
-        yum -y install curl wget sudo qrencode procps iptables-persistent netfilter-persistent openssl || \
-            dnf -y install curl wget sudo qrencode procps iptables-persistent netfilter-persistent openssl
+        yum -y install curl wget sudo procps iptables-services openssl || \
+            dnf -y install curl wget sudo procps iptables-services openssl
     else
         print_error "不支持的操作系统"; exit 1
     fi
@@ -181,7 +181,7 @@ setup_cert() {
             mkdir -p "${CONFIG_DIR}"
             openssl ecparam -genkey -name prime256v1 -out "$key_path"
             openssl req -new -x509 -days 36500 -key "$key_path" -out "$cert_path" -subj "/CN=www.bing.com"
-            chmod 644 "$cert_path" "$key_path"
+            chmod 644 "$cert_path"; chmod 600 "$key_path"
             hy_domain="www.bing.com"
             print_ok "自签证书生成完毕"
             ;;
@@ -226,6 +226,7 @@ setup_port_hopping() {
                 iptables -t nat -A PREROUTING -p udp --dport "$firstport:$endport" -j DNAT --to-destination ":${1}"
                 ip6tables -t nat -A PREROUTING -p udp --dport "$firstport:$endport" -j DNAT --to-destination ":${1}" 2>/dev/null || true
                 netfilter-persistent save >/dev/null 2>&1 || true
+                echo "${firstport}:${endport}" > "${CONFIG_DIR}/port_hop"
                 print_ok "端口跳跃已配置: ${firstport}-${endport}"
                 echo "${firstport}-${endport}"
                 return
@@ -255,9 +256,7 @@ setup_masquerade() {
 # ============================================
 
 write_config() {
-    local port="$1" pwd="$2" cert="$3" key="$4" site="$5"
-
-    mkdir -p "${CONFIG_DIR}" "${CLIENT_DIR}"
+    local port="$1" pwd="$2" cert="$3" key="$4" site="$5" sni_domain="$6" ph_range="$7"
 
     cat > "${CONFIG_FILE}" <<EOF
 listen: :${port}
@@ -288,7 +287,7 @@ EOF
     [[ -n $(echo "$ip" | grep ":") ]] && last_ip="[$ip]"
 
     local last_port="$port"
-    [[ -n "${hop_range:-}" ]] && last_port="${port},${hop_range}"
+    [[ -n "${ph_range:-}" ]] && last_port="${port},${ph_range}"
 
     cat > "${CLIENT_YAML}" <<EOF
 server: ${last_ip}:${last_port}
@@ -296,7 +295,7 @@ server: ${last_ip}:${last_port}
 auth: ${pwd}
 
 tls:
-  sni: ${hy_domain}
+  sni: ${sni_domain}
   insecure: true
 
 quic:
@@ -320,7 +319,7 @@ EOF
   "server": "${last_ip}:${last_port}",
   "auth": "${pwd}",
   "tls": {
-    "sni": "${hy_domain}",
+    "sni": "${sni_domain}",
     "insecure": true
   },
   "quic": {
@@ -340,7 +339,7 @@ EOF
 }
 EOF
 
-    local url="hysteria2://${pwd}@${last_ip}:${port}/?insecure=1&sni=${hy_domain}#Hysteria2"
+    local url="hysteria2://${pwd}@${last_ip}:${port}/?insecure=1&sni=${sni_domain}#Hysteria2"
     echo "$url" > "${URL_FILE}"
 }
 
@@ -402,6 +401,8 @@ install_hysteria() {
         systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
     fi
 
+    mkdir -p "${CONFIG_DIR}" "${CLIENT_DIR}"
+
     print_info "安装依赖..."
     install_deps
 
@@ -418,7 +419,7 @@ install_hysteria() {
     site=$(setup_masquerade)
 
     print_info "生成配置..."
-    write_config "$port" "$pwd" "$cert_path" "$key_path" "$site"
+    write_config "$port" "$pwd" "$cert_path" "$key_path" "$site" "${hy_domain}" "${hop_range:-}"
 
     reload_service
     print_ok "Hysteria 2 安装完成！"
@@ -438,9 +439,19 @@ uninstall_hysteria() {
     rm -f "/lib/systemd/system/${SERVICE_NAME}.service"
     rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
     rm -f "/usr/local/bin/hysteria"
+
+    # 清理端口跳跃规则（精确删除，不影响其他服务）
+    if [[ -f "${CONFIG_DIR}/port_hop" ]]; then
+        local hop_range; hop_range=$(cat "${CONFIG_DIR}/port_hop")
+        iptables -t nat -D PREROUTING -p udp --dport "$hop_range" -j DNAT --to-destination ":" 2>/dev/null || true
+        ip6tables -t nat -D PREROUTING -p udp --dport "$hop_range" -j DNAT --to-destination ":" 2>/dev/null || true
+        netfilter-persistent save >/dev/null 2>&1 || true
+    fi
+
+    # 清理 ACME 证书（如果存在）
+    rm -f /root/cert.crt /root/private.key /root/ca.log 2>/dev/null || true
+
     rm -rf "${CONFIG_DIR}" "${CLIENT_DIR}"
-    iptables -t nat -F PREROUTING >/dev/null 2>&1 || true
-    netfilter-persistent save >/dev/null 2>&1 || true
     systemctl daemon-reload
 
     print_ok "Hysteria 2 卸载完成。"
@@ -489,18 +500,17 @@ restart_service() {
 
 change_port() {
     if ! is_installed; then print_error "未安装"; return; fi
-    local old_port new_port
+    local old_port new_port ip sni pwd
     old_port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${CONFIG_FILE}" 2>/dev/null || true)
     new_port=$(setup_port)
+    ip=$(get_ip)
+    sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+    pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
 
-    sed -i "s/:${old_port}/:${new_port}/" "${CONFIG_FILE}"
-    sed -i "s/:${old_port}/:${new_port}/" "${CLIENT_YAML}" 2>/dev/null || true
-    sed -i "s/:${old_port}/:${new_port}/" "${CLIENT_JSON}" 2>/dev/null || true
+    sed -i "s/^listen: :${old_port}$/listen: :${new_port}/" "${CONFIG_FILE}"
+    sed -i "s/^server: .*:${old_port}$/server: ${ip}:${new_port}/" "${CLIENT_YAML}" 2>/dev/null || true
+    sed -i "s/\"server\": \".*:${old_port}\"/\"server\": \"${ip}:${new_port}\"/" "${CLIENT_JSON}" 2>/dev/null || true
 
-    # 更新 URL
-    local ip; ip=$(get_ip)
-    local sni; sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
-    local pwd; pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
     echo "hysteria2://${pwd}@${ip}:${new_port}/?insecure=1&sni=${sni}#Hysteria2" > "${URL_FILE}"
 
     restart_service
