@@ -21,6 +21,7 @@ fi
 
 # ================= Init 系统检测 =================
 
+# 加载共享库（本地 > 系统 > GitHub > 内联兜底）
 LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
 if [ -f "$LIB_DIR/svc-utils.sh" ]; then
     . "$LIB_DIR/svc-utils.sh"
