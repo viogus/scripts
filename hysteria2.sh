@@ -70,7 +70,7 @@ detect_os() {
     elif grep -qi "centos\|red hat\|rhel\|alma\|rocky\|fedora\|amazon" /etc/os-release 2>/dev/null; then
         echo "rhel"
     else
-        echo "systemd"
+        echo "unknown"
     fi
 }
 

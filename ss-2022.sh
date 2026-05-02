@@ -29,20 +29,23 @@ MAINLAND_BLOCK_REPO_URL="https://raw.githubusercontent.com/viogus/scripts/main/b
 MAINLAND_EXTRACT_REPO_URL="https://raw.githubusercontent.com/viogus/scripts/main/extract-cn-ip-from-mmdb.py"
 
 # 颜色定义
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly CYAN='\033[0;36m'
-readonly PLAIN='\033[0m'
-readonly RESET='\033[0m'
-readonly BOLD='\033[1m'
+[ -z "${RED:-}" ] && {
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+PLAIN='\033[0m'
+RESET='\033[0m'
+BOLD='\033[1m'
+}
+RED_BG='\033[41;37m'
 
 # 状态提示
-readonly INFO="${GREEN}[信息]${PLAIN}"
-readonly ERROR="${RED}[错误]${PLAIN}"
-readonly WARNING="${YELLOW}[警告]${PLAIN}"
-readonly SUCCESS="${GREEN}[成功]${PLAIN}"
+INFO="${GREEN}[信息]${PLAIN}"
+ERROR="${RED}[错误]${PLAIN}"
+WARNING="${YELLOW}[警告]${PLAIN}"
+SUCCESS="${GREEN}[成功]${PLAIN}"
 
 # 系统信息
 OS_TYPE=""
@@ -556,7 +559,7 @@ set_port() {
     fi
     
     echo && echo "=================================="
-    echo -e "端口：${Red_background_prefix} ${SS_PORT} ${RESET}"
+    echo -e "端口：${RED_BG} ${SS_PORT} ${RESET}"
     echo "=================================="
     
     # 检查并配置防火墙
@@ -607,7 +610,7 @@ set_password() {
     fi
     
     echo && echo "=================================="
-    echo -e "密码：${Red_background_prefix} ${SS_PASSWORD} ${RESET}"
+    echo -e "密码：${RED_BG} ${SS_PASSWORD} ${RESET}"
     echo "==================================" && echo
 }
 
@@ -660,7 +663,7 @@ set_method() {
     esac
     
     echo && echo "=================================="
-    echo -e "加密：${Red_background_prefix} ${SS_METHOD} ${RESET}"
+    echo -e "加密：${RED_BG} ${SS_METHOD} ${RESET}"
     echo "==================================" && echo
 }
 
@@ -681,7 +684,7 @@ set_tfo() {
     fi
     
     echo && echo "=================================="
-    echo -e "TFO：${Red_background_prefix} ${SS_TFO} ${RESET}"
+    echo -e "TFO：${RED_BG} ${SS_TFO} ${RESET}"
     echo "==================================" && echo
 }
 
@@ -700,12 +703,12 @@ set_dns() {
         read -e -p "(默认：8.8.8.8)：" SS_DNS
         [[ -z "${SS_DNS}" ]] && SS_DNS="8.8.8.8"
         echo && echo "=================================="
-        echo -e "DNS：${Red_background_prefix} ${SS_DNS} ${RESET}"
+        echo -e "DNS：${RED_BG} ${SS_DNS} ${RESET}"
         echo "==================================" && echo
     else
         SS_DNS=""
         echo && echo "=================================="
-        echo -e "DNS：${Red_background_prefix} 使用系统默认 DNS ${RESET}"
+        echo -e "DNS：${RED_BG} 使用系统默认 DNS ${RESET}"
         echo "==================================" && echo
     fi
 }
@@ -814,7 +817,7 @@ Install() {
     start_service
     
     if [[ "$?" == "0" ]]; then
-        echo -e "${Success} Shadowsocks Rust 安装并启动成功！"
+        echo -e "${SUCCESS} Shadowsocks Rust 安装并启动成功！"
         View
         echo -e "${GREEN}[信息]${RESET} 您可以使用 ${GREEN}ssrust${RESET} 命令进行管理"
         Before_Start_Menu
@@ -896,7 +899,7 @@ Update() {
             detect_arch
             download_ss "${new_ver#v}" "${OS_ARCH}"
             svc_restart ss-rust
-            echo -e "${Success} Shadowsocks Rust 已更新到最新版本 [ ${new_ver} ]"
+            echo -e "${SUCCESS} Shadowsocks Rust 已更新到最新版本 [ ${new_ver} ]"
         else
             echo -e "${GREEN}[信息]${RESET} 已取消更新"
         fi
@@ -1150,7 +1153,7 @@ Update_Shell() {
             # 更新脚本
             mv -f ${temp_file} "${SCRIPT_PATH}/${SCRIPT_NAME}"
             chmod +x "${SCRIPT_PATH}/${SCRIPT_NAME}"
-            echo -e "${Success} 脚本已更新至 [ ${sh_new_ver} ]"
+            echo -e "${SUCCESS} 脚本已更新至 [ ${sh_new_ver} ]"
             echo -e "${GREEN}[信息]${RESET} 2秒后执行新脚本..."
             sleep 2s
             exec "${SCRIPT_PATH}/${SCRIPT_NAME}"
@@ -1215,7 +1218,7 @@ install_mainland_block_scripts() {
     fi
 
     chmod +x "${MAINLAND_BLOCK_SCRIPT}" "${MAINLAND_EXTRACT_SCRIPT}"
-    echo -e "${Success} 大陆IP屏蔽脚本部署完成"
+    echo -e "${SUCCESS} 大陆IP屏蔽脚本部署完成"
     return 0
 }
 
@@ -1261,14 +1264,14 @@ mainland_block_menu() {
         case "${mainland_num}" in
             1)
                 if run_mainland_block_cmd "enable"; then
-                    echo -e "${Success} 大陆IP屏蔽启用完成"
+                    echo -e "${SUCCESS} 大陆IP屏蔽启用完成"
                 else
                     echo -e "${RED}[错误]${RESET} 大陆IP屏蔽启用失败"
                 fi
                 ;;
             2)
                 if run_mainland_block_cmd "update"; then
-                    echo -e "${Success} 大陆IP库更新完成"
+                    echo -e "${SUCCESS} 大陆IP库更新完成"
                 else
                     echo -e "${RED}[错误]${RESET} 大陆IP库更新失败"
                 fi
@@ -1278,7 +1281,7 @@ mainland_block_menu() {
                 ;;
             4)
                 if run_mainland_block_cmd "disable"; then
-                    echo -e "${Success} 大陆IP屏蔽已禁用"
+                    echo -e "${SUCCESS} 大陆IP屏蔽已禁用"
                 else
                     echo -e "${RED}[错误]${RESET} 禁用失败"
                 fi
