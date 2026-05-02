@@ -1,5 +1,6 @@
 #!/bin/bash
 # =========================================
+[[ "${BASH_VERSINFO[0]:-0}" -lt 4 ]] && { echo "需要 Bash 4.0 或更高版本"; exit 1; }
 # 作者: jinqians + viogus
 # 日期: 2025年2月 / 2026年5月
 # 网站：jinqians.com / github.com/viogus

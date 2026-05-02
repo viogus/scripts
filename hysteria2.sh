@@ -453,6 +453,9 @@ show_config() {
     echo -e "${GREEN}Surge 格式：${RESET}"
     echo "Proxy-Hysteria = hysteria2, ${ip}, ${port}, password=${pwd}, sni=${sni}"
     echo ""
+    echo -e "${YELLOW}⚠ 当前使用自签证书 + insecure 模式，仅防运营商 QoS，不防中间人攻击。${RESET}"
+    echo -e "${YELLOW}如需安全传输，请使用 ACME 申请受信证书，并在客户端配置中移除 insecure。${RESET}"
+    echo ""
     echo -e "${CYAN}========================================${RESET}"
     echo -e "${YELLOW}完整配置已保存至：${RESET}"
     echo -e "  YAML: ${CLIENT_YAML}"
@@ -629,9 +632,10 @@ change_password() {
     old_pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
     new_pwd=$(setup_password)
 
-    sed -i "s/${old_pwd}/${new_pwd}/" "${CONFIG_FILE}"
-    sed -i "s/${old_pwd}/${new_pwd}/" "${CLIENT_YAML}" 2>/dev/null || true
-    sed -i "s/${old_pwd}/${new_pwd}/" "${CLIENT_JSON}" 2>/dev/null || true
+    # 使用 awk 做字面值替换（避免 sed 中 / & \ 等特殊字符导致异常）
+    for f in "${CONFIG_FILE}" "${CLIENT_YAML}" "${CLIENT_JSON}"; do
+        [[ -f "$f" ]] && awk -v old="$old_pwd" -v new="$new_pwd" '{gsub(old, new)}1' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+    done
 
     # 更新 URL
     local ip; ip=$(get_ip)
