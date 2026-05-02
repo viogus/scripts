@@ -412,7 +412,7 @@ svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" d
 svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; fi; else systemctl is-active "$1" 2>/dev/null || echo "inactive"; fi; }
 svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
 svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
-svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null; fi; }
+svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi; }
 svc_list_match() { if [[ "$(detect_init)" == "openrc" ]]; then rc-status -s 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; else systemctl list-units --type=service --all --no-legend 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; fi; }
 
 write_openrc_snell() {

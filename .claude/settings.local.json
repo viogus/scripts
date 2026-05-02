@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -A3 'local main_pid=\\\\$\\(svc_main_pid' snell.sh)",
+      "Bash(grep -A3 'local user_pid=\\\\$\\(svc_main_pid' snell.sh)",
+      "Bash(grep -A3 'local stls_pid=\\\\$\\(svc_main_pid' snell.sh)"
+    ]
+  }
+}

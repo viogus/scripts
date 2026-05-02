@@ -415,8 +415,7 @@ uninstall_snell() {
             fi
         done
     fi
-    rm -f "/lib/systemd/system/snell.service" "/etc/init.d/snell"
-    rm -f "/etc/systemd/system/snell.service" "/etc/init.d/snell"
+    rm -f "/lib/systemd/system/snell.service" "/etc/systemd/system/snell.service" "/etc/init.d/snell"
     rm -f /usr/local/bin/snell-server
     rm -rf /usr/local/etc/snell
     rm -f /usr/local/bin/snell
