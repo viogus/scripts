@@ -12,8 +12,8 @@ set -euo pipefail
 # ============================================
 # 常量
 # ============================================
-CONFIG_DIR="/etc/AnyTLS"
-BINARY="${CONFIG_DIR}/server"
+CONFIG_DIR="/usr/local/etc/anytls"
+BINARY="/usr/local/bin/anytls-server"
 SERVICE_NAME="anytls"
 SYSTEMD_UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
 OPENRC_INIT="/etc/init.d/${SERVICE_NAME}"
@@ -250,7 +250,7 @@ write_openrc() {
 #!/sbin/openrc-run
 name="AnyTLS"
 description="AnyTLS server"
-command="/etc/AnyTLS/server"
+command="/usr/local/bin/anytls-server"
 command_background="yes"
 pidfile="/run/anytls.pid"
 output_log="/var/log/anytls.log"

@@ -3,10 +3,10 @@ set -e
 
 # =========================================================
 # VLESS Reality 一键菜单脚本（终极完整版）
-# Author: jinqians
+# Author: jinqians + viogus
 # =========================================================
 
-SCRIPT_REMOTE_URL="https://raw.githubusercontent.com/jinqians/vless/refs/heads/main/vless.sh"
+SCRIPT_REMOTE_URL="https://raw.githubusercontent.com/viogus/scripts/main/vless.sh"
 
 CONFIG_DIR="/usr/local/etc/xray"
 CONFIG_FILE="$CONFIG_DIR/config.json"

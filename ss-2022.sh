@@ -2,9 +2,9 @@
 set -e
 
 # =========================================
-# 作者: jinqians
-# 日期: 2025年3月
-# 网站：jinqians.com
+# 作者: jinqians + viogus
+# 日期: 2025年3月 / 2026年5月
+# 网站：jinqians.com / github.com/viogus
 # 描述: Shadowsocks Rust 管理脚本
 # =========================================
 
@@ -18,15 +18,15 @@ SCRIPT_DIR=$(dirname "${SCRIPT_PATH}")
 SCRIPT_NAME=$(basename "$0")
 
 # 安装路径
-INSTALL_DIR="/etc/ss-rust"
+INSTALL_DIR="/usr/local/etc/ss-rust"
 BINARY_PATH="/usr/local/bin/ss-rust"
-CONFIG_PATH="/etc/ss-rust/config.json"
-VERSION_FILE="/etc/ss-rust/ver.txt"
+CONFIG_PATH="/usr/local/etc/ss-rust/config.json"
+VERSION_FILE="/usr/local/etc/ss-rust/ver.txt"
 SYSCTL_CONF="/etc/sysctl.d/local.conf"
 MAINLAND_BLOCK_SCRIPT="/usr/local/bin/block-mainland.sh"
 MAINLAND_EXTRACT_SCRIPT="/usr/local/bin/extract-cn-ip-from-mmdb.py"
-MAINLAND_BLOCK_REPO_URL="https://raw.githubusercontent.com/jinqians/ss-2022.sh/refs/heads/main/block-mainland.sh"
-MAINLAND_EXTRACT_REPO_URL="https://raw.githubusercontent.com/jinqians/ss-2022.sh/refs/heads/main/extract-cn-ip-from-mmdb.py"
+MAINLAND_BLOCK_REPO_URL="https://raw.githubusercontent.com/viogus/scripts/main/block-mainland.sh"
+MAINLAND_EXTRACT_REPO_URL="https://raw.githubusercontent.com/viogus/scripts/main/extract-cn-ip-from-mmdb.py"
 
 # 颜色定义
 readonly RED='\033[0;31m'

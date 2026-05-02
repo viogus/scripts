@@ -1,8 +1,8 @@
 #!/bin/bash
 # =========================================
-# 作者: jinqians
-# 日期: 2025年2月
-# 网站：jinqians.com
+# 作者: jinqians + viogus
+# 日期: 2025年2月 / 2026年5月
+# 网站：jinqians.com / github.com/viogus
 # 描述: 这个脚本用于安装、卸载、查看和更新 Snell 代理
 # =========================================
 
@@ -177,9 +177,9 @@ detect_installed_snell_version() {
 # === 新增：备份和还原配置函数 ===
 # 备份 Snell 配置
 backup_snell_config() {
-    local backup_dir="/etc/snell/backup_$(date +%Y%m%d_%H%M%S)"
+    local backup_dir="${SNELL_CONF_DIR}/backup_$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$backup_dir"
-    cp -a /etc/snell/users/*.conf "$backup_dir"/ 2>/dev/null
+    cp -a ${SNELL_CONF_DIR}/users/*.conf "$backup_dir"/ 2>/dev/null
     echo "$backup_dir"
 }
 
@@ -187,7 +187,7 @@ backup_snell_config() {
 restore_snell_config() {
     local backup_dir="$1"
     if [ -d "$backup_dir" ]; then
-        cp -a "$backup_dir"/*.conf /etc/snell/users/
+        cp -a "$backup_dir"/*.conf ${SNELL_CONF_DIR}/users/
         echo -e "${GREEN}配置已从备份恢复。${RESET}"
     else
         echo -e "${RED}未找到备份目录，无法恢复配置。${RESET}"
@@ -230,7 +230,7 @@ check_curl() {
 # 定义系统路径
 INSTALL_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
-SNELL_CONF_DIR="/etc/snell"
+SNELL_CONF_DIR="/usr/local/etc/snell"
 SNELL_CONF_FILE="${SNELL_CONF_DIR}/users/snell-main.conf"
 SYSTEMD_SERVICE_FILE="${SYSTEMD_DIR}/snell.service"
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 # =========================================
-# 作者: jinqians
-# 日期: 2025年3月16
-# 网站：jinqians.com
+# 作者: jinqians + viogus
+# 日期: 2025年3月16 / 2026年5月
+# 网站：jinqians.com / github.com/viogus
 # 描述: 这个脚本用于安装和管理 ShadowTLS V3
 # =========================================
 
@@ -16,13 +16,14 @@ RESET='\033[0m'
 # 定义系统路径
 INSTALL_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
-CONFIG_DIR="/etc/shadowtls"
+CONFIG_DIR="/usr/local/etc/shadowtls"
 SERVICE_FILE="${SYSTEMD_DIR}/shadowtls.service"
 
 # 定义配置目录
-SNELL_CONF_DIR="/etc/snell"
+SNELL_CONF_DIR="/usr/local/etc/snell"
 SNELL_CONF_FILE="${SNELL_CONF_DIR}/users/snell-main.conf"
 USERS_DIR="${SNELL_CONF_DIR}/users"
+SSRUST_CONF="/usr/local/etc/ss-rust/config.json"
 
 # 检查是否以 root 权限运行
 check_root() {
@@ -76,7 +77,7 @@ check_snell() {
 
 # 获取 SS 端口
 get_ssrust_port() {
-    local ssrust_conf="/etc/ss-rust/config.json"
+    local ssrust_conf="${SSRUST_CONF}"
     if [ ! -f "$ssrust_conf" ]; then
         return 1
     fi
@@ -86,7 +87,7 @@ get_ssrust_port() {
 
 # 获取 SS 密码
 get_ssrust_password() {
-    local ssrust_conf="/etc/ss-rust/config.json"
+    local ssrust_conf="${SSRUST_CONF}"
     if [ ! -f "$ssrust_conf" ]; then
         return 1
     fi
@@ -96,7 +97,7 @@ get_ssrust_password() {
 
 # 获取 SS 加密方式
 get_ssrust_method() {
-    local ssrust_conf="/etc/ss-rust/config.json"
+    local ssrust_conf="${SSRUST_CONF}"
     if [ ! -f "$ssrust_conf" ]; then
         return 1
     fi
@@ -113,7 +114,7 @@ get_snell_port() {
 
 # 获取 Snell PSK
 get_snell_psk() {
-    local snell_conf="/etc/snell/users/snell-main.conf"
+    local snell_conf="${SNELL_CONF_DIR}/users/snell-main.conf"
     if [ ! -f "$snell_conf" ]; then
         return 1
     fi
@@ -1078,7 +1079,7 @@ add_shadowtls_config() {
                         
                         # 显示配置信息
                         local server_ip=$(get_server_ip)
-                        local psk=$(grep -E "^psk = " "/etc/snell/users/snell-${port}.conf" 2>/dev/null | sed 's/psk = //' || grep -E "^psk = " "/etc/snell/users/snell-main.conf" 2>/dev/null | sed 's/psk = //')
+                        local psk=$(grep -E "^psk = " "${SNELL_CONF_DIR}/users/snell-${port}.conf" 2>/dev/null | sed 's/psk = //' || grep -E "^psk = " "${SNELL_CONF_DIR}/users/snell-main.conf" 2>/dev/null | sed 's/psk = //')
                         generate_snell_links "${server_ip}" "${stls_port}" "${psk}" "${password}" "${tls_domain}" "${port}"
                     done
                 elif [[ "$port_choice" =~ ^[0-9]+$ ]] && [ "$port_choice" -ge 1 ] && [ "$port_choice" -le ${#port_list[@]} ]; then
@@ -1103,7 +1104,7 @@ add_shadowtls_config() {
                     
                     # 显示配置信息
                     local server_ip=$(get_server_ip)
-                    local psk=$(grep -E "^psk = " "/etc/snell/users/snell-${selected_port}.conf" 2>/dev/null | sed 's/psk = //' || grep -E "^psk = " "/etc/snell/users/snell-main.conf" 2>/dev/null | sed 's/psk = //')
+                    local psk=$(grep -E "^psk = " "${SNELL_CONF_DIR}/users/snell-${selected_port}.conf" 2>/dev/null | sed 's/psk = //' || grep -E "^psk = " "${SNELL_CONF_DIR}/users/snell-main.conf" 2>/dev/null | sed 's/psk = //')
                     generate_snell_links "${server_ip}" "${stls_port}" "${psk}" "${password}" "${tls_domain}" "${selected_port}"
                 else
                     echo -e "${RED}无效的选择${RESET}"

@@ -20,8 +20,8 @@ current_version="4.0"
 # ============================================
 # AnyTLS 常量
 # ============================================
-ANYTLS_CONFIG_DIR="/etc/AnyTLS"
-ANYTLS_BINARY="${ANYTLS_CONFIG_DIR}/server"
+ANYTLS_CONFIG_DIR="/usr/local/etc/anytls"
+ANYTLS_BINARY="/usr/local/bin/anytls-server"
 ANYTLS_SERVICE_NAME="anytls"
 ANYTLS_SYSTEMD_UNIT="/etc/systemd/system/${ANYTLS_SERVICE_NAME}.service"
 ANYTLS_OPENRC_INIT="/etc/init.d/${ANYTLS_SERVICE_NAME}"
@@ -34,9 +34,9 @@ ANYTLS_SNAP_DIR="/tmp/anytls_install_$$"
 # Hysteria 2 常量
 # ============================================
 HY2_SERVICE_NAME="hysteria-server"
-HY2_CONFIG_FILE="/etc/hysteria/config.yaml"
-HY2_CLIENT_YAML="/root/hy/hy-client.yaml"
-HY2_URL_FILE="/root/hy/url.txt"
+HY2_CONFIG_FILE="/usr/local/etc/hysteria/config.yaml"
+HY2_CLIENT_YAML="/usr/local/etc/hysteria/hy-client.yaml"
+HY2_URL_FILE="/usr/local/etc/hysteria/url.txt"
 
 # ============================================
 # 通用工具函数
@@ -167,8 +167,8 @@ check_and_show_status() {
         else
             user_count=$((user_count + 1))
         fi
-        if [ -d "/etc/snell/users" ]; then
-            for user_conf in "/etc/snell/users"/*; do
+        if [ -d "/usr/local/etc/snell/users" ]; then
+            for user_conf in "/usr/local/etc/snell/users"/*; do
                 if [ -f "$user_conf" ] && [[ "$user_conf" != *"snell-main.conf" ]]; then
                     local port=$(grep -E '^listen' "$user_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
                     if [ ! -z "$port" ]; then
@@ -370,8 +370,8 @@ uninstall_snell() {
     echo -e "${CYAN}正在卸载 Snell${RESET}"
     systemctl stop snell 2>/dev/null
     systemctl disable snell 2>/dev/null
-    if [ -d "/etc/snell/users" ]; then
-        for user_conf in "/etc/snell/users"/*; do
+    if [ -d "/usr/local/etc/snell/users" ]; then
+        for user_conf in "/usr/local/etc/snell/users"/*; do
             if [ -f "$user_conf" ]; then
                 local port=$(grep -E '^listen' "$user_conf" | sed -n 's/.*::0:\([0-9]*\)/\1/p')
                 if [ ! -z "$port" ]; then
@@ -386,7 +386,7 @@ uninstall_snell() {
     rm -f "/lib/systemd/system/snell.service"
     rm -f "/etc/systemd/system/snell.service"
     rm -f /usr/local/bin/snell-server
-    rm -rf /etc/snell
+    rm -rf /usr/local/etc/snell
     rm -f /usr/local/bin/snell
     systemctl daemon-reload
     echo -e "${GREEN}Snell 及其所有多用户配置已成功卸载${RESET}"
@@ -398,7 +398,7 @@ uninstall_ss_rust() {
     systemctl disable ss-rust 2>/dev/null
     rm -f "/etc/systemd/system/ss-rust.service"
     rm -f "/usr/local/bin/ss-rust"
-    rm -rf "/etc/ss-rust"
+    rm -rf "/usr/local/etc/ss-rust"
     systemctl daemon-reload
     echo -e "${GREEN}SS-2022 卸载完成！${RESET}"
 }
@@ -471,14 +471,14 @@ uninstall_hysteria() {
         rm -f "/lib/systemd/system/${HY2_SERVICE_NAME}.service"
         rm -f "/etc/systemd/system/${HY2_SERVICE_NAME}.service"
         rm -f "/usr/local/bin/hysteria"
-        if [[ -f "/etc/hysteria/port_hop" ]]; then
-            local hop_range; hop_range=$(cat "/etc/hysteria/port_hop")
+        if [[ -f "/usr/local/etc/hysteria/port_hop" ]]; then
+            local hop_range; hop_range=$(cat "/usr/local/etc/hysteria/port_hop")
             iptables -t nat -D PREROUTING -p udp --dport "$hop_range" -j DNAT --to-destination ":" 2>/dev/null || true
             ip6tables -t nat -D PREROUTING -p udp --dport "$hop_range" -j DNAT --to-destination ":" 2>/dev/null || true
             netfilter-persistent save 2>/dev/null || true
         fi
         rm -f /root/cert.crt /root/private.key /root/ca.log 2>/dev/null || true
-        rm -rf "/etc/hysteria" "/root/hy"
+        rm -rf "/usr/local/etc/hysteria"
         systemctl daemon-reload 2>/dev/null || true
         echo -e "${GREEN}Hysteria 2 卸载完成！${RESET}"
     else
@@ -522,11 +522,11 @@ surge_export_all() {
     fi
 
     # --- Snell ---
-    if command -v snell-server &> /dev/null && [ -f "/etc/snell/snell-server.conf" ]; then
+    if command -v snell-server &> /dev/null && [ -f "/usr/local/etc/snell/snell-server.conf" ]; then
         local sn_port sn_psk sn_obfs
-        sn_port=$(grep -E '^listen' /etc/snell/snell-server.conf 2>/dev/null | sed -n 's/.*:\([0-9]*\)/\1/p' | head -1 || true)
-        sn_psk=$(grep -E '^psk' /etc/snell/snell-server.conf 2>/dev/null | awk '{print $3}' || true)
-        sn_obfs=$(grep -E '^obfs' /etc/snell/snell-server.conf 2>/dev/null | awk '{print $3}' || echo "http")
+        sn_port=$(grep -E '^listen' /usr/local/etc/snell/snell-server.conf 2>/dev/null | sed -n 's/.*:\([0-9]*\)/\1/p' | head -1 || true)
+        sn_psk=$(grep -E '^psk' /usr/local/etc/snell/snell-server.conf 2>/dev/null | awk '{print $3}' || true)
+        sn_obfs=$(grep -E '^obfs' /usr/local/etc/snell/snell-server.conf 2>/dev/null | awk '{print $3}' || echo "http")
         if [[ -n "${sn_port}" && -n "${sn_psk}" ]]; then
             echo -e "${GREEN}[Snell]${RESET}"
             local sn_extra=""
@@ -536,9 +536,9 @@ surge_export_all() {
         fi
 
         # Snell 多用户
-        if [ -d "/etc/snell/users" ]; then
+        if [ -d "/usr/local/etc/snell/users" ]; then
             local idx=1
-            for user_conf in "/etc/snell/users"/*; do
+            for user_conf in "/usr/local/etc/snell/users"/*; do
                 if [ -f "$user_conf" ] && [[ "$user_conf" != *"snell-main.conf" ]]; then
                     local u_port u_psk
                     u_port=$(grep -E '^listen' "$user_conf" 2>/dev/null | sed -n 's/.*:\([0-9]*\)/\1/p' || true)
@@ -555,11 +555,11 @@ surge_export_all() {
     fi
 
     # --- SS-2022 ---
-    if [ -f "/etc/ss-rust/config.json" ]; then
+    if [ -f "/usr/local/etc/ss-rust/config.json" ]; then
         local ss_port ss_method ss_pass
-        ss_port=$(sed -n 's/.*"server_port"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' /etc/ss-rust/config.json 2>/dev/null | head -1 || true)
-        ss_method=$(sed -n 's/.*"method"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/ss-rust/config.json 2>/dev/null | head -1 || true)
-        ss_pass=$(sed -n 's/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/ss-rust/config.json 2>/dev/null | head -1 || true)
+        ss_port=$(sed -n 's/.*"server_port"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' /usr/local/etc/ss-rust/config.json 2>/dev/null | head -1 || true)
+        ss_method=$(sed -n 's/.*"method"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /usr/local/etc/ss-rust/config.json 2>/dev/null | head -1 || true)
+        ss_pass=$(sed -n 's/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /usr/local/etc/ss-rust/config.json 2>/dev/null | head -1 || true)
         if [[ -n "${ss_port}" ]]; then
             echo -e "${GREEN}[SS-2022]${RESET}"
             echo "Proxy-SS = ss, ${ip}, ${ss_port}, encrypt-method=${ss_method:-2022-blake3-aes-256-gcm}, password=${ss_pass}"
@@ -607,7 +607,7 @@ surge_export_all() {
 
     # --- VLESS Reality ---
     # Surge 不支持 VLESS 协议，跳过
-    if [ -f "/etc/vless/config.json" ] || [ -d "/etc/vless" ]; then
+    if [ -f "/usr/local/etc/xray/config.json" ] || [ -d "/usr/local/etc/xray" ]; then
         echo -e "${YELLOW}[VLESS] Surge 不支持 VLESS 协议，无法导出。请使用支持 VLESS 的客户端。${RESET}\n"
     fi
 

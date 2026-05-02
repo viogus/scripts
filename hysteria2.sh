@@ -11,12 +11,11 @@ set -euo pipefail
 # ============================================
 # 常量
 # ============================================
-CONFIG_DIR="/etc/hysteria"
+CONFIG_DIR="/usr/local/etc/hysteria"
 CONFIG_FILE="${CONFIG_DIR}/config.yaml"
-CLIENT_DIR="/root/hy"
-CLIENT_YAML="${CLIENT_DIR}/hy-client.yaml"
-CLIENT_JSON="${CLIENT_DIR}/hy-client.json"
-URL_FILE="${CLIENT_DIR}/url.txt"
+CLIENT_YAML="${CONFIG_DIR}/hy-client.yaml"
+CLIENT_JSON="${CONFIG_DIR}/hy-client.json"
+URL_FILE="${CONFIG_DIR}/url.txt"
 SERVICE_NAME="hysteria-server"
 SYSTEMD_UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
 SCRIPT_VERSION="1.0.0"
@@ -401,7 +400,7 @@ install_hysteria() {
         systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
     fi
 
-    mkdir -p "${CONFIG_DIR}" "${CLIENT_DIR}"
+    mkdir -p "${CONFIG_DIR}"
 
     print_info "安装依赖..."
     install_deps
@@ -451,7 +450,7 @@ uninstall_hysteria() {
     # 清理 ACME 证书（如果存在）
     rm -f /root/cert.crt /root/private.key /root/ca.log 2>/dev/null || true
 
-    rm -rf "${CONFIG_DIR}" "${CLIENT_DIR}"
+    rm -rf "${CONFIG_DIR}"
     systemctl daemon-reload
 
     print_ok "Hysteria 2 卸载完成。"

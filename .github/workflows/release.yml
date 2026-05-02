@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create release archive
+        run: |
+          mkdir -p dist/scripts
+          cp *.sh dist/scripts/
+          chmod +x dist/scripts/*.sh
+          cd dist
+          tar czf ../scripts.tar.gz scripts/
+          cd ..
+          rm -rf dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ github.ref_name }}"
+          files: scripts.tar.gz
+          generate_release_notes: true
