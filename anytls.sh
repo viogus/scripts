@@ -199,7 +199,7 @@ get_ip() {
 get_latest_version() {
     local version
     version=$(curl -s --connect-timeout 10 --max-time 30 https://api.github.com/repos/anytls/anytls-go/releases/latest \
-        | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/') || true
     [[ -z "$version" ]] && { print_error "无法获取AnyTLS最新版本号"; return 1; }
     echo "$version"
 }

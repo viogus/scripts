@@ -1053,7 +1053,7 @@ ${YELLOW}SS 服务未运行，请尝试以下命令重启：${RESET}"
 ${YELLOW}Snell 服务状态：${RESET}"
         declare -A shown_services
         while IFS= read -r service_file; do
-            local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
+            local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\(\.service\)\?/\1/')
             if [ -z "${shown_services[$port]}" ]; then
                 shown_services[$port]=1
                 echo -e "
@@ -1298,7 +1298,7 @@ ${YELLOW}重启 Shadowsocks 的 ShadowTLS 服务...${RESET}"
         echo -e "
 ${YELLOW}重启 Snell 的 ShadowTLS 服务...${RESET}"
         while IFS= read -r service_file; do
-            local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
+            local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\(\.service\)\?/\1/')
             echo -e "重启端口 ${port} 的服务..."
             svc_restart "shadowtls-snell-${port}"
             if [ $? -eq 0 ]; then
@@ -1328,7 +1328,7 @@ ${CYAN}Shadowsocks ShadowTLS 服务状态：${RESET}"
     
     if [ ! -z "$snell_services" ]; then
         while IFS= read -r service_file; do
-            local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
+            local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\(\.service\)\?/\1/')
             echo -e "
 ${CYAN}Snell 端口 ${port} 的 ShadowTLS 服务状态：${RESET}"
             svc_status "shadowtls-snell-${port}"

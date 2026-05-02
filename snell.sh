@@ -978,7 +978,7 @@ ${CYAN}=============== 服务状态检查 ===============${RESET}"
         local snell_services=$(find /etc/systemd/system /etc/init.d -maxdepth 1 -name "shadowtls-snell-*" 2>/dev/null 2>/dev/null | sort -u)
         if [ ! -z "$snell_services" ]; then
             while IFS= read -r service_file; do
-                local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\.service/\1/')
+                local port=$(basename "$service_file" | sed 's/shadowtls-snell-\([0-9]*\)\(\.service\)\?/\1/')
                 
                 # 检查是否已处理过该端口
                 if [ -z "${processed_ports[$port]}" ]; then

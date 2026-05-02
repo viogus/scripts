@@ -213,7 +213,7 @@ check_installation() {
 # 获取最新版本
 get_latest_version() {
     SS_VERSION=$(wget -qO- https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases | \
-                 jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]')
+                 jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]') || true
     
     if [[ -z ${SS_VERSION} ]]; then
         error_exit "获取 Shadowsocks Rust 最新版本失败！"
@@ -243,7 +243,7 @@ check_status() {
 }
 
 check_new_ver() {
-    new_ver=$(wget -qO- https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases| jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]')
+    new_ver=$(wget -qO- https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases| jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]') || true
     [[ -z ${new_ver} ]] && echo -e "${RED}[错误]${RESET} Shadowsocks Rust 最新版本获取失败！" && exit 1
     echo -e "${GREEN}[信息]${RESET} 检测到 Shadowsocks Rust 最新版本为 [ ${new_ver} ]"
 }

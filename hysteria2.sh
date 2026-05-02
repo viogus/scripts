@@ -91,12 +91,12 @@ detect_os() {
 detect_init() {
     if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
     if has_cmd systemctl && [[ -d /run/systemd/system ]]; then
-        echo "systemd"; return
+        _INIT_TYPE="systemd"; echo "systemd"; return
     fi
     if has_cmd rc-service; then
-        echo "openrc"; return
+        _INIT_TYPE="openrc"; echo "openrc"; return
     fi
-    echo "systemd"
+    _INIT_TYPE="systemd"; echo "systemd"
 }
 fi  # end inline fallback
 
@@ -147,7 +147,7 @@ install_hysteria_binary() {
 
     if [[ "$os_type" == "alpine" ]]; then
         # Alpine: 直接从官方 GitHub 下载二进制
-        local latest_ver; latest_ver=$(curl -s --connect-timeout 10 --max-time 30 https://api.github.com/repos/apernet/hysteria/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        local latest_ver; latest_ver=$(curl -s --connect-timeout 10 --max-time 30 https://api.github.com/repos/apernet/hysteria/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/') || true
         if [[ -z "$latest_ver" ]]; then
             print_error "无法获取 Hysteria 最新版本号"; exit 1
         fi
