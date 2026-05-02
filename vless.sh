@@ -101,7 +101,7 @@ if [ "$(id -u)" != "0" ]; then
   exit 1
 fi
 TMP=$(mktemp)
-curl -fsSL https://raw.githubusercontent.com/jinqians/vless/refs/heads/main/vless.sh -o "$TMP"
+curl -fsSL https://raw.githubusercontent.com/viogus/scripts/main/vless.sh -o "$TMP"
 bash "$TMP"
 rm -f "$TMP"
 EOFSCRIPT

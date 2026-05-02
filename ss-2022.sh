@@ -33,7 +33,9 @@ readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
+readonly CYAN='\033[0;36m'
 readonly PLAIN='\033[0m'
+readonly RESET='\033[0m'
 readonly BOLD='\033[1m'
 
 # 状态提示
@@ -409,9 +411,12 @@ write_config() {
     "fast_open": ${SS_TFO},
     "mode": "tcp_and_udp",
     "user": "nobody",
-    "timeout": 300${SS_DNS:+",\n    \"nameserver\":\"${SS_DNS}\""}
+    "timeout": 300
 }
 EOF
+    if [[ -n "${SS_DNS:-}" ]]; then
+        sed -i 's/"timeout": 300/"timeout": 300,\n    "nameserver": "'"${SS_DNS}"'"/' ${CONFIG_PATH}
+    fi
     echo -e "${SUCCESS} 配置文件写入完成！"
 }
 
@@ -747,7 +752,7 @@ Install() {
     install_service
 
     echo -e "${Info} 创建命令快捷方式..."
-    curl -L -s ss.jinqians.com -o "/usr/local/bin/ss-2022.sh"
+    curl -L -s https://raw.githubusercontent.com/viogus/scripts/main/ss-2022.sh -o "/usr/local/bin/ss-2022.sh"
     chmod +x "/usr/local/bin/ss-2022.sh"
     if [ -f "/usr/local/bin/ssrust" ]; then
         rm -f "/usr/local/bin/ssrust"
@@ -1052,7 +1057,7 @@ Update_Shell() {
     
     # 下载最新版本进行版本对比
     local temp_file="/tmp/ss-2022.sh"
-    if ! wget --no-check-certificate -O ${temp_file} "https://raw.githubusercontent.com/jinqians/ss-2022.sh/refs/heads/main/ss-2022.sh"; then
+    if ! wget --no-check-certificate -O ${temp_file} "https://raw.githubusercontent.com/viogus/scripts/main/ss-2022.sh"; then
         echo -e "${Error} 下载最新脚本失败！"
         rm -f ${temp_file}
         return 1
@@ -1106,7 +1111,7 @@ install_shadowtls() {
     echo -e "${Info} 开始下载 ShadowTLS 安装脚本..."
     
     # 下载 ShadowTLS 脚本
-    wget -N --no-check-certificate https://raw.githubusercontent.com/jinqians/ss-2022.sh/refs/heads/main/shadowtls.sh
+    wget -N --no-check-certificate https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh
     
     if [ $? -ne 0 ]; then
         echo -e "${Error} ShadowTLS 脚本下载失败！"
@@ -1250,8 +1255,8 @@ Start_Menu() {
     echo -e "${GREEN}============================================${RESET}"
     echo -e "${GREEN}          SS - 2022 管理脚本 ${RESET}"
     echo -e "${GREEN}============================================${RESET}"
-    echo -e "${GREEN}            作者: jinqian${RESET}"
-    echo -e "${GREEN}       网站：https://jinqians.com${RESET}"
+    echo -e "${GREEN}         作者: jinqian & viogus${RESET}"
+    echo -e "${GREEN}   网站: jinqians.com / github.com/viogus${RESET}"
     echo -e "${GREEN}============================================${RESET}"
         echo && echo -e "  
  ${Green_font_prefix}0.${Font_color_suffix} 更新脚本

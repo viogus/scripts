@@ -522,17 +522,26 @@ surge_export_all() {
     fi
 
     # --- Snell ---
-    if command -v snell-server &> /dev/null && [ -f "/usr/local/etc/snell/snell-server.conf" ]; then
-        local sn_port sn_psk sn_obfs
-        sn_port=$(grep -E '^listen' /usr/local/etc/snell/snell-server.conf 2>/dev/null | sed -n 's/.*:\([0-9]*\)/\1/p' | head -1 || true)
-        sn_psk=$(grep -E '^psk' /usr/local/etc/snell/snell-server.conf 2>/dev/null | awk '{print $3}' || true)
-        sn_obfs=$(grep -E '^obfs' /usr/local/etc/snell/snell-server.conf 2>/dev/null | awk '{print $3}' || echo "http")
-        if [[ -n "${sn_port}" && -n "${sn_psk}" ]]; then
-            echo -e "${GREEN}[Snell]${RESET}"
-            local sn_extra=""
-            [[ -n "${sn_obfs}" && "${sn_obfs}" != "off" ]] && sn_extra=", obfs=${sn_obfs}"
-            echo "Proxy-Snell = snell, ${ip}, ${sn_port}, psk=${sn_psk}, version=4${sn_extra}"
-            echo ""
+    if command -v snell-server &> /dev/null; then
+        # 优先使用新路径，兼容旧路径
+        local sn_conf=""
+        if [ -f "/usr/local/etc/snell/users/snell-main.conf" ]; then
+            sn_conf="/usr/local/etc/snell/users/snell-main.conf"
+        elif [ -f "/usr/local/etc/snell/snell-server.conf" ]; then
+            sn_conf="/usr/local/etc/snell/snell-server.conf"
+        fi
+        if [[ -n "${sn_conf}" ]]; then
+            local sn_port sn_psk sn_obfs
+            sn_port=$(grep -E '^listen' "$sn_conf" 2>/dev/null | sed -n 's/.*:\([0-9]*\)/\1/p' | head -1 || true)
+            sn_psk=$(grep -E '^psk' "$sn_conf" 2>/dev/null | awk '{print $3}' || true)
+            sn_obfs=$(grep -E '^obfs' "$sn_conf" 2>/dev/null | awk '{print $3}' || echo "http")
+            if [[ -n "${sn_port}" && -n "${sn_psk}" ]]; then
+                echo -e "${GREEN}[Snell]${RESET}"
+                local sn_extra=""
+                [[ -n "${sn_obfs}" && "${sn_obfs}" != "off" ]] && sn_extra=", obfs=${sn_obfs}"
+                echo "Proxy-Snell = snell, ${ip}, ${sn_port}, psk=${sn_psk}, version=4${sn_extra}"
+                echo ""
+            fi
         fi
 
         # Snell 多用户
