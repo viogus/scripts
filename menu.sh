@@ -125,7 +125,7 @@ get_cpu_usage() {
     local cpu_cores=$(nproc)
 
     if [ ! -z "$pid" ] && [ "$pid" != "0" ]; then
-        cpu_usage=$(top -b -n 2 -d 0.2 -p "$pid" | tail -1 | awk '{print $9}')
+        cpu_usage=$( { top -b -n 2 -d 0.2 -p "$pid" || true; } | tail -1 | awk '{print $9}')
         if [ -z "$cpu_usage" ]; then
             cpu_usage=$(ps -p "$pid" -o %cpu= 2>/dev/null || echo 0)
         fi
@@ -654,7 +654,7 @@ surge_export_all() {
         local hy2_port hy2_pwd hy2_sni
         hy2_port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${HY2_CONFIG_FILE}" 2>/dev/null | head -1 || true)
         hy2_pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${HY2_CONFIG_FILE}" 2>/dev/null | head -1 || true)
-        hy2_sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${HY2_CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+        hy2_sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${HY2_CLIENT_YAML}" 2>/dev/null || echo "www.bing.com")
         if [[ -n "${hy2_port}" && -n "${hy2_pwd}" ]]; then
             echo -e "${GREEN}[Hysteria2]${RESET}"
             echo "Proxy-Hysteria = hysteria2, ${ip}, ${hy2_port}, password=${hy2_pwd}, sni=${hy2_sni}"

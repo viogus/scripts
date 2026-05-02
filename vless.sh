@@ -100,14 +100,14 @@ parse_x25519() {
   xray x25519 > "$tmp_keyfile" 2>&1
   KEY_OUTPUT=$(cat "$tmp_keyfile")
 
-  PRIVATE_KEY=$(echo "$KEY_OUTPUT" | grep -i 'private' | awk -F': *' '{print $2}' | head -n1)
-  PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -i 'public' | awk -F': *' '{print $2}' | head -n1)
+  PRIVATE_KEY=$(echo "$KEY_OUTPUT" | grep -i 'private' | awk -F': *' '{print $2}' | head -n1) || true
+  PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -i 'public' | awk -F': *' '{print $2}' | head -n1) || true
 
   if [[ -z "$PUBLIC_KEY" ]]; then
-    PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -i 'password' | awk -F': *' '{print $2}' | head -n1)
+    PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -i 'password' | awk -F': *' '{print $2}' | head -n1) || true
   fi
   if [[ -z "$PUBLIC_KEY" ]]; then
-    PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -i 'hash32' | awk -F': *' '{print $2}' | head -n1)
+    PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -i 'hash32' | awk -F': *' '{print $2}' | head -n1) || true
   fi
 
   rm -f "$tmp_keyfile"
@@ -312,7 +312,7 @@ show_config_action() {
 update_action() {
   bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) install
   svc_restart xray || true
-  xray -version | head -n 3
+  xray -version 2>&1 | { head -n 3; exit 0; }
 }
 
 uninstall_action() {

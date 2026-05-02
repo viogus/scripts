@@ -53,9 +53,9 @@ select_snell_version() {
 
 # 获取 Snell v4 最新版本
 get_latest_snell_v4_version() {
-    latest_version=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K4\.[0-9]+\.[0-9]+' | head -n 1)
+    latest_version=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K4\.[0-9]+\.[0-9]+' | head -n 1) || true || true
     if [ -z "$latest_version" ]; then
-        latest_version=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K4\.[0-9]+\.[0-9]+' | head -n 1)
+        latest_version=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K4\.[0-9]+\.[0-9]+' | head -n 1) || true || true
     fi
     if [ -n "$latest_version" ]; then
         echo "v${latest_version}"
@@ -67,18 +67,18 @@ get_latest_snell_v4_version() {
 # 获取 Snell v5 最新版本
 get_latest_snell_v5_version() {
     # 先抓 beta 版
-    v5_beta=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+b[0-9]+' | head -n 1)
+    v5_beta=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+b[0-9]+' | head -n 1) || true || true
     if [ -z "$v5_beta" ]; then
-        v5_beta=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+b[0-9]+' | head -n 1)
+        v5_beta=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+b[0-9]+' | head -n 1) || true || true
     fi
     if [ -n "$v5_beta" ]; then
         echo "v${v5_beta}"
         return
     fi
     # 再抓正式版，过滤掉带 b 的 beta 版本
-    v5_release=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' | grep -v b | head -n 1)
+    v5_release=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' | grep -v b | head -n 1) || true || true
     if [ -z "$v5_release" ]; then
-        v5_release=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' | grep -v b | head -n 1)
+        v5_release=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' | grep -v b | head -n 1) || true || true
     fi
     if [ -n "$v5_release" ]; then
         echo "v${v5_release}"
@@ -641,7 +641,7 @@ install_snell() {
 
     get_user_port  # 获取用户输入的端口
     get_dns # 获取用户输入的 DNS 服务器
-    PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
+    PSK=$( { tr -dc A-Za-z0-9 </dev/urandom | head -c 80; } || true ); PSK=${PSK:0:20}
 
     # 创建用户配置目录
     mkdir -p ${SNELL_CONF_DIR}/users

@@ -678,7 +678,7 @@ install_shadowtls() {
     chmod +x "$INSTALL_DIR/shadow-tls"
     
     # 生成随机密码
-    password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+    password=$( { tr -dc A-Za-z0-9 </dev/urandom | head -c 64; } || true ); password=${password:0:16}
     
     # 获取 TLS 伪装域名
     read -rp "请输入 TLS 伪装域名 (直接回车默认为 www.microsoft.com): " tls_domain
@@ -1123,7 +1123,7 @@ ${YELLOW}请选择要新增配置的协议：${RESET}"
                     continue
                 fi
                 # 获取必要的配置信息
-                password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+                password=$( { tr -dc A-Za-z0-9 </dev/urandom | head -c 64; } || true ); password=${password:0:16}
                 read -rp "请输入 TLS 伪装域名 (直接回车默认为 www.microsoft.com): " tls_domain
                 if [ -z "$tls_domain" ]; then
                     tls_domain="www.microsoft.com"
@@ -1161,7 +1161,7 @@ ${YELLOW}请选择要新增配置的协议：${RESET}"
                 fi
                 
                 # 获取必要的配置信息
-                password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+                password=$( { tr -dc A-Za-z0-9 </dev/urandom | head -c 64; } || true ); password=${password:0:16}
                 read -rp "请输入 TLS 伪装域名 (直接回车默认为 www.microsoft.com): " tls_domain
                 if [ -z "$tls_domain" ]; then
                     tls_domain="www.microsoft.com"

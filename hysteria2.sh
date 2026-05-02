@@ -458,7 +458,7 @@ show_config() {
     local port pwd sni
     port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${CONFIG_FILE}" 2>/dev/null || true)
     pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
-    sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+    sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null || echo "www.bing.com")
 
     echo ""
     echo -e "${CYAN}========== Hysteria 2 客户端配置 ==========${RESET}"
@@ -634,7 +634,7 @@ change_port() {
     old_port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${CONFIG_FILE}" 2>/dev/null || true)
     new_port=$(setup_port)
     ip=$(get_ip)
-    sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+    sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null || echo "www.bing.com")
     pwd=$(sed -n '/^auth:/,/^[a-z]/{s/^[[:space:]]*password:[[:space:]]*\(.*\)/\1/p}' "${CONFIG_FILE}" 2>/dev/null | head -1 || true)
 
     sed -i "s/^listen: :${old_port}$/listen: :${new_port}/" "${CONFIG_FILE}"
@@ -662,7 +662,7 @@ change_password() {
     # 更新 URL
     local ip; ip=$(get_ip)
     local port; port=$(sed -n 's/^listen:[[:space:]]*:\([0-9]*\).*/\1/p' "${CONFIG_FILE}" 2>/dev/null || true)
-    local sni; sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null | head -1 || echo "www.bing.com")
+    local sni; sni=$(sed -n '/^tls:/,/^[a-z]/{s/^[[:space:]]*sni:[[:space:]]*\(.*\)/\1/p}' "${CLIENT_YAML}" 2>/dev/null || echo "www.bing.com")
     echo "hysteria2://${new_pwd}@${ip}:${port}/?insecure=1&sni=${sni}#Hysteria2" > "${URL_FILE}"
 
     restart_service
