@@ -920,7 +920,7 @@ Uninstall() {
         check_status
         [[ "$status" == "running" ]] && svc_stop ss-rust
         svc_disable ss-rust
-        rm -f "/etc/systemd/system/ss-rust.service" "/etc/init.d/ss-rust" "/etc/init.d/ss-rust"
+        rm -f "/etc/systemd/system/ss-rust.service" "/etc/init.d/ss-rust"
         rm -rf "${INSTALL_DIR}"
         rm -rf "${BINARY_PATH}"
         rm -f "/usr/local/bin/ssrust"
