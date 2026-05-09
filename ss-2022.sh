@@ -125,8 +125,12 @@ command_user="nobody"
 command_args="-c ${CONFIG_PATH}"
 command_background="yes"
 pidfile="/run/ss-rust.pid"
+output_log="/var/log/ss-rust.log"
+error_log="/var/log/ss-rust.err"
 OPENRCEOF
     chmod +x "/etc/init.d/ss-rust"
+    touch /var/log/ss-rust.log /var/log/ss-rust.err
+    chown nobody:nobody /var/log/ss-rust.log /var/log/ss-rust.err 2>/dev/null || chown nobody /var/log/ss-rust.log /var/log/ss-rust.err 2>/dev/null || true
 }
 
 # 检测操作系统
@@ -832,7 +836,11 @@ Install() {
         echo -e "${RED}[错误]${RESET} Shadowsocks Rust 启动失败，请检查日志！"
         echo -e "${GREEN}[信息]${RESET} 您可以使用以下命令查看详细日志："
         echo -e " - svc_status ss-rust"
-        echo -e " - journalctl -xe --unit ss-rust"
+        if command -v journalctl >/dev/null 2>&1; then
+            echo -e " - journalctl -xe --unit ss-rust"
+        else
+            echo -e " - cat /var/log/ss-rust.log"
+        fi
         Before_Start_Menu
     fi
 }
@@ -858,7 +866,12 @@ start_service() {
     if ! svc_is_active ss-rust >/dev/null 2>&1; then
         echo -e "${ERROR} Shadowsocks Rust 启动失败！"
         echo -e "${INFO} 查看服务日志："
-        journalctl -xe --unit ss-rust
+        if [[ "$(detect_init)" == "openrc" ]]; then
+            rc-service ss-rust status 2>/dev/null || true
+            tail -20 /var/log/ss-rust.log /var/log/ss-rust.err 2>/dev/null
+        else
+            journalctl -xe --unit ss-rust
+        fi
         return 1
     fi
     
