@@ -298,6 +298,8 @@ OPENRCEOF
 command_args="-l 0.0.0.0:${port} -p ${pass}"
 EOF
     chmod +x "$OPENRC_INIT"
+    touch /var/log/anytls.log /var/log/anytls.err
+    chown nobody:nobody /var/log/anytls.log /var/log/anytls.err 2>/dev/null || chown nobody /var/log/anytls.log /var/log/anytls.err 2>/dev/null || true
 }
 
 restart_service() {
