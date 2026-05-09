@@ -443,7 +443,7 @@ install_dependencies() {
         yum install -y jq gzip wget curl unzip xz openssl qrencode tar || \
             dnf install -y jq gzip wget curl unzip xz openssl qrencode tar
     elif [ -x "$(command -v apk)" ]; then
-        apk update && apk add --no-cache jq gzip wget curl unzip xz openssl qrencode tar
+        apk update && apk add --no-cache jq gzip wget curl unzip xz openssl libqrencode tar
     else
         apt-get update
         apt-get install -y jq gzip wget curl unzip xz-utils openssl qrencode tar
