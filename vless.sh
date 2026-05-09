@@ -71,8 +71,12 @@ command_user="nobody"
 command_args="run -config /usr/local/etc/xray/config.json"
 command_background="yes"
 pidfile="/run/xray.pid"
+output_log="/var/log/xray.log"
+error_log="/var/log/xray.err"
 OPENRCEOF
   chmod +x "/etc/init.d/xray"
+  touch /var/log/xray.log /var/log/xray.err
+  chown nobody:nobody /var/log/xray.log /var/log/xray.err 2>/dev/null || chown nobody /var/log/xray.log /var/log/xray.err 2>/dev/null || true
 }
 
 # ================= 基础工具函数 =================
@@ -85,7 +89,7 @@ ensure_deps() {
   elif [ -x "$(command -v yum)" ]; then
     yum install -y curl qrencode || true
   elif [ -x "$(command -v apk)" ]; then
-    apk update && apk add --no-cache curl qrencode || true
+    apk update && apk add --no-cache curl libqrencode || true
   fi
 }
 

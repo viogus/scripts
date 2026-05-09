@@ -405,8 +405,12 @@ command_user="nobody"
 command_args="-c ${conf}"
 command_background="yes"
 pidfile="/run/${name}.pid"
+output_log="/var/log/${name}.log"
+error_log="/var/log/${name}.err"
 OPENRCEOF
     chmod +x "/etc/init.d/${name}"
+    touch "/var/log/${name}.log" "/var/log/${name}.err"
+    chown nobody:nobody "/var/log/${name}.log" "/var/log/${name}.err" 2>/dev/null || chown nobody "/var/log/${name}.log" "/var/log/${name}.err" 2>/dev/null || true
 }
 
 check_root

@@ -117,8 +117,12 @@ command_user="nobody"
 command_args="--v3 server --listen ::0:${listen_port} --server 127.0.0.1:${port} --tls ${tls_domain} --password ${password}"
 command_background="yes"
 pidfile="/run/${name}.pid"
+output_log="/var/log/${name}.log"
+error_log="/var/log/${name}.err"
 OPENRCEOF
     chmod +x "/etc/init.d/${name}"
+    touch "/var/log/${name}.log" "/var/log/${name}.err"
+    chown nobody:nobody "/var/log/${name}.log" "/var/log/${name}.err" 2>/dev/null || chown nobody "/var/log/${name}.log" "/var/log/${name}.err" 2>/dev/null || true
 }
 
 # 安装必要的工具

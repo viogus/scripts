@@ -417,6 +417,8 @@ output_log="/var/log/hysteria.log"
 error_log="/var/log/hysteria.err"
 OPENRCEOF
     chmod +x "/etc/init.d/${SERVICE_NAME}"
+    touch /var/log/hysteria.log /var/log/hysteria.err
+    chown nobody:nobody /var/log/hysteria.log /var/log/hysteria.err 2>/dev/null || chown nobody /var/log/hysteria.log /var/log/hysteria.err 2>/dev/null || true
 }
 
 reload_service() {
