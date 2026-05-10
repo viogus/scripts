@@ -483,3 +483,398 @@ download_and_install_binary() {
         return 1
     fi
 }
+
+# ============================================
+# Init 模板
+# ============================================
+
+write_openrc() {
+    local name="$1" cmd="$2" args="$3" user="${4:-nobody}"
+    cat > "/etc/init.d/${name}" << OPENRCEOF
+#!/sbin/openrc-run
+name="${name}"
+command="${cmd}"
+command_user="${user}"
+command_args="${args}"
+command_background="yes"
+pidfile="/run/${name}.pid"
+output_log="/var/log/${name}.log"
+error_log="/var/log/${name}.err"
+OPENRCEOF
+    chmod +x "/etc/init.d/${name}"
+    touch "/var/log/${name}.log" "/var/log/${name}.err"
+    chown "${user}:${user}" "/var/log/${name}.log" "/var/log/${name}.err" 2>/dev/null || \
+        chown "${user}" "/var/log/${name}.log" "/var/log/${name}.err" 2>/dev/null || true
+}
+
+write_systemd() {
+    local name="$1" cmd="$2" args="$3" user="${4:-nobody}"
+    cat > "/etc/systemd/system/${name}.service" << SYSTEMDEOF
+[Unit]
+Description=${name} service
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${user}
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecStart=${cmd} ${args}
+Restart=on-failure
+RestartSec=10s
+LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMDEOF
+}
+
+# ============================================
+# 安装
+# ============================================
+
+svc_install() {
+    local conf="$1"
+    source_conf "$conf" || return 1
+
+    # 依赖检查
+    if [[ -n "${DEPENDS_ON:-}" ]]; then
+        local dep_conf="services/${DEPENDS_ON}.conf"
+        if [[ ! -f "$dep_conf" ]]; then
+            echo -e "${ERROR} ${DISPLAY} 依赖 ${DEPENDS_ON}，配置文件不存在${RESET}"
+            return 1
+        fi
+        . "$dep_conf"
+        [[ -x "${BIN_PATH}" ]] || {
+            echo -e "${ERROR} ${DISPLAY} 依赖 ${DEPENDS_ON}，请先安装 ${DEPENDS_ON}${RESET}"
+            return 1
+        }
+        . "$conf"
+        echo -e "${INFO} 依赖 ${DEPENDS_ON} 已满足"
+    fi
+
+    # 检查已安装
+    [[ -x "${BIN_PATH}" ]] && {
+        echo -e "${YELLOW}${DISPLAY} 已安装，请先卸载或使用更新${RESET}"
+        return 1
+    }
+
+    echo -e "${INFO} 正在安装系统依赖..."
+    os_install "${EXTRA_DEPS:-}"
+    echo -e "${OK} 依赖安装完成"
+
+    close_wall
+
+    echo -e "${INFO} 正在下载 ${DISPLAY}..."
+    case "${SOURCE:-github}" in
+        github)
+            download_and_install_binary "github" "$GITHUB_REPO" "$BINARY_NAME" "$BIN_PATH" \
+                "${ARCHIVE_FORMAT:-tar.xz}" || return 1
+            ;;
+        *)
+            echo -e "${ERROR} 不支持的 SOURCE: ${SOURCE:-}${RESET}"
+            return 1
+            ;;
+    esac
+
+    # 交互式配置
+    local port; port=$(read_port "${PORT_RANGE:-2000-65000}")
+    local pass; pass=$(gen_pass "${PASS_TYPE:-uuid}")
+    echo -e "${INFO} 端口: ${port}  密码: ${pass}"
+
+    # 写配置
+    mkdir -p "$CONF_DIR"
+    local conf_content; conf_content=$(tmpl "${CONF_TEMPLATE}" port "$port" pass "$pass")
+    printf '%s\n' "$conf_content" > "$CONF_FILE"
+    echo -e "${OK} 配置文件写入完成"
+
+    # 构造命令行参数，支持 BACKEND_PORT_FROM
+    local cmd_args; cmd_args=$(tmpl "${COMMAND_ARGS}" port "$port" pass "$pass")
+    if [[ -n "${BACKEND_PORT_FROM:-}" ]]; then
+        local backend_conf="services/${BACKEND_PORT_FROM}.conf"
+        if [[ -f "$backend_conf" ]]; then
+            . "$backend_conf"
+            local backend_port
+            backend_port=$(sed -nE 's/.*:([0-9]+).*/\1/p' "$CONF_FILE" 2>/dev/null | head -1 || true)
+            [[ -n "$backend_port" ]] && cmd_args="${cmd_args//__BACKEND_PORT__/${backend_port}}"
+        fi
+        . "$conf"
+    fi
+
+    # 写 init
+    echo -e "${INFO} 正在安装系统服务..."
+    if [[ "$(detect_init)" == "openrc" ]]; then
+        write_openrc "$SERVICE" "$BIN_PATH" "$cmd_args" "${COMMAND_USER:-nobody}"
+    else
+        write_systemd "$SERVICE" "$BIN_PATH" "$cmd_args" "${COMMAND_USER:-nobody}"
+    fi
+
+    svc_reload
+    svc_enable "$SERVICE"
+
+    echo -e "${INFO} 正在启动 ${DISPLAY}..."
+    svc_start "$SERVICE"
+    sleep 2
+
+    if svc_is_active "$SERVICE" >/dev/null 2>&1; then
+        echo -e "${OK} ${DISPLAY} 安装并启动成功！"
+    else
+        echo -e "${ERROR} ${DISPLAY} 启动失败，查看日志："
+        if [[ "$(detect_init)" == "openrc" ]]; then
+            tail -20 "/var/log/${SERVICE}.log" "/var/log/${SERVICE}.err" 2>/dev/null
+        else
+            journalctl -xe --unit "$SERVICE" 2>/dev/null || true
+        fi
+        return 1
+    fi
+
+    svc_view "$conf"
+}
+
+# ============================================
+# 更新
+# ============================================
+
+svc_update() {
+    local conf="$1"
+    source_conf "$conf" || return 1
+
+    [[ -x "${BIN_PATH}" ]] || {
+        echo -e "${ERROR} ${DISPLAY} 未安装，无法更新${RESET}"
+        return 1
+    }
+
+    local port pass
+    port=$(sed -nE 's/.*:([0-9]+).*/\1/p' "$CONF_FILE" 2>/dev/null | head -1 || true)
+    pass=$(grep -oP '(?:password|pass)[:=]\s*\K\S+' "$CONF_FILE" 2>/dev/null | head -1 || true)
+
+    echo -e "${INFO} 正在更新 ${DISPLAY}..."
+    case "${SOURCE:-github}" in
+        github)
+            svc_stop "$SERVICE" 2>/dev/null || true
+            download_and_install_binary "github" "$GITHUB_REPO" "$BINARY_NAME" "$BIN_PATH" \
+                "${ARCHIVE_FORMAT:-tar.xz}" || return 1
+            svc_start "$SERVICE"
+            ;;
+        *)
+            echo -e "${ERROR} 不支持的更新方式${RESET}"
+            return 1
+            ;;
+    esac
+
+    [[ -n "$port" ]] && [[ -n "$pass" ]] && {
+        local conf_content; conf_content=$(tmpl "${CONF_TEMPLATE}" port "$port" pass "$pass")
+        printf '%s\n' "$conf_content" > "$CONF_FILE"
+    }
+
+    echo -e "${OK} ${DISPLAY} 更新完成"
+}
+
+# ============================================
+# 卸载
+# ============================================
+
+svc_uninstall() {
+    local conf="$1"
+    source_conf "$conf" || return 1
+
+    local ans
+    read -rp "确认卸载 ${DISPLAY}? (y/N): " ans
+    [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
+
+    svc_stop "$SERVICE" 2>/dev/null || true
+    svc_disable "$SERVICE" 2>/dev/null || true
+    rm -f "/etc/init.d/${SERVICE}" "/etc/systemd/system/${SERVICE}.service"
+    svc_reload
+    rm -f "$BIN_PATH"
+    rm -rf "$CONF_DIR" || true
+    echo -e "${OK} ${DISPLAY} 卸载完成"
+}
+
+# ============================================
+# 查看配置
+# ============================================
+
+svc_view() {
+    local conf="$1"
+    source_conf "$conf" || return 1
+
+    local port pass ip
+    ip=$(get_ip)
+    port=$(sed -nE 's/.*:([0-9]+).*/\1/p' "$CONF_FILE" 2>/dev/null | head -1 || echo "N/A")
+    pass=$(grep -oP '(?:password|pass)[:=]\s*\K\S+' "$CONF_FILE" 2>/dev/null | head -1 || echo "N/A")
+
+    echo ""
+    echo -e "${CYAN}========== ${DISPLAY} 客户端配置 ==========${RESET}"
+    if [[ -n "${CLIENT_URL_FMT:-}" ]]; then
+        local url; url=$(tmpl "$CLIENT_URL_FMT" ip "$ip" port "$port" pass "$pass")
+        echo -e "${GREEN}URL 格式：${RESET}${url}"
+    fi
+    if [[ -n "${CLIENT_SURGE_FMT:-}" ]]; then
+        local surge; surge=$(tmpl "$CLIENT_SURGE_FMT" ip "$ip" port "$port" pass "$pass")
+        echo -e "${GREEN}Surge 格式：${RESET}${surge}"
+    fi
+    echo -e "${CYAN}========================================${RESET}"
+
+    if [[ -n "${CLIENT_FILE:-}" ]]; then
+        {
+            [[ -n "${CLIENT_URL_FMT:-}" ]] && \
+                tmpl "$CLIENT_URL_FMT" ip "$ip" port "$port" pass "$pass" | sed 's/^/URL: /'
+            [[ -n "${CLIENT_SURGE_FMT:-}" ]] && \
+                tmpl "$CLIENT_SURGE_FMT" ip "$ip" port "$port" pass "$pass" | sed 's/^/Surge: /'
+        } > "$CLIENT_FILE"
+        echo -e "${YELLOW}配置已保存至: ${CLIENT_FILE}${RESET}"
+    fi
+}
+
+# ============================================
+# 修改端口
+# ============================================
+
+svc_port() {
+    local conf="$1"
+    source_conf "$conf" || return 1
+    [[ -f "$CONF_FILE" ]] || { echo -e "${ERROR} 配置文件不存在${RESET}"; return 1; }
+
+    local old_pass new_port
+    old_pass=$(grep -oP '(?:password|pass)[:=]\s*\K\S+' "$CONF_FILE" 2>/dev/null | head -1 || \
+        gen_pass "${PASS_TYPE:-uuid}")
+    new_port=$(read_port "${PORT_RANGE:-2000-65000}")
+
+    local conf_content; conf_content=$(tmpl "${CONF_TEMPLATE}" port "$new_port" pass "$old_pass")
+    printf '%s\n' "$conf_content" > "$CONF_FILE"
+
+    local cmd_args; cmd_args=$(tmpl "${COMMAND_ARGS}" port "$new_port" pass "$old_pass")
+    if [[ "$(detect_init)" == "openrc" ]]; then
+        write_openrc "$SERVICE" "$BIN_PATH" "$cmd_args" "${COMMAND_USER:-nobody}"
+    else
+        write_systemd "$SERVICE" "$BIN_PATH" "$cmd_args" "${COMMAND_USER:-nobody}"
+    fi
+
+    svc_reload
+    svc_restart "$SERVICE"
+    echo -e "${OK} 端口已更新为: ${new_port}"
+}
+
+# ============================================
+# 修改密码
+# ============================================
+
+svc_pass() {
+    local conf="$1"
+    source_conf "$conf" || return 1
+    [[ -f "$CONF_FILE" ]] || { echo -e "${ERROR} 配置文件不存在${RESET}"; return 1; }
+
+    local old_port new_pass
+    old_port=$(sed -nE 's/.*:([0-9]+).*/\1/p' "$CONF_FILE" 2>/dev/null | head -1 || \
+        random_port "${PORT_RANGE:-2000-65000}")
+    new_pass=$(gen_pass "${PASS_TYPE:-uuid}")
+
+    local conf_content; conf_content=$(tmpl "${CONF_TEMPLATE}" port "$old_port" pass "$new_pass")
+    printf '%s\n' "$conf_content" > "$CONF_FILE"
+
+    local cmd_args; cmd_args=$(tmpl "${COMMAND_ARGS}" port "$old_port" pass "$new_pass")
+    if [[ "$(detect_init)" == "openrc" ]]; then
+        write_openrc "$SERVICE" "$BIN_PATH" "$cmd_args" "${COMMAND_USER:-nobody}"
+    else
+        write_systemd "$SERVICE" "$BIN_PATH" "$cmd_args" "${COMMAND_USER:-nobody}"
+    fi
+
+    svc_reload
+    svc_restart "$SERVICE"
+    echo -e "${OK} 密码已更新为: ${new_pass}"
+}
+
+# ============================================
+# 状态显示
+# ============================================
+
+svc_status() {
+    local conf="$1"
+    source_conf "$conf" || {
+        printf "  ${YELLOW}%-12s${RESET} 配置错误\n" "$(basename "$conf")"
+        return 1
+    }
+
+    set +e
+
+    if [[ -x "${BIN_PATH}" ]]; then
+        if svc_is_active "$SERVICE" >/dev/null 2>&1; then
+            local pid; pid=$(svc_main_pid "$SERVICE")
+            local mem; mem=$(ps -o rss= -p "$pid" 2>/dev/null || echo 0)
+            local cpu; cpu=$(ps -o %cpu= -p "$pid" 2>/dev/null || echo 0)
+            local cores; cores=$(nproc 2>/dev/null || echo 1)
+            cpu=$(echo "scale=2; ${cpu:-0} / $cores" | bc -l 2>/dev/null || echo "0")
+            mem=$(echo "scale=2; ${mem:-0} / 1024" | bc -l 2>/dev/null || echo "0")
+            printf "  ${GREEN}%-12s${RESET} 运行中  PID: %-6s  CPU: %5s%%  MEM: %6s MB  运行: 1/1\n" \
+                "${DISPLAY}" "${pid:-N/A}" "$cpu" "$mem"
+        else
+            printf "  ${YELLOW}%-12s${RESET} 已停止  运行: 0/1\n" "$DISPLAY"
+        fi
+    else
+        printf "  ${YELLOW}%-12s${RESET} 未安装\n" "$DISPLAY"
+    fi
+
+    set -e
+}
+
+show_all_status() {
+    local services_dir="${1:-services}"
+    printf '\n%b=== 服务状态检查 ===%b\n' "$CYAN" "$RESET"
+
+    local cores; cores=$(nproc 2>/dev/null || echo 1)
+    printf '系统 CPU 核心数: %s\n' "$cores"
+
+    if [[ -d "$services_dir" ]]; then
+        local conf
+        for conf in "$services_dir"/*.conf; do
+            [[ -f "$conf" ]] || continue
+            svc_status "$conf"
+        done
+    fi
+    printf '%b====================%b\n\n' "$CYAN" "$RESET"
+}
+
+# ============================================
+# 菜单
+# ============================================
+
+show_service_submenu() {
+    local conf="$1"
+    source_conf "$conf" || return 1
+
+    while true; do
+        clear
+        printf '%b============================================%b\n' "$CYAN" "$RESET"
+        printf '%b %s 管理菜单%b\n' "$CYAN" "$DISPLAY" "$RESET"
+        printf '%b============================================%b\n' "$CYAN" "$RESET"
+
+        set +e; svc_status "$conf"; set -e
+
+        echo ""
+        printf '%b1.%b 安装/重装 %s\n' "$GREEN" "$RESET" "$DISPLAY"
+        printf '%b2.%b 更新 %s\n' "$GREEN" "$RESET" "$DISPLAY"
+        printf '%b3.%b 卸载 %s\n' "$GREEN" "$RESET" "$DISPLAY"
+        printf '%b4.%b 查看配置\n' "$GREEN" "$RESET"
+        printf '%b5.%b 更改端口\n' "$GREEN" "$RESET"
+        printf '%b6.%b 更改密码\n' "$GREEN" "$RESET"
+        printf '%b0.%b 返回主菜单\n' "$GREEN" "$RESET"
+        printf '%b============================================%b\n' "$CYAN" "$RESET"
+
+        printf '请输入选项 [0-6]: '
+        local choice
+        read -r choice
+        case "$choice" in
+            1) svc_install "$conf"; printf '按回车返回...'; read -r _ ;;
+            2) svc_update "$conf"; printf '按回车返回...'; read -r _ ;;
+            3) svc_uninstall "$conf"; printf '按回车返回...'; read -r _ ;;
+            4) svc_view "$conf"; printf '按回车返回...'; read -r _ ;;
+            5) svc_port "$conf"; printf '按回车返回...'; read -r _ ;;
+            6) svc_pass "$conf"; printf '按回车返回...'; read -r _ ;;
+            0) return ;;
+            *) printf '%b无效选项%b\n' "$RED" "$RESET" ;;
+        esac
+    done
+}
