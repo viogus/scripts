@@ -504,6 +504,8 @@ set_password() {
 show_status() {
     echo -e "
 ${CYAN}=== AnyTLS 状态 ===${RESET}"
+    # 使用 set +e 防止 status 检查时意外退出
+    set +e
     if is_installed; then
         local status; status="$(svc_is_active "${SERVICE_NAME}")"
         if [[ "$status" == "active" ]]; then
@@ -525,6 +527,7 @@ ${CYAN}=== AnyTLS 状态 ===${RESET}"
     fi
     echo -e "${CYAN}===================${RESET}
 "
+    set -e
 }
 
 # ============================================
