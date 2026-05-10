@@ -160,7 +160,13 @@ detect_os() {
 detect_arch() {
     local arch=$(uname -m)
     local os=$(uname -s)
-    
+    local libc_suffix="gnu"
+
+    # 检测 musl (Alpine) vs glibc
+    if [[ -f /lib/ld-musl-x86_64.so.1 ]] || [[ -f /lib/ld-musl-aarch64.so.1 ]] || ldd --version 2>&1 | grep -qi musl; then
+        libc_suffix="musl"
+    fi
+
     case "${os}" in
         "Darwin")
             case "${arch}" in
@@ -175,21 +181,21 @@ detect_arch() {
         "Linux")
             case "${arch}" in
                 "x86_64")
-                    OS_ARCH="x86_64-unknown-linux-gnu"
+                    OS_ARCH="x86_64-unknown-linux-${libc_suffix}"
                     ;;
                 "aarch64")
-                    OS_ARCH="aarch64-unknown-linux-gnu"
+                    OS_ARCH="aarch64-unknown-linux-${libc_suffix}"
                     ;;
                 "armv7l"|"armv7")
                     # 检查是否支持硬浮点
                     if grep -q "gnueabihf" /proc/cpuinfo; then
-                        OS_ARCH="armv7-unknown-linux-gnueabihf"
+                        OS_ARCH="armv7-unknown-linux-${libc_suffix}eabihf"
                     else
-                        OS_ARCH="arm-unknown-linux-gnueabi"
+                        OS_ARCH="arm-unknown-linux-${libc_suffix}eabi"
                     fi
                     ;;
                 "armv6l")
-                    OS_ARCH="arm-unknown-linux-gnueabi"
+                    OS_ARCH="arm-unknown-linux-${libc_suffix}eabi"
                     ;;
                 "i686"|"i386")
                     OS_ARCH="i686-unknown-linux-musl"
