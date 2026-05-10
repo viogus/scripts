@@ -17,6 +17,14 @@ BLUE='[0;34m'
 RESET='[0m'
 }
 
+	# === 新框架 (Phase 1) ===
+	FRAMEWORK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+	if [[ -f "${FRAMEWORK_DIR}/lib/framework.sh" ]]; then
+	    FRAMEWORK_LOADED=true
+	else
+	    FRAMEWORK_LOADED=false
+	fi
+
 # 当前版本号
 current_version="4.0"
 
@@ -664,12 +672,13 @@ ${YELLOW}=== 卸载功能 ===${RESET}"
 ${YELLOW}=== 系统功能 ===${RESET}"
     echo -e "${GREEN}12.${RESET} 更新脚本"
     echo -e "${GREEN}13.${RESET} 输出 Surge 配置"
+	    echo -e "${GREEN}14.${RESET} [新] 统一管理模式 (测试中)"
     echo -e "${GREEN}0.${RESET} 退出"
 
     echo -e "${CYAN}============================================${RESET}"
     echo -e "${GREEN}退出脚本后，输入 menu 可重新进入${RESET}"
     echo -e "${CYAN}============================================${RESET}"
-    read -rp "请输入选项 [0-13]: " num
+    read -rp "请输入选项 [0-14]: " num
 }
 
 # ============================================
@@ -696,8 +705,34 @@ while true; do
         11) uninstall_hysteria ;;
         12) update_script ;;
         13) surge_export_all ;;
+	    14)
+	        if $FRAMEWORK_LOADED; then
+	            . "${FRAMEWORK_DIR}/lib/framework.sh"
+	            show_all_status "services"
+	            echo -e "${CYAN}可用服务:${RESET}"
+	            local i=1
+	            for conf in services/*.conf; do
+	                [[ -f "$conf" ]] || continue
+	                . "$conf"
+	                echo -e "${GREEN}${i}.${RESET} ${DISPLAY}"
+	                ((i++))
+	            done
+	            echo ""
+	            read -rp "选择服务 (1-$((i-1)), 0 返回): " svc_choice
+	            [[ "$svc_choice" == "0" ]] && continue
+	            local c=1
+	            for conf in services/*.conf; do
+	                [[ -f "$conf" ]] || continue
+	                [[ "$c" -eq "$svc_choice" ]] && { show_service_submenu "$conf"; break; }
+	                ((c++))
+	            done
+	        else
+	            echo -e "${RED}framework.sh 未找到${RESET}"
+	            read -rp "按回车返回..." _
+	        fi
+	        ;;
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
-        *) echo -e "${RED}请输入正确的选项 [0-13]${RESET}" ;;
+        *) echo -e "${RED}请输入正确的选项 [0-14]${RESET}" ;;
     esac
     echo -e "
 ${CYAN}按任意键返回主菜单...${RESET}"
