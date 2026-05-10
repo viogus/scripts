@@ -125,11 +125,13 @@ get_cpu_usage() {
     local cpu_cores=$(nproc)
 
     if [ ! -z "$pid" ] && [ "$pid" != "0" ]; then
-        cpu_usage=$( { top -b -n 2 -d 0.2 -p "$pid" || true; } | tail -1 | awk '{print $9}')
+        # ps -o %cpu= 在 BusyBox 和 GNU 上都可用
+        cpu_usage=$(ps -p "$pid" -o %cpu= 2>/dev/null || echo "")
         if [ -z "$cpu_usage" ]; then
-            cpu_usage=$(ps -p "$pid" -o %cpu= 2>/dev/null || echo 0)
+            # 在 GNU top 上尝试 top -p（BusyBox top 没有 -p）
+            cpu_usage=$( { top -b -n 2 -d 0.2 -p "$pid" 2>/dev/null || true; } | tail -1 | awk '{print $9}')
         fi
-        cpu_usage=$(echo "scale=2; $cpu_usage / $cpu_cores" | bc -l 2>/dev/null || echo "0")
+        cpu_usage=$(echo "scale=2; ${cpu_usage:-0} / $cpu_cores" | bc -l 2>/dev/null || echo "0")
     fi
 
     echo "$cpu_usage"
