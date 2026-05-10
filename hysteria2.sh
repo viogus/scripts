@@ -110,7 +110,10 @@ get_ip() {
 }
 
 is_installed() {
-    [[ -f "/usr/local/bin/hysteria" ]] && [[ -f "${CONFIG_FILE}" ]]
+    if [[ -f "/usr/local/bin/hysteria" ]] && [[ -f "${CONFIG_FILE}" ]]; then
+        return 0
+    fi
+    return 1
 }
 
 # ============================================

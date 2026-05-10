@@ -247,7 +247,10 @@ service_exists_systemd(){ [[ -f "${SYSTEMD_UNIT}" ]]; }
 service_exists_openrc(){ [[ -f "${OPENRC_INIT}" ]]; }
 
 is_installed() {
-    binary_exists || service_exists_systemd || service_exists_openrc
+    if binary_exists || service_exists_systemd || service_exists_openrc; then
+        return 0
+    fi
+    return 1
 }
 
 # ============================================
