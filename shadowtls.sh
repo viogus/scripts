@@ -620,7 +620,7 @@ EOF
     # 创建日志文件并设置权限
     touch "/var/log/${identifier}.log"
     chmod 640 "/var/log/${identifier}.log"
-    chown root:root "/var/log/${identifier}.log"
+    chown nobody:nobody "/var/log/${identifier}.log" 2>/dev/null || chown nobody "/var/log/${identifier}.log" 2>/dev/null || true
 }
 
 # 安装 ShadowTLS

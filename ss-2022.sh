@@ -839,7 +839,7 @@ Install() {
         if command -v journalctl >/dev/null 2>&1; then
             echo -e " - journalctl -xe --unit ss-rust"
         else
-            echo -e " - cat /var/log/ss-rust.log"
+            echo -e " - cat /var/log/ss-rust.log /var/log/ss-rust.err 2>/dev/null"
         fi
         Before_Start_Menu
     fi
