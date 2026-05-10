@@ -111,20 +111,41 @@ gen_pass() {
         uuid)
             if [[ -f /proc/sys/kernel/random/uuid ]]; then
                 cat /proc/sys/kernel/random/uuid
-            else
+            elif has_cmd dd && has_cmd od; then
                 # Fallback: build a UUID-like string from /dev/urandom
                 local raw
                 raw=$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -A n -tx1 | tr -d ' \n')
                 echo "${raw:0:8}-${raw:8:4}-${raw:12:4}-${raw:16:4}-${raw:20:12}"
+            elif has_cmd openssl; then
+                local raw
+                raw=$(openssl rand -hex 16)
+                echo "${raw:0:8}-${raw:8:4}-${raw:12:4}-${raw:16:4}-${raw:20:12}"
+            else
+                echo -e "${ERROR} gen_pass: 缺少 dd、od 或 openssl${RESET}" >&2
+                return 1
             fi
             ;;
         base64)
-            dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64 | tr -d '\n'
+            if has_cmd dd && has_cmd base64; then
+                dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64 | tr -d '\n'
+            elif has_cmd openssl; then
+                openssl rand -base64 32 | tr -d '\n'
+            else
+                echo -e "${ERROR} gen_pass: 缺少 dd、base64 或 openssl${RESET}" >&2
+                return 1
+            fi
             ;;
         hex)
-            local n
-            n=$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -A n -tx1 | tr -d ' \n')
-            echo "${n:0:32}"
+            if has_cmd openssl; then
+                openssl rand -hex 16
+            elif has_cmd dd && has_cmd od; then
+                local n
+                n=$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -A n -tx1 | tr -d ' \n')
+                echo "${n:0:32}"
+            else
+                echo -e "${ERROR} gen_pass: 缺少 dd、od 或 openssl${RESET}" >&2
+                return 1
+            fi
             ;;
         *)
             gen_pass uuid
@@ -142,7 +163,7 @@ is_port_used() {
     if has_cmd ss; then
         ss -tuln 2>/dev/null | awk '{print $5}' | grep -Eq "[:.]${port}([[:space:]]|$)"
     elif has_cmd netstat; then
-        netstat -tuln 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}$"
+        netstat -tuln 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}([[:space:]]|$)"
     else
         return 1
     fi
@@ -158,7 +179,8 @@ read_port() {
     local input
 
     while true; do
-        read -r -p "输入端口(1-65535)，回车随机: " input
+        printf "输入端口(1-65535)，回车随机: " >&2
+        read -r input
         if [[ -z "$input" ]]; then
             input=$(random_port "$range")
             echo -e "${INFO} 已生成随机端口: ${input}${RESET}" >&2
@@ -182,25 +204,26 @@ read_port() {
 # 返回格式: amd64-musl, amd64-gnu, arm64-musl 等
 # libc 检测: /lib/ld-musl-*.so.1 存在或 ldd --version 含 musl
 detect_arch_musl() {
-    local arch_raw libc arch
+    local arch_raw libc arch arch_musl_name
 
     arch_raw=$(uname -m)
     case "$arch_raw" in
-        x86_64|amd64)               arch="amd64" ;;
-        aarch64|arm64)              arch="arm64" ;;
-        armv7l|armv7)               arch="armv7" ;;
-        armv6l|armv6)               arch="armv6" ;;
-        i686|i386)                  arch="i686" ;;
-        riscv64)                    arch="riscv64" ;;
+        x86_64|amd64)               arch="amd64"; arch_musl_name="x86_64" ;;
+        aarch64|arm64)              arch="arm64"; arch_musl_name="aarch64" ;;
+        armv7l|armv7)               arch="armv7"; arch_musl_name="armhf" ;;
+        armv8l)                     arch="arm64"; arch_musl_name="aarch64" ;;
+        armv6l|armv6)               arch="armv6"; arch_musl_name="armhf" ;;
+        i686|i386)                  arch="i686"; arch_musl_name="i386" ;;
+        riscv64)                    arch="riscv64"; arch_musl_name="riscv64" ;;
         *)
             echo -e "${ERROR} 不支持的系统架构: ${arch_raw}${RESET}" >&2
             return 1
             ;;
     esac
 
-    # Detect musl vs gnu
+    # Detect musl vs gnu — check dynamically for ld-musl-<arch>.so.1
     libc="gnu"
-    if [[ -f /lib/ld-musl-x86_64.so.1 ]] || [[ -f /lib/ld-musl-aarch64.so.1 ]] || [[ -f /lib/ld-musl-armhf.so.1 ]]; then
+    if [[ -n "$arch_musl_name" && -f "/lib/ld-musl-${arch_musl_name}.so.1" ]]; then
         libc="musl"
     elif has_cmd ldd && ldd --version 2>&1 | grep -qi musl; then
         libc="musl"
@@ -221,9 +244,14 @@ os_install() {
 
     echo -e "${INFO} 正在安装系统依赖 (${os})...${RESET}"
 
-    # Build package list
-    local pkgs="ca-certificates curl unzip bash tzdata"
-    pkgs="$pkgs $extra"
+    # Validate extra package names to prevent hyphen-injection
+    if [[ -n "$extra" ]] && ! [[ "$extra" =~ ^[a-zA-Z0-9._-]+( [a-zA-Z0-9._-]+)*$ ]]; then
+        echo -e "${ERROR} 非法的额外包名: ${extra}${RESET}" >&2
+        return 1
+    fi
+
+    # Build package list with safe concatenation
+    local pkgs="ca-certificates curl unzip bash tzdata${extra:+ $extra}"
 
     case "$os" in
         alpine)
@@ -263,11 +291,11 @@ close_wall() {
     done
 
     # Also check ufw command directly (may not have a service file)
-    if ! $found && has_cmd ufw && ufw status 2>/dev/null | grep -qi active; then
+    if [[ "$found" == "false" ]] && has_cmd ufw && ufw status 2>/dev/null | grep -qi active; then
         found=true
     fi
 
-    if $found; then
+    if [[ "$found" == "true" ]]; then
         echo -e "${WARN} 检测到防火墙服务，请手动放行端口。示例：${RESET}"
         echo -e "  ${YELLOW}ufw:        ufw allow <端口>${RESET}"
         echo -e "  ${YELLOW}firewalld:  firewall-cmd --add-port=<端口>/tcp --permanent && firewall-cmd --reload${RESET}"
@@ -284,9 +312,17 @@ get_latest_version() {
     local repo="$1"
     local version
 
-    version=$(curl -s --connect-timeout 10 --max-time 30 \
-        "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null \
-        | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/') || true
+    # Try grep -oP first (GNU grep), fall back to grep/sed
+    if echo "test" | grep -oP 'test' >/dev/null 2>&1; then
+        version=$(curl -s --connect-timeout 10 --max-time 30 \
+            "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null \
+            | grep -oP '"tag_name":\s*"\K[^"]+') || true
+    fi
+    if [[ -z "$version" ]]; then
+        version=$(curl -s --connect-timeout 10 --max-time 30 \
+            "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null \
+            | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/') || true
+    fi
 
     if [[ -z "$version" ]]; then
         echo -e "${ERROR} 无法获取 ${repo} 最新版本号${RESET}" >&2
@@ -425,7 +461,7 @@ download_and_install_binary() {
 
     # 8. Find the binary (in extracted tree or raw file)
     local found
-    found=$(find "$tmpdir" -type f -name "$binary_name" 2>/dev/null | head -1)
+    found=$(find "$tmpdir" -type f -name "$binary_name" -executable 2>/dev/null | head -1)
     if [[ -z "$found" ]]; then
         echo -e "${ERROR} 未在归档中找到可执行文件: ${binary_name}${RESET}" >&2
         echo -e "  ${YELLOW}归档内容:${RESET}" >&2
