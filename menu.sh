@@ -17,13 +17,21 @@ BLUE='[0;34m'
 RESET='[0m'
 }
 
-	# === 新框架 (Phase 1) ===
-	FRAMEWORK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-	if [[ -f "${FRAMEWORK_DIR}/lib/framework.sh" ]]; then
-	    FRAMEWORK_LOADED=true
-	else
-	    FRAMEWORK_LOADED=false
-	fi
+# === 新框架 (Phase 1) ===
+# 从 GitHub 下载框架，不留本地文件
+GITHUB_RAW="https://raw.githubusercontent.com/viogus/scripts/main"
+
+fw_download() {
+    local tmp; tmp=$(mktemp /tmp/fw-XXXXXX)
+    if curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_RAW}/$1" -o "$tmp" 2>/dev/null; then
+        echo "$tmp"
+    else
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+
 
 # 当前版本号
 current_version="4.0"
@@ -685,6 +693,53 @@ ${YELLOW}=== 系统功能 ===${RESET}"
 # 主程序入口
 # ============================================
 
+# === 统一框架模式 (从 GitHub 动态加载) ===
+run_framework_mode() {
+    local fw_tmp svc_tmp conf_tmp
+    echo -e "${CYAN}正在加载统一管理框架...${RESET}"
+
+    fw_tmp=$(fw_download "lib/framework.sh") || {
+        echo -e "${RED}下载 framework.sh 失败，请检查网络${RESET}"
+        read -rp "按回车返回..." _
+        return
+    }
+    . "$fw_tmp"
+
+    svc_tmp=$(mktemp -d /tmp/fw-services-XXXXXX)
+    local confs="anytls hysteria2"
+    for c in $confs; do
+        conf_tmp=$(fw_download "services/${c}.conf") && mv "$conf_tmp" "${svc_tmp}/${c}.conf"
+    done
+
+    show_all_status "$svc_tmp"
+
+    echo -e "${CYAN}可用服务:${RESET}"
+    local i=1
+    local confs_list=()
+    for conf in "${svc_tmp}"/*.conf; do
+        [[ -f "$conf" ]] || continue
+        . "$conf"
+        echo -e "${GREEN}${i}.${RESET} ${DISPLAY}"
+        confs_list+=("$conf")
+        ((i++))
+    done
+
+    if [[ ${#confs_list[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}没有可用的服务配置${RESET}"
+        rm -rf "$svc_tmp" "$fw_tmp"
+        read -rp "按回车返回..." _
+        return
+    fi
+
+    echo ""
+    read -rp "选择服务 (1-$((i-1)), 0 返回): " svc_choice
+    if [[ "${svc_choice:-0}" != "0" ]] && [[ "$svc_choice" -ge 1 ]] && [[ "$svc_choice" -le ${#confs_list[@]} ]]; then
+        show_service_submenu "${confs_list[$((svc_choice-1))]}"
+    fi
+
+    rm -rf "$svc_tmp" "$fw_tmp"
+}
+
 check_root
 check_dependencies
 install_global_command
@@ -705,32 +760,7 @@ while true; do
         11) uninstall_hysteria ;;
         12) update_script ;;
         13) surge_export_all ;;
-	    14)
-	        if $FRAMEWORK_LOADED; then
-	            . "${FRAMEWORK_DIR}/lib/framework.sh"
-	            show_all_status "services"
-	            echo -e "${CYAN}可用服务:${RESET}"
-	            local i=1
-	            for conf in services/*.conf; do
-	                [[ -f "$conf" ]] || continue
-	                . "$conf"
-	                echo -e "${GREEN}${i}.${RESET} ${DISPLAY}"
-	                ((i++))
-	            done
-	            echo ""
-	            read -rp "选择服务 (1-$((i-1)), 0 返回): " svc_choice
-	            [[ "$svc_choice" == "0" ]] && continue
-	            local c=1
-	            for conf in services/*.conf; do
-	                [[ -f "$conf" ]] || continue
-	                [[ "$c" -eq "$svc_choice" ]] && { show_service_submenu "$conf"; break; }
-	                ((c++))
-	            done
-	        else
-	            echo -e "${RED}framework.sh 未找到${RESET}"
-	            read -rp "按回车返回..." _
-	        fi
-	        ;;
+        14) run_framework_mode ;;
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
         *) echo -e "${RED}请输入正确的选项 [0-14]${RESET}" ;;
     esac
