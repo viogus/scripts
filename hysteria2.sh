@@ -573,6 +573,7 @@ uninstall_hysteria() {
 show_status() {
     echo -e "
 ${CYAN}=== Hysteria 2 状态 ===${RESET}"
+    set +e
     if is_installed; then
         local init; init=$(detect_init)
         if [[ "$init" == "openrc" ]]; then
@@ -601,6 +602,7 @@ ${CYAN}=== Hysteria 2 状态 ===${RESET}"
     fi
     echo -e "${CYAN}===================${RESET}
 "
+    set -e
 }
 
 start_service() {
