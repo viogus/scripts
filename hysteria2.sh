@@ -418,6 +418,11 @@ command_background="yes"
 pidfile="/run/hysteria.pid"
 output_log="/var/log/hysteria.log"
 error_log="/var/log/hysteria.err"
+
+depend() {
+    need net
+}
+
 OPENRCEOF
     chmod +x "/etc/init.d/${SERVICE_NAME}"
     touch /var/log/hysteria.log /var/log/hysteria.err

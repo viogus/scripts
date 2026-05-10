@@ -127,6 +127,11 @@ command_background="yes"
 pidfile="/run/ss-rust.pid"
 output_log="/var/log/ss-rust.log"
 error_log="/var/log/ss-rust.err"
+
+depend() {
+    need net
+}
+
 OPENRCEOF
     chmod +x "/etc/init.d/ss-rust"
     touch /var/log/ss-rust.log /var/log/ss-rust.err

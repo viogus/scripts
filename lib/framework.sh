@@ -500,6 +500,11 @@ command_background="yes"
 pidfile="/run/${name}.pid"
 output_log="/var/log/${name}.log"
 error_log="/var/log/${name}.err"
+
+	depend() {
+	    need net
+	}
+
 OPENRCEOF
     chmod +x "/etc/init.d/${name}"
     touch "/var/log/${name}.log" "/var/log/${name}.err"

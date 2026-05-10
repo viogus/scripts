@@ -295,6 +295,11 @@ command_user="nobody"
 command_background="yes"
 pidfile="/run/anytls.pid"
 output_log="/var/log/anytls.log"
+
+depend() {
+    need net
+}
+
 error_log="/var/log/anytls.err"
 OPENRCEOF
     cat >> "$OPENRC_INIT" <<EOF

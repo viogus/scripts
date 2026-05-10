@@ -119,6 +119,11 @@ command_background="yes"
 pidfile="/run/${name}.pid"
 output_log="/var/log/${name}.log"
 error_log="/var/log/${name}.err"
+
+depend() {
+    need net
+}
+
 OPENRCEOF
     chmod +x "/etc/init.d/${name}"
     touch "/var/log/${name}.log" "/var/log/${name}.err"
@@ -560,6 +565,11 @@ command_background="yes"
 pidfile="/run/${identifier}.pid"
 output_log="/var/log/${identifier}.log"
 error_log="/var/log/${identifier}.log"
+
+	depend() {
+	    need net
+	}
+
 OPENRCEOF
         chmod +x "$service_file"
     else

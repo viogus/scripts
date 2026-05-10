@@ -73,6 +73,11 @@ command_background="yes"
 pidfile="/run/xray.pid"
 output_log="/var/log/xray.log"
 error_log="/var/log/xray.err"
+
+depend() {
+    need net
+}
+
 OPENRCEOF
   chmod +x "/etc/init.d/xray"
   touch /var/log/xray.log /var/log/xray.err
