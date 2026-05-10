@@ -385,9 +385,14 @@ download_ss() {
     
     rm -f "${filename}"
     chmod +x ssserver
+    mkdir -p "$(dirname "${BINARY_PATH}")"
     mv -f ssserver "${BINARY_PATH}"
     rm -f sslocal ssmanager ssservice ssurl
-    
+
+    if [[ ! -x "${BINARY_PATH}" ]]; then
+        error_exit "Shadowsocks Rust 安装失败：${BINARY_PATH} 不可执行"
+    fi
+
     echo "${version}" > "${VERSION_FILE}"
     echo -e "${SUCCESS} Shadowsocks Rust ${version} 下载安装完成！"
 }

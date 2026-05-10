@@ -346,8 +346,7 @@ install_anytls() {
     judge "下载AnyTLS"
 
     unzip -o "$out" -d "$SNAP_DIR" >/dev/null
-    mv "${SNAP_DIR}/anytls-server" "$BINARY"
-    chmod +x "$BINARY"
+    install -D -m755 "${SNAP_DIR}/anytls-server" "$BINARY"
     rm -rf "${SNAP_DIR}"
 
     local port pass init
@@ -405,8 +404,7 @@ update_anytls() {
     judge "下载AnyTLS"
 
     unzip -o "$out" -d "$SNAP_DIR" >/dev/null
-    mv "${SNAP_DIR}/anytls-server" "$BINARY"
-    chmod +x "$BINARY"
+    install -D -m755 "${SNAP_DIR}/anytls-server" "$BINARY"
     rm -rf "${SNAP_DIR}"
 
     write_config "$port" "$pass"
