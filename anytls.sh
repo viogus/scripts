@@ -297,7 +297,7 @@ pidfile="/run/anytls.pid"
 output_log="/var/log/anytls.log"
 
 depend() {
-    need net
+    need networking
 }
 
 error_log="/var/log/anytls.err"

@@ -60,6 +60,7 @@ get_latest_snell_v4_version() {
     if [ -n "$latest_version" ]; then
         echo "v${latest_version}"
     else
+        echo -e "${YELLOW}无法获取 Snell v4 最新版本号，使用默认版本: v4.1.1${RESET}" >&2
         echo "v4.1.1"
     fi
 }
@@ -83,6 +84,7 @@ get_latest_snell_v5_version() {
     if [ -n "$v5_release" ]; then
         echo "v${v5_release}"
     else
+        echo -e "${YELLOW}无法获取 Snell v5 最新版本号，使用默认版本: v5.0.0${RESET}" >&2
         echo "v5.0.0"
     fi
 }
@@ -154,9 +156,9 @@ generate_surge_config() {
     local installed_version=$6   # 新增参数
 
     if [ "$installed_version" = "v5" ]; then
-        # v5 版本输出 v4 和 v5 两种配置
-        echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 4, reuse = true, tfo = true${RESET}"
-        echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 5, reuse = true, tfo = true${RESET}"
+        # v5 服务端向下兼容 v4 客户端，同时输出两种配置
+        echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 4, reuse = true, tfo = true${RESET}  ${YELLOW}(v4 向下兼容)${RESET}"
+        echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 5, reuse = true, tfo = true${RESET}  ${YELLOW}(v5 当前版本)${RESET}"
     else
         # v4 版本只输出 v4 配置
         echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 4, reuse = true, tfo = true${RESET}"
@@ -166,9 +168,9 @@ generate_surge_config() {
 # 检测当前安装的 Snell 版本
 detect_installed_snell_version() {
     if command -v snell-server &> /dev/null; then
-        # 尝试获取版本信息
-        local version_output=$(snell-server --v 2>&1)
-        if echo "$version_output" | grep -q "v5"; then
+        local version_output; version_output=$(snell-server --v 2>&1) || true
+        # 匹配 v5 / V5 / version 5 / 5.0.0 等格式，不区分大小写
+        if echo "$version_output" | grep -qiE '(^|[[:space:]/v])5\.'; then
             echo "v5"
         else
             echo "v4"
@@ -409,7 +411,7 @@ output_log="/var/log/${name}.log"
 error_log="/var/log/${name}.err"
 
 depend() {
-    need net
+    need networking
 }
 
 OPENRCEOF
@@ -1157,16 +1159,16 @@ ${GREEN}用户 ShadowTLS 配置 (端口: ${snell_port})：${RESET}"
 ${GREEN}Surge 配置格式：${RESET}"
             if [ ! -z "$IPV4_ADDR" ]; then
                 if [ "$snell_version" = "v5" ]; then
-                    echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
-                    echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 5, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
+                    echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}  ${YELLOW}(v4 向下兼容)${RESET}"
+                    echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 5, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}  ${YELLOW}(v5 当前版本)${RESET}"
                 else
                     echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
                 fi
             fi
             if [ ! -z "$IPV6_ADDR" ]; then
                 if [ "$snell_version" = "v5" ]; then
-                    echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
-                    echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 5, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
+                    echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}  ${YELLOW}(v4 向下兼容)${RESET}"
+                    echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 5, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}  ${YELLOW}(v5 当前版本)${RESET}"
                 else
                     echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
                 fi

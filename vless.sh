@@ -75,7 +75,7 @@ output_log="/var/log/xray.log"
 error_log="/var/log/xray.err"
 
 depend() {
-    need net
+    need networking
 }
 
 OPENRCEOF

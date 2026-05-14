@@ -420,7 +420,7 @@ output_log="/var/log/hysteria.log"
 error_log="/var/log/hysteria.err"
 
 depend() {
-    need net
+    need networking
 }
 
 OPENRCEOF

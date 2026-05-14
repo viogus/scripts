@@ -129,7 +129,7 @@ output_log="/var/log/ss-rust.log"
 error_log="/var/log/ss-rust.err"
 
 depend() {
-    need net
+    need networking
 }
 
 OPENRCEOF

@@ -121,7 +121,7 @@ output_log="/var/log/${name}.log"
 error_log="/var/log/${name}.err"
 
 depend() {
-    need net
+    need networking
 }
 
 OPENRCEOF
@@ -567,7 +567,7 @@ output_log="/var/log/${identifier}.log"
 error_log="/var/log/${identifier}.log"
 
 	depend() {
-	    need net
+	    need networking
 	}
 
 OPENRCEOF

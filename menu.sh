@@ -504,6 +504,28 @@ uninstall_hysteria() {
     fi
 }
 
+uninstall_frp() {
+    echo -e "${CYAN}正在卸载 frp...${RESET}"
+    local init; init=$(detect_init)
+    if [[ "$init" == "openrc" ]]; then
+        rc-service frps stop 2>/dev/null || true
+        rc-service frpc stop 2>/dev/null || true
+        rc-update del frps default >/dev/null 2>&1 || true
+        rc-update del frpc default >/dev/null 2>&1 || true
+        rm -f "/etc/init.d/frps" "/etc/init.d/frpc"
+    else
+        systemctl stop frps 2>/dev/null || true
+        systemctl stop frpc 2>/dev/null || true
+        systemctl disable frps >/dev/null 2>&1 || true
+        systemctl disable frpc >/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/frps.service" "/etc/systemd/system/frpc.service"
+        systemctl daemon-reload 2>/dev/null || true
+    fi
+    rm -f /usr/local/bin/frps /usr/local/bin/frpc
+    rm -rf /usr/local/etc/frp
+    echo -e "${GREEN}frp 卸载完成！${RESET}"
+}
+
 # IP 检测（供 surge_export_all 使用）
 at_get_ip() {
     local ip4 ip6
@@ -667,26 +689,28 @@ show_menu() {
     echo -e "${GREEN}4.${RESET} ShadowTLS 安装管理"
     echo -e "${GREEN}5.${RESET} AnyTLS 安装管理"
     echo -e "${GREEN}6.${RESET} Hysteria 2 安装管理"
+    echo -e "${GREEN}7.${RESET} frp 安装管理 (frps/frpc)"
 
     echo -e "
 ${YELLOW}=== 卸载功能 ===${RESET}"
-    echo -e "${GREEN}7.${RESET} 卸载 Snell"
-    echo -e "${GREEN}8.${RESET} 卸载 SS-2022"
-    echo -e "${GREEN}9.${RESET} 卸载 ShadowTLS"
-    echo -e "${GREEN}10.${RESET} 卸载 AnyTLS"
-    echo -e "${GREEN}11.${RESET} 卸载 Hysteria 2"
+    echo -e "${GREEN}8.${RESET} 卸载 Snell"
+    echo -e "${GREEN}9.${RESET} 卸载 SS-2022"
+    echo -e "${GREEN}10.${RESET} 卸载 ShadowTLS"
+    echo -e "${GREEN}11.${RESET} 卸载 AnyTLS"
+    echo -e "${GREEN}12.${RESET} 卸载 Hysteria 2"
+    echo -e "${GREEN}13.${RESET} 卸载 frp (frps/frpc)"
 
     echo -e "
 ${YELLOW}=== 系统功能 ===${RESET}"
-    echo -e "${GREEN}12.${RESET} 更新脚本"
-    echo -e "${GREEN}13.${RESET} 输出 Surge 配置"
-	    echo -e "${GREEN}14.${RESET} [新] 统一管理模式 (测试中)"
+    echo -e "${GREEN}14.${RESET} 更新脚本"
+    echo -e "${GREEN}15.${RESET} 输出 Surge 配置"
+	    echo -e "${GREEN}16.${RESET} [新] 统一管理模式 (测试中)"
     echo -e "${GREEN}0.${RESET} 退出"
 
     echo -e "${CYAN}============================================${RESET}"
     echo -e "${GREEN}退出脚本后，输入 menu 可重新进入${RESET}"
     echo -e "${CYAN}============================================${RESET}"
-    read -rp "请输入选项 [0-14]: " num
+    read -rp "请输入选项 [0-16]: " num
 }
 
 # ============================================
@@ -753,16 +777,18 @@ while true; do
         4) run_service_script "ShadowTLS" "https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh" ;;
         5) run_service_script "AnyTLS" "https://raw.githubusercontent.com/viogus/scripts/main/anytls.sh" ;;
         6) run_service_script "Hysteria 2" "https://raw.githubusercontent.com/viogus/scripts/main/hysteria2.sh" ;;
-        7) uninstall_snell ;;
-        8) uninstall_ss_rust ;;
-        9) uninstall_shadowtls ;;
-        10) uninstall_anytls ;;
-        11) uninstall_hysteria ;;
-        12) update_script ;;
-        13) surge_export_all ;;
-        14) run_framework_mode ;;
+        7) run_service_script "frp" "https://raw.githubusercontent.com/viogus/scripts/main/frp.sh" ;;
+        8) uninstall_snell ;;
+        9) uninstall_ss_rust ;;
+        10) uninstall_shadowtls ;;
+        11) uninstall_anytls ;;
+        12) uninstall_hysteria ;;
+        13) uninstall_frp ;;
+        14) update_script ;;
+        15) surge_export_all ;;
+        16) run_framework_mode ;;
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
-        *) echo -e "${RED}请输入正确的选项 [0-14]${RESET}" ;;
+        *) echo -e "${RED}请输入正确的选项 [0-16]${RESET}" ;;
     esac
     echo -e "
 ${CYAN}按任意键返回主菜单...${RESET}"
