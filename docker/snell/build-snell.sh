@@ -5,18 +5,22 @@ case "${TARGETARCH}" in
   amd64)
     SNELL_ARCH=amd64
     GNU_TRIPLET=x86_64-linux-gnu
-    LD_PATH=/lib64/ld-linux-x86-64.so.2
     ;;
+esac
+
+# Standard ld-linux path per arch (busybox /lib64 → /lib symlink)
+case "${TARGETARCH}" in
+  amd64) LD_PATH=/lib/ld-linux-x86-64.so.2 ;;
+  arm64) LD_PATH=/lib/ld-linux-aarch64.so.1 ;;
+  arm)   LD_PATH=/lib/ld-linux-armhf.so.3 ;;
   arm64)
     SNELL_ARCH=aarch64
     GNU_TRIPLET=aarch64-linux-gnu
-    LD_PATH=/lib/ld-linux-aarch64.so.1
     ;;
   arm)
     if [ "${TARGETVARIANT}" = "v7" ]; then
       SNELL_ARCH=armv7l
       GNU_TRIPLET=arm-linux-gnueabihf
-      LD_PATH=/lib/ld-linux-armhf.so.3
     else
       echo "Unsupported arm variant: ${TARGETVARIANT}" >&2; exit 1
     fi
@@ -73,12 +77,6 @@ for lib in \
     echo "[snell] skip $lib (not present)"
   fi
 done
-
-# Busybox needs /lib64 on amd64 for ld-linux
-if [ "${TARGETARCH}" = "amd64" ]; then
-  mkdir -p /runtime/root/lib64
-  cp -a "$LD_PATH" /runtime/root/lib64/
-fi
 
 rm -rf /tmp/snell /tmp/snell.zip
 apt-get purge -y wget unzip && apt-get autoremove -y && apt-get clean
