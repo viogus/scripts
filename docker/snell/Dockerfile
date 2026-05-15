@@ -6,10 +6,9 @@ ARG SNELL_VERSION=5.0.1
 COPY build-snell.sh /tmp/
 RUN sh /tmp/build-snell.sh
 
-FROM busybox:stable-glibc
+FROM busybox:stable
 
-COPY --from=builder /usr/local/bin/snell-server /usr/local/bin/snell-server
-COPY --from=builder /runtime/lib/ /lib/
+COPY --from=builder /runtime/root/ /
 
 COPY snell-entrypoint.sh /usr/local/bin/snell-entrypoint.sh
 RUN chmod +x /usr/local/bin/snell-entrypoint.sh \
