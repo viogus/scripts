@@ -33,6 +33,11 @@ jobs:
         major:
           - 4
           - 5
+        variant:
+          - dockerfile: Dockerfile
+            suffix: ''
+          - dockerfile: Dockerfile.busybox
+            suffix: '-busybox'
 
     steps:
       - uses: actions/checkout@v4
@@ -74,10 +79,14 @@ jobs:
           IMG="${{ env.REGISTRY }}/${{ github.repository_owner }}/snell-server"
           V="${{ steps.version.outputs.snell_version }}"
           MAJOR="${{ steps.version.outputs.major }}"
+          SFX="${{ matrix.variant.suffix }}"
 
-          TAGS="${IMG}:v${V},${IMG}:v${MAJOR}"
-          if [ "$MAJOR" = "5" ]; then
+          TAGS="${IMG}:v${V}${SFX},${IMG}:v${MAJOR}${SFX}"
+          if [ "$MAJOR" = "5" ] && [ -z "$SFX" ]; then
             TAGS="${TAGS},${IMG}:latest"
+          fi
+          if [ "$MAJOR" = "5" ] && [ "$SFX" = "-busybox" ]; then
+            TAGS="${TAGS},${IMG}:busybox"
           fi
           echo "list=${TAGS}" >> $GITHUB_OUTPUT
 
@@ -85,6 +94,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: docker/snell
+          file: docker/snell/${{ matrix.variant.dockerfile }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           build-args: |
             SNELL_VERSION=${{ steps.version.outputs.snell_version }}
