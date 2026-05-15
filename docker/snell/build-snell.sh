@@ -5,22 +5,18 @@ case "${TARGETARCH}" in
   amd64)
     SNELL_ARCH=amd64
     GNU_TRIPLET=x86_64-linux-gnu
+    LD_PATH=/lib/ld-linux-x86-64.so.2
     ;;
-esac
-
-# Standard ld-linux path per arch (busybox /lib64 → /lib symlink)
-case "${TARGETARCH}" in
-  amd64) LD_PATH=/lib/ld-linux-x86-64.so.2 ;;
-  arm64) LD_PATH=/lib/ld-linux-aarch64.so.1 ;;
-  arm)   LD_PATH=/lib/ld-linux-armhf.so.3 ;;
   arm64)
     SNELL_ARCH=aarch64
     GNU_TRIPLET=aarch64-linux-gnu
+    LD_PATH=/lib/ld-linux-aarch64.so.1
     ;;
   arm)
     if [ "${TARGETVARIANT}" = "v7" ]; then
       SNELL_ARCH=armv7l
       GNU_TRIPLET=arm-linux-gnueabihf
+      LD_PATH=/lib/ld-linux-armhf.so.3
     else
       echo "Unsupported arm variant: ${TARGETVARIANT}" >&2; exit 1
     fi
@@ -50,20 +46,16 @@ mkdir -p /runtime/root/usr/local/bin
 cp /tmp/snell/snell-server /runtime/root/usr/local/bin/snell-server
 chmod +x /runtime/root/usr/local/bin/snell-server
 
-# Ensure glibc ABI: copy all needed .so files + dynamic linker from builder
-# libdl may be an ld script (glibc 2.34+) or absent entirely
+# Collect glibc .so files + dynamic linker from builder
 LIB_DIR=/lib/${GNU_TRIPLET}
 USR_LIB_DIR=/usr/lib/${GNU_TRIPLET}
 
-for dst in /runtime/root/lib /runtime/root/usr/lib; do
-  mkdir -p "$dst"
-done
+mkdir -p /runtime/root/lib /runtime/root/usr/lib
 
-# Copy dynamic linker to its hardcoded path (read from ELF INTERP)
+# Dynamic linker at standard path (busybox /lib64 → /lib symlink handles amd64)
 mkdir -p "$(dirname /runtime/root${LD_PATH})"
 cp -a "$LD_PATH" "/runtime/root${LD_PATH}"
 
-# Copy core glibc + gcc runtime
 for lib in \
   "${LIB_DIR}/libc.so.6" \
   "${LIB_DIR}/libm.so.6" \
