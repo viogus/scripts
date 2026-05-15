@@ -30,10 +30,14 @@ listen = 0.0.0.0:${PORT}
 psk = ${PSK}
 EOF
 
-if [ "$OBFS" != "off" ] && [ -n "${OBFS_HOST:-}" ]; then
-  echo "obfs = ${OBFS}" >> "$CONF"
-  echo "obfs-host = ${OBFS_HOST}" >> "$CONF"
+if [ "$OBFS" != "off" ]; then
+  if [ -n "${OBFS_HOST:-}" ]; then
+    echo "obfs = ${OBFS}" >> "$CONF"
+    echo "obfs-host = ${OBFS_HOST}" >> "$CONF"
+  else
+    echo "[snell] WARNING: OBFS=${OBFS} but OBFS_HOST not set, obfs disabled" >&2
+  fi
 fi
 
-echo "[snell] port=${PORT} psk=${PSK} obfs=${OBFS}"
+echo "[snell] port=${PORT} psk=*** obfs=${OBFS}"
 exec "$BIN" -c "$CONF"
