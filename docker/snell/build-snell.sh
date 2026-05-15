@@ -5,18 +5,19 @@ case "${TARGETARCH}" in
   amd64)
     SNELL_ARCH=amd64
     GNU_TRIPLET=x86_64-linux-gnu
-    LD_PATH=/lib/ld-linux-x86-64.so.2
+    # ELF INTERP = /lib64/ld-linux-x86-64.so.2, busybox /lib64->/lib
+    LD_DST=/lib/ld-linux-x86-64.so.2
     ;;
   arm64)
     SNELL_ARCH=aarch64
     GNU_TRIPLET=aarch64-linux-gnu
-    LD_PATH=/lib/ld-linux-aarch64.so.1
+    LD_DST=/lib/ld-linux-aarch64.so.1
     ;;
   arm)
     if [ "${TARGETVARIANT}" = "v7" ]; then
       SNELL_ARCH=armv7l
       GNU_TRIPLET=arm-linux-gnueabihf
-      LD_PATH=/lib/ld-linux-armhf.so.3
+      LD_DST=/lib/ld-linux-armhf.so.3
     else
       echo "Unsupported arm variant: ${TARGETVARIANT}" >&2; exit 1
     fi
@@ -52,9 +53,15 @@ USR_LIB_DIR=/usr/lib/${GNU_TRIPLET}
 
 mkdir -p /runtime/root/lib /runtime/root/usr/lib
 
-# Dynamic linker at standard path (busybox /lib64 → /lib symlink handles amd64)
-mkdir -p "$(dirname /runtime/root${LD_PATH})"
-cp -a "$LD_PATH" "/runtime/root${LD_PATH}"
+# Dynamic linker: source from GNU triplet dir, dest at ELF INTERP path
+LD_SRC="${LIB_DIR}/$(basename ${LD_DST})"
+mkdir -p "$(dirname /runtime/root${LD_DST})"
+if [ -e "$LD_SRC" ]; then
+  cp -a "$LD_SRC" "/runtime/root${LD_DST}"
+else
+  echo "[snell] WARNING: ld not at $LD_SRC, trying $LD_DST" >&2
+  cp -a "$LD_DST" "/runtime/root${LD_DST}"
+fi
 
 for lib in \
   "${LIB_DIR}/libc.so.6" \
