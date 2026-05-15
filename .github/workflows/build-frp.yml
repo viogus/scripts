@@ -5,8 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'Dockerfile'
-      - 'build-frp.sh'
+      - 'docker/frp/**'
       - '.github/workflows/build-frp.yml'
   schedule:
     - cron: '0 0 * * 0'
@@ -75,7 +74,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: docker/frp
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           build-args: |
             FRP_VERSION=${{ steps.version.outputs.frp_version }}
