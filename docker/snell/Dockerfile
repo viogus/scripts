@@ -12,7 +12,8 @@ COPY --from=builder /usr/local/bin/snell-server /usr/local/bin/snell-server
 COPY --from=builder /runtime/lib/ /lib/
 
 COPY snell-entrypoint.sh /usr/local/bin/snell-entrypoint.sh
-RUN chmod +x /usr/local/bin/snell-entrypoint.sh
+RUN chmod +x /usr/local/bin/snell-entrypoint.sh \
+ && mkdir -p /app
 
 ENV PORT=""
 ENV PSK=""
