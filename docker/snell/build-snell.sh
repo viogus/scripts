@@ -43,10 +43,16 @@ cp /tmp/snell/snell-server /usr/local/bin/snell-server
 chmod +x /usr/local/bin/snell-server
 
 # Collect .so files missing from busybox:stable-glibc
-mkdir -p /runtime/lib /runtime/usr/lib
-cp /lib/${GNU_TRIPLET}/libdl.so.2        /runtime/lib/
-cp /lib/${GNU_TRIPLET}/libgcc_s.so.1      /runtime/lib/
-cp /usr/lib/${GNU_TRIPLET}/libstdc++.so.6 /runtime/usr/lib/
+# libdl merged into libc in glibc 2.34+, skip if absent
+mkdir -p /runtime/lib
+for lib in \
+  /lib/${GNU_TRIPLET}/libdl.so.2 \
+  /lib/${GNU_TRIPLET}/libgcc_s.so.1 \
+  /usr/lib/${GNU_TRIPLET}/libstdc++.so.6; do
+  if [ -f "$lib" ]; then
+    cp "$lib" /runtime/lib/
+  fi
+done
 
 rm -rf /tmp/snell /tmp/snell.zip
 apt-get purge -y wget unzip && apt-get autoremove -y

@@ -9,8 +9,7 @@ RUN sh /tmp/build-snell.sh
 FROM busybox:stable-glibc
 
 COPY --from=builder /usr/local/bin/snell-server /usr/local/bin/snell-server
-COPY --from=builder /runtime/lib/     /lib/
-COPY --from=builder /runtime/usr/lib/ /usr/lib/
+COPY --from=builder /runtime/lib/ /lib/
 
 COPY snell-entrypoint.sh /app/snell-entrypoint.sh
 RUN chmod +x /app/snell-entrypoint.sh
