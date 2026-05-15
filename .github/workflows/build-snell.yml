@@ -8,7 +8,7 @@ on:
       - 'docker/snell/**'
       - '.github/workflows/build-snell.yml'
   schedule:
-    - cron: '0 3 * * 0'
+    - cron: '17 3 * * 0'
   workflow_dispatch:
     inputs:
       snell_version:
@@ -27,6 +27,13 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        major:
+          - 4
+          - 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -43,27 +50,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine Snell version
+      - name: Resolve v${{ matrix.major }} version
         id: version
         run: |
           if [ -n "${{ inputs.snell_version }}" ]; then
-            echo "snell_version=${{ inputs.snell_version }}" >> $GITHUB_OUTPUT
+            VER="${{ inputs.snell_version }}"
+            MAJOR="${{ matrix.major }}"
           else
+            MAJOR="${{ matrix.major }}"
+            P="snell-server-v${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*"
             VER=$(curl -s https://manual.nssurge.com/others/snell.html \
-              | grep -oP 'snell-server-v\K[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*' \
+              | grep -oP "$P" \
+              | grep -oP "${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*" \
               | grep -v b | sort -Vr | head -1) || true
-            [ -z "$VER" ] && VER="5.0.1"
-            echo "snell_version=$VER" >> $GITHUB_OUTPUT
+            [ -z "$VER" ] && VER="${MAJOR}.0.1"
           fi
+          echo "snell_version=$VER" >> $GITHUB_OUTPUT
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/snell-server
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.version.outputs.snell_version }}
+      - name: Generate tags
+        id: tags
+        run: |
+          IMG="${{ env.REGISTRY }}/${{ github.repository_owner }}/snell-server"
+          V="${{ steps.version.outputs.snell_version }}"
+          MAJOR="${{ steps.version.outputs.major }}"
+
+          TAGS="${IMG}:v${V},${IMG}:v${MAJOR}"
+          if [ "$MAJOR" = "5" ]; then
+            TAGS="${TAGS},${IMG}:latest"
+          fi
+          echo "list=${TAGS}" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -72,7 +88,9 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           build-args: |
             SNELL_VERSION=${{ steps.version.outputs.snell_version }}
-          labels: ${{ steps.meta.outputs.labels }}
-          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.snell_version }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: ${{ steps.tags.outputs.list }}
           push: true
           provenance: false
