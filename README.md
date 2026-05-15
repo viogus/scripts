@@ -81,6 +81,87 @@ source lib/svc-utils.sh
 - 安装脚本不会自动关闭防火墙
 - 私钥/密码不会写入全局可读的临时文件
 
+## Docker 镜像
+
+多架构镜像（amd64/arm64/armv7），每周自动更新，推送到 [ghcr.io/viogus](https://github.com/viogus/scripts/pkgs/container/)。
+
+### frp（frps / frpc）
+
+| 镜像 | 基础 | 大小 | 说明 |
+|------|------|------|------|
+| `ghcr.io/viogus/frps:latest` | scratch | ~15MB | frp 服务端 |
+| `ghcr.io/viogus/frpc:latest` | scratch | ~15MB | frp 客户端 |
+
+```yaml
+# docker-compose.yml
+services:
+  frps:
+    image: ghcr.io/viogus/frps:latest
+    restart: always
+    network_mode: host
+    volumes:
+      - ./frps.toml:/etc/frp/frps.toml
+    command: -c /etc/frp/frps.toml
+
+  frpc:
+    image: ghcr.io/viogus/frpc:latest
+    restart: always
+    network_mode: host
+    volumes:
+      - ./frpc.toml:/etc/frp/frpc.toml
+    command: -c /etc/frp/frpc.toml
+```
+
+### snell-server
+
+| 标签 | 基础 | 大小 | 说明 |
+|------|------|------|------|
+| `:latest` `:v5` `:v4` | scratch | ~3MB | 挂载配置文件 |
+| `:busybox` `:v5-busybox` `:v4-busybox` | busybox | ~4.5MB | 支持 env 变量 |
+
+**方式一：挂载配置（推荐）**
+
+```yaml
+services:
+  snell-server:
+    image: ghcr.io/viogus/snell-server:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./snell-server.conf:/app/snell-server.conf
+    command: -c /app/snell-server.conf
+```
+
+`snell-server.conf`：
+```ini
+[snell-server]
+listen = 0.0.0.0:9102
+psk = your_psk_here
+```
+
+**方式二：env 变量**
+
+```yaml
+services:
+  snell-server:
+    image: ghcr.io/viogus/snell-server:busybox
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PORT=9102
+      - PSK=your_psk
+      # 可选:
+      - OBFS=http        # off | http
+      - OBFS_HOST=       # 仅 OBFS=http 时有效
+```
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PORT` | 随机 1025-65535 | 监听端口 |
+| `PSK` | 随机 32 位 | 预共享密钥 |
+| `OBFS` | `off` | 混淆模式 |
+| `OBFS_HOST` | — | 混淆域名 |
+
 ## 许可
 
 MIT License
