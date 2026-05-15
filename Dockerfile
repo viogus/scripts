@@ -8,30 +8,15 @@ WORKDIR /src
 
 RUN apk add --no-cache git
 
-RUN <<SETUP
-  set -eu
-  case "${TARGETARCH}" in
-    amd64) GOARCH=amd64 ;;
-    arm64) GOARCH=arm64 ;;
-    arm)   GOARCH=arm
-           GOARM=${TARGETVARIANT#v}
-           : ${GOARM:=7} ;;
-    *)     echo "Unsupported arch: ${TARGETARCH}"; exit 1 ;;
-  esac
+# Cross-compile frp for target architecture
+COPY build-frp.sh /tmp/
+RUN sh /tmp/build-frp.sh
 
-  git clone --depth 1 --branch "v${FRP_VERSION}" \
-    https://github.com/fatedier/frp.git /src/frp
-  cd /src/frp
+FROM alpine:latest
 
-  GOOS=linux GOARCH=$GOARCH GOARM=${GOARM:-} \
-    go build -v -trimpath -ldflags "-s -w" -o /frps ./cmd/frps
-  GOOS=linux GOARCH=$GOARCH GOARM=${GOARM:-} \
-    go build -v -trimpath -ldflags "-s -w" -o /frpc ./cmd/frpc
-SETUP
-
-FROM scratch
-
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /frps /frpc /usr/bin/
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+RUN mkdir -p /etc/frp
 
 ENTRYPOINT ["/usr/bin/frps", "-c", "/etc/frp/frps.toml"]
