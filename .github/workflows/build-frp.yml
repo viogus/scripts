@@ -1,0 +1,142 @@
+name: Build & Push FRP Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/build-frp.yml'
+  schedule:
+    - cron: '0 0 * * 0'  # weekly sunday
+  workflow_dispatch:
+    inputs:
+      frp_version:
+        description: 'FRP version tag (e.g. 0.68.1)'
+        required: false
+        default: ''
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/frp
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine FRP version
+        id: version
+        run: |
+          if [ -n "${{ inputs.frp_version }}" ]; then
+            echo "frp_version=${{ inputs.frp_version }}" >> $GITHUB_OUTPUT
+          else
+            VER=$(curl -s https://api.github.com/repos/fatedier/frp/releases/latest \
+              | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
+            [ -z "$VER" ] && VER="0.68.1"
+            echo "frp_version=$VER" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            FRP_VERSION=${{ steps.version.outputs.frp_version }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.frp_version }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.platform }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      packages: write
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine FRP version
+        id: version
+        run: |
+          if [ -n "${{ inputs.frp_version }}" ]; then
+            echo "frp_version=${{ inputs.frp_version }}" >> $GITHUB_OUTPUT
+          else
+            VER=$(curl -s https://api.github.com/repos/fatedier/frp/releases/latest \
+              | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
+            [ -z "$VER" ] && VER="0.68.1"
+            echo "frp_version=$VER" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          TAG_ARGS="-t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.frp_version }}"
+          DIGEST_ARGS=""
+          for f in *; do
+            DIGEST_ARGS="$DIGEST_ARGS ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:$f"
+          done
+          docker buildx imagetools create $TAG_ARGS $DIGEST_ARGS
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
