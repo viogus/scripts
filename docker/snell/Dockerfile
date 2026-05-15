@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM debian:stable-slim AS builder
+FROM debian:stable-slim AS builder
 
 ARG TARGETARCH TARGETVARIANT
 ARG SNELL_VERSION=5.0.1
