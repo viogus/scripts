@@ -114,14 +114,22 @@ services:
 
 ### snell-server
 
-| 标签 | 基础 | 大小 | 说明 |
-|------|------|------|------|
-| `:latest` `:v5` `:v4` | scratch | ~3MB | 挂载配置文件 |
-| `:busybox` `:v5-busybox` `:v4-busybox` | busybox | ~4.5MB | 支持 env 变量 |
-
-**方式一：挂载配置（推荐）**
+`ghcr.io/viogus/snell-server` — env 变量和挂载配置均支持。
 
 ```yaml
+# env 变量方式
+services:
+  snell-server:
+    image: ghcr.io/viogus/snell-server:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PORT=9102
+      - PSK=your_psk
+```
+
+```yaml
+# 挂载配置方式（检测到配置文件自动跳过 env 生成）
 services:
   snell-server:
     image: ghcr.io/viogus/snell-server:latest
@@ -129,30 +137,6 @@ services:
     network_mode: host
     volumes:
       - ./snell-server.conf:/app/snell-server.conf
-    command: -c /app/snell-server.conf
-```
-
-`snell-server.conf`：
-```ini
-[snell-server]
-listen = 0.0.0.0:9102
-psk = your_psk_here
-```
-
-**方式二：env 变量**
-
-```yaml
-services:
-  snell-server:
-    image: ghcr.io/viogus/snell-server:busybox
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      - PORT=9102
-      - PSK=your_psk
-      # 可选:
-      - OBFS=http        # off | http
-      - OBFS_HOST=       # 仅 OBFS=http 时有效
 ```
 
 | 变量 | 默认值 | 说明 |
@@ -160,7 +144,6 @@ services:
 | `PORT` | 随机 1025-65535 | 监听端口 |
 | `PSK` | 随机 32 位 | 预共享密钥 |
 | `OBFS` | `off` | 混淆模式 |
-| `OBFS_HOST` | — | 混淆域名 |
 
 ## 许可
 

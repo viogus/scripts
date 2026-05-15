@@ -1,16 +1,24 @@
-FROM --platform=$BUILDPLATFORM alpine:latest AS downloader
+FROM --platform=$BUILDPLATFORM debian:stable-slim AS builder
 
 ARG TARGETARCH TARGETVARIANT
 ARG SNELL_VERSION=5.0.1
 
-RUN apk add --no-cache curl unzip
-
 COPY build-snell.sh /tmp/
 RUN sh /tmp/build-snell.sh
 
-FROM scratch
+FROM busybox:stable-glibc
 
-COPY --from=downloader /usr/local/bin/snell-server /usr/local/bin/snell-server
+COPY --from=builder /usr/local/bin/snell-server /usr/local/bin/snell-server
+COPY --from=builder /runtime/lib/     /lib/
+COPY --from=builder /runtime/usr/lib/ /usr/lib/
 
-ENTRYPOINT ["/usr/local/bin/snell-server"]
-CMD ["-c", "/app/snell-server.conf"]
+COPY snell-entrypoint.sh /app/snell-entrypoint.sh
+RUN chmod +x /app/snell-entrypoint.sh
+
+ENV PORT=""
+ENV PSK=""
+ENV OBFS="off"
+
+VOLUME ["/app"]
+
+ENTRYPOINT ["/app/snell-entrypoint.sh"]

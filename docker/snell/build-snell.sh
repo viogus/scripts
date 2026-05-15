@@ -2,11 +2,18 @@
 set -eu
 
 case "${TARGETARCH}" in
-  amd64) SNELL_ARCH=amd64 ;;
-  arm64) SNELL_ARCH=aarch64 ;;
+  amd64)
+    SNELL_ARCH=amd64
+    GNU_TRIPLET=x86_64-linux-gnu
+    ;;
+  arm64)
+    SNELL_ARCH=aarch64
+    GNU_TRIPLET=aarch64-linux-gnu
+    ;;
   arm)
     if [ "${TARGETVARIANT}" = "v7" ]; then
       SNELL_ARCH=armv7l
+      GNU_TRIPLET=arm-linux-gnueabihf
     else
       echo "Unsupported arm variant: ${TARGETVARIANT}" >&2; exit 1
     fi
@@ -19,9 +26,10 @@ esac
 URL="https://dl.nssurge.com/snell/snell-server-v${SNELL_VERSION}-linux-${SNELL_ARCH}.zip"
 echo "[snell] downloading v${SNELL_VERSION} for linux/${SNELL_ARCH}"
 
+apt-get update && apt-get install -y --no-install-recommends wget unzip ca-certificates
+
 for i in 1 2 3; do
-  if curl -fsSL --connect-timeout 10 --max-time 120 \
-    -o /tmp/snell.zip "$URL"; then
+  if wget -q --timeout=30 -O /tmp/snell.zip "$URL"; then
     break
   fi
   echo "[snell] attempt $i failed, retrying..." >&2
@@ -34,6 +42,11 @@ unzip -q /tmp/snell.zip -d /tmp/snell
 cp /tmp/snell/snell-server /usr/local/bin/snell-server
 chmod +x /usr/local/bin/snell-server
 
-rm -rf /tmp/snell /tmp/snell.zip
+# Collect .so files missing from busybox:stable-glibc
+mkdir -p /runtime/lib /runtime/usr/lib
+cp /lib/${GNU_TRIPLET}/libdl.so.2        /runtime/lib/
+cp /lib/${GNU_TRIPLET}/libgcc_s.so.1      /runtime/lib/
+cp /usr/lib/${GNU_TRIPLET}/libstdc++.so.6 /runtime/usr/lib/
 
-echo "[snell] version: $(/usr/local/bin/snell-server --version 2>&1 || true)"
+rm -rf /tmp/snell /tmp/snell.zip
+apt-get purge -y wget unzip && apt-get autoremove -y
