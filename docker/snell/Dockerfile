@@ -29,7 +29,7 @@ RUN <<'SRC'
     *) echo "Unsupported arch: ${TARGETARCH}" >&2; exit 1 ;;
   esac
 
-  apt-get update && apt-get install -y --no-install-recommends wget unzip ca-certificates libstdc++6
+  apt-get update && apt-get install -y --no-install-recommends wget unzip ca-certificates binutils libstdc++6
 
   URL="https://dl.nssurge.com/snell/snell-server-v${SNELL_VERSION}-linux-${SNELL_ARCH}.zip"
   echo "[snell] downloading v${SNELL_VERSION} for linux/${SNELL_ARCH}"
@@ -43,12 +43,13 @@ RUN <<'SRC'
 
   unzip -q /tmp/snell.zip -d /tmp/snell
 
+  strip --strip-all /tmp/snell/snell-server
+
   mkdir -p /runtime/root/usr/local/bin /runtime/root/lib /runtime/root/usr/lib
   cp /tmp/snell/snell-server /runtime/root/usr/local/bin/snell-server
   chmod +x /runtime/root/usr/local/bin/snell-server
 
   LIB_DIR=/lib/${GNU_TRIPLET}
-  USR_LIB_DIR=/usr/lib/${GNU_TRIPLET}
 
   # dynamic linker: source from GNU triplet dir, dest at ELF INTERP path
   LD_SRC="${LIB_DIR}/$(basename ${LD_DST})"
@@ -60,17 +61,15 @@ RUN <<'SRC'
     cp -a "$LD_DST" "/runtime/root${LD_DST}"
   fi
 
-  # core glibc + gcc runtime (libdl may be ld script or absent on glibc 2.34+)
-  # cp -L follows symlinks so versioned targets (e.g. libstdc++.so.6.0.33) land too
-  for lib in \
-    "${LIB_DIR}/libc.so.6" \
-    "${LIB_DIR}/libm.so.6" \
-    "${LIB_DIR}/libpthread.so.0" \
-    "${LIB_DIR}/libdl.so.2" \
-    "${LIB_DIR}/libgcc_s.so.1" \
-    "${USR_LIB_DIR}/libstdc++.so.6"; do
-    if [ -e "$lib" ]; then cp -L "$lib" /runtime/root/lib/; fi
-  done
+  # discover and copy required shared libraries via ldd
+  ldd /runtime/root/usr/local/bin/snell-server \
+    | grep '=> /' \
+    | sed -n 's/.*=> \(\/[^ ]*\).*/\1/p' \
+    | sort -u \
+    | while read -r lib; do
+        echo "[snell]   $lib"
+        cp -L "$lib" /runtime/root/lib/
+      done
 
   echo "[snell] libraries staged:"
   ls -la /runtime/root/lib/
