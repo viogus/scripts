@@ -238,6 +238,53 @@ func test_change_noFamily_infers() {
     expect(c?.newPhoneticGiven, "Wei", "newPhoneticGiven")
 }
 
+// MARK: - Phone Normalization
+
+func test_normalize_bareChinese11Digit() {
+    expect(normalizeChinesePhone("13800138000"), "+86 13800138000", "bare 11-digit")
+}
+
+func test_normalize_11DigitStartsWith1() {
+    expect(normalizeChinesePhone("15912345678"), "+86 15912345678", "159 prefix")
+}
+
+func test_normalize_withSpacesAndDashes() {
+    expect(normalizeChinesePhone("138-0013-8000"), "+86 13800138000", "dashes stripped")
+    expect(normalizeChinesePhone("138 0013 8000"), "+86 13800138000", "spaces stripped")
+}
+
+func test_normalize_withParentheses() {
+    expect(normalizeChinesePhone("(138)00138000"), "+86 13800138000", "parens stripped")
+}
+
+func test_normalize_alreadyHasPlus86() {
+    expectNil(normalizeChinesePhone("+86 13800138000"), "already +86 with space")
+    expectNil(normalizeChinesePhone("+8613800138000"), "already +86 no space")
+}
+
+func test_normalize_alreadyHasPlusOther() {
+    expectNil(normalizeChinesePhone("+1 5551234567"), "already +1")
+    expectNil(normalizeChinesePhone("+44 7911123456"), "already +44")
+}
+
+func test_normalize_not11Digits() {
+    expectNil(normalizeChinesePhone("1380013800"), "10 digits")
+    expectNil(normalizeChinesePhone("138001380000"), "12 digits")
+    expectNil(normalizeChinesePhone("021-12345678"), "landline")
+}
+
+func test_normalize_11DigitNotStartingWith1() {
+    expectNil(normalizeChinesePhone("23800138000"), "starts with 2")
+}
+
+func test_normalize_containsNonDigit() {
+    expectNil(normalizeChinesePhone("1380a138000"), "contains letter")
+}
+
+func test_normalize_emptyString() {
+    expectNil(normalizeChinesePhone(""), "empty")
+}
+
 // MARK: - Run all tests
 
 let tests: [(String, () -> Void)] = [
@@ -273,6 +320,16 @@ let tests: [(String, () -> Void)] = [
     ("change_alreadyCorrect", test_change_alreadyCorrect),
     ("change_noChinese", test_change_noChinese),
     ("change_noFamily", test_change_noFamily_infers),
+    ("phone_bare11Digit", test_normalize_bareChinese11Digit),
+    ("phone_11DigitStartsWith1", test_normalize_11DigitStartsWith1),
+    ("phone_withSpacesAndDashes", test_normalize_withSpacesAndDashes),
+    ("phone_withParentheses", test_normalize_withParentheses),
+    ("phone_alreadyHasPlus86", test_normalize_alreadyHasPlus86),
+    ("phone_alreadyHasPlusOther", test_normalize_alreadyHasPlusOther),
+    ("phone_not11Digits", test_normalize_not11Digits),
+    ("phone_11DigitNotStartingWith1", test_normalize_11DigitNotStartingWith1),
+    ("phone_containsNonDigit", test_normalize_containsNonDigit),
+    ("phone_empty", test_normalize_emptyString),
 ]
 
 for (_, testFn) in tests {
