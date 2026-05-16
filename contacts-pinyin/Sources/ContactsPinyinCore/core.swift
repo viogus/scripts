@@ -61,8 +61,12 @@ public func toPinyin(_ text: String) -> String {
     let mutable = NSMutableString(string: text)
     CFStringTransform(mutable, nil, kCFStringTransformToLatin, false)
     CFStringTransform(mutable, nil, kCFStringTransformStripDiacritics, false)
-    // CFST inserts spaces between syllables; join them.
-    let joined = (mutable as String).replacingOccurrences(of: " ", with: "")
+    // CFST inserts spaces between syllables; join only pinyin syllables.
+    let joined = (mutable as String).replacingOccurrences(
+        of: #"(?<=[a-z]) (?=[a-z])"#,
+        with: "",
+        options: .regularExpression
+    )
     return joined
 }
 

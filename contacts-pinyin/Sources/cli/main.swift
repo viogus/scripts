@@ -19,16 +19,18 @@ let groupFilter: String? = {
 MainActor.assumeIsolated {
     let store = CNContactStore()
 
-    // Authorization
+    // Authorization — semaphore pattern is safe because Contacts
+    // delivers the callback on an arbitrary queue, not the main thread.
     let semaphore = DispatchSemaphore(value: 0)
-    var granted = false
+    class Box { var value = false }
+    let granted = Box()
     store.requestAccess(for: .contacts) { g, _ in
-        granted = g
+        granted.value = g
         semaphore.signal()
     }
     semaphore.wait()
 
-    guard granted else {
+    guard granted.value else {
         fputs("错误: 需要通讯录访问权限。请前往 系统设置 → 隐私与安全性 → 通讯录 授权。\n", stderr)
         exit(1)
     }
@@ -100,7 +102,8 @@ MainActor.assumeIsolated {
         exit(0)
     }
 
-    // Save
+    // Save (batch all updates into one CNSaveRequest)
+    let saveReq = CNSaveRequest()
     var success = 0
     var failed = 0
 
@@ -112,16 +115,15 @@ MainActor.assumeIsolated {
         }
         mutable.phoneticFamilyName = change.newPhoneticFamily
         mutable.phoneticGivenName = change.newPhoneticGiven
+        saveReq.update(mutable)
+        success += 1
+    }
 
-        let req = CNSaveRequest()
-        req.update(mutable)
-        do {
-            try store.execute(req)
-            success += 1
-        } catch {
-            failed += 1
-            fputs("错误: 更新 '\(change.fullName)' 失败 — \(error.localizedDescription)\n", stderr)
-        }
+    do {
+        try store.execute(saveReq)
+    } catch {
+        fputs("错误: 批量保存失败 — \(error.localizedDescription)\n", stderr)
+        exit(3)
     }
 
     print("\n成功 \(success) / 失败 \(failed)")
