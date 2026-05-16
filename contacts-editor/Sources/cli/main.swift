@@ -32,53 +32,53 @@ guard let subcommand = args.first else {
 let subArgs = args.dropFirst()
 let write = subArgs.contains("--write")
 let groupFilter: String? = {
-    if let idx = subArgs.firstIndex(of: "--group"), idx + 1 < subArgs.endIndex {
-        let val = subArgs[subArgs.index(after: idx)]
-        guard !val.hasPrefix("--") else {
-            fputs("错误: '--group' 需要参数，不能接另一个选项 '\(val)'。\n", stderr)
-            exit(2)
-        }
-        return val
+    guard let idx = subArgs.firstIndex(of: "--group") else { return nil }
+    guard idx + 1 < subArgs.endIndex else {
+        fputs("错误: '--group' 需要参数。\n", stderr)
+        exit(2)
     }
-    return nil
+    let val = subArgs[subArgs.index(after: idx)]
+    guard !val.hasPrefix("--") else {
+        fputs("错误: '--group' 需要参数，不能接另一个选项 '\(val)'。\n", stderr)
+        exit(2)
+    }
+    return val
 }()
 
 // MARK: - Main
 
-MainActor.assumeIsolated {
-    let store = CNContactStore()
+let store = CNContactStore()
 
-    let semaphore = DispatchSemaphore(value: 0)
-    class Box { var value = false }
-    let granted = Box()
-    store.requestAccess(for: .contacts) { g, _ in
-        granted.value = g
-        semaphore.signal()
-    }
-    semaphore.wait()
+let semaphore = DispatchSemaphore(value: 0)
+class Box { var value = false }
+let granted = Box()
+store.requestAccess(for: .contacts) { g, _ in
+    granted.value = g
+    semaphore.signal()
+}
+semaphore.wait()
 
-    guard granted.value else {
-        fputs("错误: 需要通讯录访问权限。请前往 系统设置 → 隐私与安全性 → 通讯录 授权。\n", stderr)
-        exit(1)
-    }
+guard granted.value else {
+    fputs("错误: 需要通讯录访问权限。请前往 系统设置 → 隐私与安全性 → 通讯录 授权。\n", stderr)
+    exit(1)
+}
 
-    switch subcommand {
-    case "pinyin":
-        runPinyin(store: store, write: write, groupFilter: groupFilter)
-    case "phone":
-        runPhone(store: store, write: write, groupFilter: groupFilter)
-    case "list":
-        if subArgs.first == "groups" {
-            runListGroups(store: store)
-        } else {
-            fputs("错误: 未知子命令 'list \(subArgs.first ?? "")'\n", stderr)
-            exit(2)
-        }
-    default:
-        fputs("错误: 未知子命令 '\(subcommand)'\n", stderr)
-        printHelp()
+switch subcommand {
+case "pinyin":
+    runPinyin(store: store, write: write, groupFilter: groupFilter)
+case "phone":
+    runPhone(store: store, write: write, groupFilter: groupFilter)
+case "list":
+    if subArgs.first == "groups" {
+        runListGroups(store: store)
+    } else {
+        fputs("错误: 未知子命令 'list \(subArgs.first ?? "")'\n", stderr)
         exit(2)
     }
+default:
+    fputs("错误: 未知子命令 '\(subcommand)'\n", stderr)
+    printHelp()
+    exit(2)
 }
 
 // MARK: - Subcommand: pinyin
@@ -232,9 +232,10 @@ func runPhone(store: CNContactStore, write: Bool, groupFilter: String?) {
     var success = 0
     var failed = 0
     for pc in changes {
+        let contactName = "\(pc.contact.familyName)\(pc.contact.givenName)"
         guard let mutable = pc.contact.mutableCopy() as? CNMutableContact else {
             failed += pc.oldNumbers.count
-            fputs("错误: 无法获取可变副本\n", stderr)
+            fputs("错误: 无法获取可变副本 — \(contactName)\n", stderr)
             continue
         }
         var newPhoneNumbers = mutable.phoneNumbers
@@ -256,7 +257,7 @@ func runPhone(store: CNContactStore, write: Bool, groupFilter: String?) {
             success += contactChanged
         } catch {
             failed += contactChanged
-            fputs("错误: 更新电话号码失败 — \(error.localizedDescription)\n", stderr)
+            fputs("错误: 更新 '\(contactName)' 电话号码失败 — \(error.localizedDescription)\n", stderr)
         }
     }
     print("\n成功 \(success) / 失败 \(failed)")
