@@ -61,6 +61,7 @@ RUN <<'SRC'
   fi
 
   # core glibc + gcc runtime (libdl may be ld script or absent on glibc 2.34+)
+  # cp -L follows symlinks so versioned targets (e.g. libstdc++.so.6.0.33) land too
   for lib in \
     "${LIB_DIR}/libc.so.6" \
     "${LIB_DIR}/libm.so.6" \
@@ -68,8 +69,14 @@ RUN <<'SRC'
     "${LIB_DIR}/libdl.so.2" \
     "${LIB_DIR}/libgcc_s.so.1" \
     "${USR_LIB_DIR}/libstdc++.so.6"; do
-    if [ -e "$lib" ]; then cp -a "$lib" /runtime/root/lib/; fi
+    if [ -e "$lib" ]; then cp -L "$lib" /runtime/root/lib/; fi
   done
+
+  echo "[snell] libraries staged:"
+  ls -la /runtime/root/lib/
+
+  echo "[snell] verifying runtime deps:"
+  ldd /runtime/root/usr/local/bin/snell-server 2>&1 || true
 
   rm -rf /tmp/snell /tmp/snell.zip
   apt-get purge -y wget unzip && apt-get autoremove -y && apt-get clean
