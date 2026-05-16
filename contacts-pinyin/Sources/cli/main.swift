@@ -33,7 +33,12 @@ let subArgs = args.dropFirst()
 let write = subArgs.contains("--write")
 let groupFilter: String? = {
     if let idx = subArgs.firstIndex(of: "--group"), idx + 1 < subArgs.endIndex {
-        return subArgs[subArgs.index(after: idx)]
+        let val = subArgs[subArgs.index(after: idx)]
+        guard !val.hasPrefix("--") else {
+            fputs("错误: '--group' 需要参数，不能接另一个选项 '\(val)'。\n", stderr)
+            exit(2)
+        }
+        return val
     }
     return nil
 }()
@@ -88,11 +93,7 @@ func runPinyin(store: CNContactStore, write: Bool, groupFilter: String?) {
 
     let fetchRequest = CNContactFetchRequest(keysToFetch: keys)
     if let name = groupFilter {
-        guard let group = findGroup(name, store: store) else {
-            fputs("错误: 未找到群组 '\(name)'\n", stderr)
-            exit(2)
-        }
-        fetchRequest.predicate = CNContact.predicateForContactsInGroup(withIdentifier: group.identifier)
+        applyGroupFilter(name, to: fetchRequest, store: store)
     }
 
     var changes: [(contact: CNContact, change: PhoneticChange)] = []
@@ -175,11 +176,7 @@ func runPhone(store: CNContactStore, write: Bool, groupFilter: String?) {
 
     let fetchRequest = CNContactFetchRequest(keysToFetch: keys)
     if let name = groupFilter {
-        guard let group = findGroup(name, store: store) else {
-            fputs("错误: 未找到群组 '\(name)'\n", stderr)
-            exit(2)
-        }
-        fetchRequest.predicate = CNContact.predicateForContactsInGroup(withIdentifier: group.identifier)
+        applyGroupFilter(name, to: fetchRequest, store: store)
     }
 
     struct PhoneChange {
@@ -283,4 +280,12 @@ func runListGroups(store: CNContactStore) {
 func findGroup(_ name: String, store: CNContactStore) -> CNGroup? {
     let groups = (try? store.groups(matching: nil)) ?? []
     return groups.first(where: { $0.name == name })
+}
+
+func applyGroupFilter(_ name: String, to request: CNContactFetchRequest, store: CNContactStore) {
+    guard let group = findGroup(name, store: store) else {
+        fputs("错误: 未找到群组 '\(name)'\n", stderr)
+        exit(2)
+    }
+    request.predicate = CNContact.predicateForContactsInGroup(withIdentifier: group.identifier)
 }
