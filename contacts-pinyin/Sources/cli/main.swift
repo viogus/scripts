@@ -102,8 +102,7 @@ MainActor.assumeIsolated {
         exit(0)
     }
 
-    // Save (batch all updates into one CNSaveRequest)
-    let saveReq = CNSaveRequest()
+    // Save — one CNSaveRequest per contact so one bad contact doesn't block others.
     var success = 0
     var failed = 0
 
@@ -115,15 +114,16 @@ MainActor.assumeIsolated {
         }
         mutable.phoneticFamilyName = change.newPhoneticFamily
         mutable.phoneticGivenName = change.newPhoneticGiven
-        saveReq.update(mutable)
-        success += 1
-    }
 
-    do {
-        try store.execute(saveReq)
-    } catch {
-        fputs("错误: 批量保存失败 — \(error.localizedDescription)\n", stderr)
-        exit(3)
+        let req = CNSaveRequest()
+        req.update(mutable)
+        do {
+            try store.execute(req)
+            success += 1
+        } catch {
+            failed += 1
+            fputs("错误: 更新 '\(change.fullName)' 失败 — \(error.localizedDescription)\n", stderr)
+        }
     }
 
     print("\n成功 \(success) / 失败 \(failed)")
