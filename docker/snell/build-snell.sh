@@ -30,7 +30,7 @@ esac
 URL="https://dl.nssurge.com/snell/snell-server-v${SNELL_VERSION}-linux-${SNELL_ARCH}.zip"
 echo "[snell] downloading v${SNELL_VERSION} for linux/${SNELL_ARCH}"
 
-apt-get update && apt-get install -y --no-install-recommends wget unzip ca-certificates
+apt-get update && apt-get install -y --no-install-recommends wget unzip ca-certificates libstdc++6
 
 for i in 1 2 3; do
   if wget -q --timeout=60 -O /tmp/snell.zip "$URL"; then
