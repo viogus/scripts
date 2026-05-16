@@ -15,6 +15,7 @@ COPY --from=downloader /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-cert
 
 RUN <<'RUNTIME'
   set -eu
+  mkdir -p /usr/local/bin
   cat > /usr/local/bin/frp-entrypoint.sh << 'EP'
 #!/bin/sh
 set -eu

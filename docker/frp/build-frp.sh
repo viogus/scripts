@@ -35,7 +35,7 @@ EXTRACT_DIR="/tmp/frp/frp_${FRP_VERSION}_linux_${ARCH}"
 [ -d "$EXTRACT_DIR" ] || { echo "[frp] extract dir not found: $EXTRACT_DIR" >&2; ls -la /tmp/frp/ >&2; exit 1; }
 
 cp "$EXTRACT_DIR/${COMPONENT}" /usr/bin/frp
-strip --strip-all /usr/bin/frp
+strip --strip-all /usr/bin/frp || true
 chmod +x /usr/bin/frp
 
 rm -rf /tmp/frp /tmp/frp.tar.gz

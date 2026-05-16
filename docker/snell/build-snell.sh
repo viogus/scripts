@@ -44,7 +44,7 @@ done
 
 unzip -q /tmp/snell.zip -d /tmp/snell
 
-strip --strip-all /tmp/snell/snell-server
+strip --strip-all /tmp/snell/snell-server || true
 
 mkdir -p /runtime/root/usr/local/bin
 cp /tmp/snell/snell-server /runtime/root/usr/local/bin/snell-server
