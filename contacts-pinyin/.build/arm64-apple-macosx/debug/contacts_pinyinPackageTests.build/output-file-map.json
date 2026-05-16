@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/cdf/Codes/scripts/contacts-pinyin/.build/arm64-apple-macosx/debug/contacts_pinyinPackageTests.build/primary.swiftdeps"
+  },
+  "/Users/cdf/Codes/scripts/contacts-pinyin/.build/arm64-apple-macosx/debug/contacts-pinyinPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/cdf/Codes/scripts/contacts-pinyin/.build/arm64-apple-macosx/debug/contacts_pinyinPackageTests.build/runner.d",
+    "object": "/Users/cdf/Codes/scripts/contacts-pinyin/.build/arm64-apple-macosx/debug/contacts_pinyinPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/cdf/Codes/scripts/contacts-pinyin/.build/arm64-apple-macosx/debug/contacts_pinyinPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/cdf/Codes/scripts/contacts-pinyin/.build/arm64-apple-macosx/debug/contacts_pinyinPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/cdf/Codes/scripts/contacts-pinyin/.build/arm64-apple-macosx/debug/contacts_pinyinPackageTests.build/runner.dia"
+  }
+}
