@@ -70,12 +70,9 @@ RUN <<'SRC'
     if [ -e "$lib" ]; then cp -L "$lib" /runtime/root/lib/; fi
   done
 
-  # libdl.so.2 and libpthread.so.0 are stubs merged into libc since glibc 2.34
-  # some older binaries still NEED them — create ld scripts pointing to libc
+  # libdl/libpthread merged into libc since glibc 2.34 — symlink for old binaries
   for stub in libdl.so.2 libpthread.so.0; do
-    if [ ! -e "/runtime/root/lib/${stub}" ]; then
-      echo "GROUP ( libc.so.6 )" > "/runtime/root/lib/${stub}"
-    fi
+    ln -sf libc.so.6 "/runtime/root/lib/${stub}"
   done
 
   echo "[snell] libraries staged:"

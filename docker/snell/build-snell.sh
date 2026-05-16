@@ -77,9 +77,7 @@ for lib in \
 done
 
 for stub in libdl.so.2 libpthread.so.0; do
-  if [ ! -e "/runtime/root/lib/${stub}" ]; then
-    echo "GROUP ( libc.so.6 )" > "/runtime/root/lib/${stub}"
-  fi
+  ln -sf libc.so.6 "/runtime/root/lib/${stub}"
 done
 
 echo "[snell] libraries staged:"
