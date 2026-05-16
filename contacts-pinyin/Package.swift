@@ -14,7 +14,7 @@ let package = Package(
             dependencies: ["ContactsPinyinCore"],
             path: "Sources/cli"
         ),
-        .testTarget(
+        .executableTarget(
             name: "ContactsPinyinCoreTests",
             dependencies: ["ContactsPinyinCore"],
             path: "Tests/ContactsPinyinCoreTests"
