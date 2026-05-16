@@ -2,10 +2,12 @@ import Foundation
 
 // MARK: - CJK Detection
 
-/// Check if string contains any CJK Unified Ideograph (U+4E00–U+9FFF).
+/// Check if string contains CJK Unified Ideographs, including Extension A
+/// (U+3400–U+4DBF), main block (U+4E00–U+9FFF), and Compatibility Ideographs
+/// (U+F900–U+FAFF).
 public func containsCJK(_ text: String) -> Bool {
     for scalar in text.unicodeScalars {
-        if (0x4E00...0x9FFF).contains(scalar.value) {
+        if (0x3400...0x9FFF).contains(scalar.value) || (0xF900...0xFAFF).contains(scalar.value) {
             return true
         }
     }

@@ -60,6 +60,11 @@ func test_cjk_japanese() {
     expectTrue(containsCJK("東京"), "containsCJK 東京")
 }
 
+func test_cjk_extensionA() {
+    // U+34D7 㓗 (Extension A character sometimes used in names)
+    expectTrue(containsCJK("㓗"), "containsCJK Extension A")
+}
+
 // MARK: - Task 3: Compound Surname
 
 func test_compound_matches() {
@@ -240,6 +245,7 @@ let tests: [(String, () -> Void)] = [
     ("cjk_withMixed", test_cjk_withMixed),
     ("cjk_withoutChinese", test_cjk_withoutChinese),
     ("cjk_japanese", test_cjk_japanese),
+    ("cjk_extensionA", test_cjk_extensionA),
     ("compound_matches", test_compound_matches),
     ("compound_twoChar", test_compound_twoChar),
     ("compound_singleChar", test_compound_singleChar_returnsNil),
