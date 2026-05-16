@@ -14,6 +14,7 @@ contacts-editor pinyin --group "工作"          # 拼音分组过滤
 contacts-editor phone                         # 电话 dry-run
 contacts-editor phone --write                 # 电话执行
 contacts-editor phone --group "工作"           # 电话分组过滤
+contacts-editor list groups                   # 列出所有群组名称
 ```
 
 默认 dry-run，需显式 `--write` 才写入。无参数时显示 help。
@@ -92,6 +93,19 @@ public func normalizeChinesePhone(_ number: String) -> String?
 - 读取失败：exit 2
 - 单个联系人更新失败：stderr + continue
 - 汇总：`成功 N / 失败 M`
+
+## list groups 子命令
+
+只读，无需 `--write`。列出所有群组名称。
+
+```
+$ contacts-editor list groups
+工作
+家人
+朋友
+```
+
+通过 `CNContactStore.groups(matching:)` 获取。退出码 0。
 
 ## 边界情况
 
