@@ -241,13 +241,14 @@ func runPhone(store: CNContactStore, write: Bool, groupFilter: String?) {
             continue
         }
         var newPhoneNumbers = mutable.phoneNumbers
+        var contactChanged = 0
         for i in 0..<newPhoneNumbers.count {
             let oldStr = newPhoneNumbers[i].value.stringValue
             if let normalized = normalizeChinesePhone(oldStr) {
                 let newValue = CNPhoneNumber(stringValue: normalized)
                 let newLabeled = CNLabeledValue(label: newPhoneNumbers[i].label, value: newValue)
                 newPhoneNumbers[i] = newLabeled
-                success += 1
+                contactChanged += 1
             }
         }
         mutable.phoneNumbers = newPhoneNumbers
@@ -255,9 +256,9 @@ func runPhone(store: CNContactStore, write: Bool, groupFilter: String?) {
         req.update(mutable)
         do {
             try store.execute(req)
+            success += contactChanged
         } catch {
-            failed += success  // count all as failed
-            success = 0
+            failed += contactChanged
             fputs("错误: 更新电话号码失败 — \(error.localizedDescription)\n", stderr)
         }
     }
