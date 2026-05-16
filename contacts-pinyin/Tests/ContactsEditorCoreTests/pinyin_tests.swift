@@ -1,4 +1,4 @@
-import ContactsPinyinCore
+import ContactsEditorCore
 import Foundation
 
 var failures = 0

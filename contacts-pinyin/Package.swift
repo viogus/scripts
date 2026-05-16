@@ -2,22 +2,22 @@
 import PackageDescription
 
 let package = Package(
-    name: "contacts-pinyin",
+    name: "contacts-editor",
     platforms: [.macOS(.v12)],
     targets: [
         .target(
-            name: "ContactsPinyinCore",
-            path: "Sources/ContactsPinyinCore"
+            name: "ContactsEditorCore",
+            path: "Sources/ContactsEditorCore"
         ),
         .executableTarget(
             name: "cli",
-            dependencies: ["ContactsPinyinCore"],
+            dependencies: ["ContactsEditorCore"],
             path: "Sources/cli"
         ),
         .executableTarget(
-            name: "ContactsPinyinCoreTests",
-            dependencies: ["ContactsPinyinCore"],
-            path: "Tests/ContactsPinyinCoreTests"
+            name: "ContactsEditorCoreTests",
+            dependencies: ["ContactsEditorCore"],
+            path: "Tests/ContactsEditorCoreTests"
         ),
     ]
 )

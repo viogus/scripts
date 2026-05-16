@@ -1,5 +1,5 @@
 import Contacts
-import ContactsPinyinCore
+import ContactsEditorCore
 import Foundation
 
 // MARK: - Argument parsing
