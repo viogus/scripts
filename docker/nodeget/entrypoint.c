@@ -79,12 +79,46 @@ int main(int argc, char **argv) {
     fclose(f);
   }
 
-  new_argv = calloc(argc + 4, sizeof(char *));
-  new_argv[0] = "/usr/bin/nodeget";
-  new_argv[1] = "-c";
-  new_argv[2] = (char *)config_path;
-  for (i = 1; i < argc; i++) new_argv[i + 2] = argv[i];
-  new_argv[argc + 2] = NULL;
+  int is_server = strcmp(component, "nodeget-server") == 0;
+  int user_argc = argc - 1;
+  char **user_argv = argv + 1;
+  int has_subcmd = 0;
+  int total;
+
+  /* Detect if user already provided a subcommand (first non-flag arg) */
+  if (user_argc > 0 && user_argv[0][0] != '-') {
+    has_subcmd = 1;
+  }
+
+  /* server needs a subcommand (default: serve); agent takes flags directly */
+  if (is_server && !has_subcmd) {
+    total = 1 + 1 + 2 + user_argc; /* bin, serve, -c, config, user_args */
+  } else if (is_server) {
+    total = 1 + 1 + 2 + (user_argc - 1); /* bin, subcmd, -c, config, rest */
+  } else {
+    total = 1 + 2 + user_argc; /* bin, -c, config, user_args */
+  }
+
+  new_argv = calloc(total + 1, sizeof(char *));
+  i = 0;
+
+  new_argv[i++] = "/usr/bin/nodeget";
+
+  if (is_server) {
+    if (!has_subcmd) {
+      new_argv[i++] = "serve";
+    } else {
+      new_argv[i++] = user_argv[0];
+      user_argv++;
+      user_argc--;
+    }
+  }
+
+  new_argv[i++] = "-c";
+  new_argv[i++] = (char *)config_path;
+
+  for (int j = 0; j < user_argc; j++) new_argv[i++] = user_argv[j];
+  new_argv[i] = NULL;
 
   execv("/usr/bin/nodeget", new_argv);
   perror("execv");
