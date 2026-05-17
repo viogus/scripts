@@ -13,9 +13,9 @@ linux/amd64, arm64, arm/v7
 
 ## 用法
 
-### 环境变量（自动生成配置）
+### 环境变量（自动生成配置，仅 Server）
 
-首次启动时若 `/etc/nodeget/config.toml` 不存在，entrypoint 自动从环境变量生成配置文件。
+Server 首次启动时若 `/etc/nodeget/config.toml` 不存在，entrypoint 自动从环境变量生成配置文件。Agent 必须挂载已有配置文件。
 
 | 环境变量 | 默认值 |
 |----------|--------|
@@ -40,14 +40,16 @@ services:
 
 ### Agent
 
+Agent 需要预配置 server 地址和 token，必须挂载配置文件：
+
 ```yaml
 services:
   nodeget-agent:
     image: ghcr.io/viogus/nodeget-agent:latest
     restart: always
     network_mode: host
-    environment:
-      NODEGET_PORT: "2211"
+    volumes:
+      - ./agent-config.toml:/etc/nodeget/config.toml
 ```
 
 ### 使用已有配置文件

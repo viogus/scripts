@@ -14,7 +14,8 @@ ARG NODEGET_COMPONENT=nodeget-server
 COPY --from=downloader /usr/bin/nodeget /usr/bin/nodeget
 COPY entrypoint.sh /entrypoint.sh
 
-ENV NODEGET_PORT=2211 \
+ENV NODEGET_COMPONENT=$NODEGET_COMPONENT \
+    NODEGET_PORT=2211 \
     NODEGET_LOG_FILTER=info \
     NODEGET_CONFIG_PATH=/etc/nodeget/config.toml \
     NODEGET_DATABASE_URL=sqlite:///var/lib/nodeget/nodeget.db?mode=rwc
