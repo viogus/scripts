@@ -30,7 +30,7 @@ static int mkdir_p(const char *path) {
 }
 
 int main(int argc, char **argv) {
-  const char *component, *config_path, *port, *log_filter, *db_url;
+  const char *component, *config_path, *port, *log_filter, *db_url, *server_uuid;
   FILE *f;
   char **new_argv;
   int i;
@@ -49,6 +49,9 @@ int main(int argc, char **argv) {
 
   db_url = getenv("NODEGET_DATABASE_URL");
   if (!db_url) db_url = "sqlite:///var/lib/nodeget/nodeget.db?mode=rwc";
+
+  server_uuid = getenv("NODEGET_SERVER_UUID");
+  if (!server_uuid) server_uuid = "auto_gen";
 
   if (access(config_path, F_OK) != 0) {
     if (strcmp(component, "nodeget-server") != 0) {
@@ -70,7 +73,7 @@ int main(int argc, char **argv) {
       perror("fopen");
       return 1;
     }
-    fprintf(f, "server_uuid = \"auto_gen\"\n");
+    fprintf(f, "server_uuid = \"%s\"\n", server_uuid);
     fprintf(f, "ws_listener = \"0.0.0.0:%s\"\n", port);
     fprintf(f, "\n[logging]\n");
     fprintf(f, "log_filter = \"%s\"\n", log_filter);
