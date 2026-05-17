@@ -6,8 +6,8 @@
 
 | 镜像 | Tag |
 |------|-----|
-| `ghcr.io/viogus/nodeget-server` | `latest`, `<version>` |
-| `ghcr.io/viogus/nodeget-agent` | `latest`, `<version>` |
+| `ghcr.io/viogus/nodeget-server` | `latest`, `0.3.1` |
+| `ghcr.io/viogus/nodeget-agent` | `latest`, `0.3.1` |
 
 linux/amd64, arm64, arm/v7
 
