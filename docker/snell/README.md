@@ -32,7 +32,8 @@ services:
 |------|------|------|
 | `PORT` | 随机 1025-65535 | 监听端口 |
 | `PSK` | 随机 32 位 | 预共享密钥 |
-| `OBFS` | `off` | `off` 或 `http` |
+| `OBFS` | `off` | `off` / `http` / `tls` |
+| `OBFS_HOST` | — | OBFS 伪装域名（OBFS≠off 时建议设置） |
 
 ### 挂载配置文件
 
