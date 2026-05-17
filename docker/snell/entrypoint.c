@@ -57,6 +57,30 @@ static int has_config_arg(int argc, char **argv) {
   return 0;
 }
 
+static int mkdir_p(const char *path) {
+  char buf[4096], *p;
+  struct stat st;
+  size_t len;
+
+  len = strlen(path);
+  if (len >= sizeof(buf)) return -1;
+  memcpy(buf, path, len + 1);
+
+  for (p = buf + 1; *p; p++) {
+    if (*p == '/') {
+      *p = '\0';
+      if (stat(buf, &st) != 0) {
+        if (mkdir(buf, 0755) != 0 && errno != EEXIST) return -1;
+      }
+      *p = '/';
+    }
+  }
+  if (stat(buf, &st) != 0) {
+    if (mkdir(buf, 0755) != 0 && errno != EEXIST) return -1;
+  }
+  return 0;
+}
+
 int main(int argc, char **argv) {
   const char *conf_path = env_or("CONF", "/app/snell-server.conf");
   const char *bin = "/usr/local/bin/snell-server";
@@ -100,6 +124,22 @@ int main(int argc, char **argv) {
       random_psk(psk_buf, 32);
       if (!psk_buf[0]) { perror("/dev/urandom"); return 1; }
       psk = psk_buf;
+    }
+
+    /* Ensure parent directory exists */
+    {
+      const char *slash = strrchr(conf_path, '/');
+      if (slash && slash != conf_path) {
+        char parent[4096];
+        size_t plen = slash - conf_path;
+        if (plen >= sizeof(parent)) return 1;
+        memcpy(parent, conf_path, plen);
+        parent[plen] = '\0';
+        if (mkdir_p(parent) != 0) {
+          fprintf(stderr, "[snell] mkdir_p(%s): %s\n", parent, strerror(errno));
+          return 1;
+        }
+      }
     }
 
     fprintf(stderr, "[snell] generating config: %s\n", conf_path);
