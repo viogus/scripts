@@ -15,15 +15,29 @@ linux/amd64, arm64, arm/v7
 
 ### 环境变量（自动生成配置，仅 Server）
 
-Server 首次启动时若 `/etc/nodeget/config.toml` 不存在，entrypoint 自动从环境变量生成配置文件。Agent 必须挂载已有配置文件。
+Server 首次启动时若 `/etc/nodeget/config.toml` 不存在或为空，entrypoint 自动从环境变量生成配置文件。Agent 必须挂载已有配置文件。
 
-| 环境变量 | 默认值 |
-|----------|--------|
-| `NODEGET_SERVER_UUID` | `auto_gen`（自动生成） |
-| `NODEGET_PORT` | `2211` |
-| `NODEGET_LOG_FILTER` | `info` |
-| `NODEGET_DATABASE_URL` | `sqlite:///var/lib/nodeget/nodeget.db?mode=rwc` |
-| `NODEGET_CONFIG_PATH` | `/etc/nodeget/config.toml` |
+与 [官方镜像](https://github.com/GenshinMinecraft/NodeGet) env 完全兼容。
+
+| 环境变量 | 别名 | 默认值 |
+|----------|------|--------|
+| `NODEGET_SERVER_UUID` | — | 自动生成（`/proc/.../uuid`） |
+| `NODEGET_PORT` | `PORT` | `2211` |
+| `NODEGET_WS_LISTENER` | — | `0.0.0.0:${PORT}` |
+| `NODEGET_LOG_FILTER` | `LOG_FILTER` | `info` |
+| `NODEGET_DATABASE_URL` | `DATABASE_URL` | `sqlite:///var/lib/nodeget/nodeget.db?mode=rwc` |
+| `NODEGET_DATA_DIR` | — | `/var/lib/nodeget` |
+| `NODEGET_CONFIG_PATH` | — | `/etc/nodeget/config.toml` |
+| `NODEGET_JSONRPC_MAX_CONNECTIONS` | — | `100` |
+| `NODEGET_ENABLE_UNIX_SOCKET` | — | `false` |
+| `NODEGET_UNIX_SOCKET_PATH` | — | `/var/lib/nodeget.sock` |
+| `NODEGET_MONITORING_FLUSH_INTERVAL_MS` | — | `500` |
+| `NODEGET_MONITORING_MAX_BATCH_SIZE` | — | `1000` |
+| `NODEGET_DB_CONNECT_TIMEOUT_MS` | — | `3000` |
+| `NODEGET_DB_ACQUIRE_TIMEOUT_MS` | — | `3000` |
+| `NODEGET_DB_IDLE_TIMEOUT_MS` | — | `3000` |
+| `NODEGET_DB_MAX_LIFETIME_MS` | — | `30000` |
+| `NODEGET_DB_MAX_CONNECTIONS` | — | `10` |
 
 ### Server
 
