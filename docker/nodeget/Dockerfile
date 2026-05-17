@@ -23,6 +23,7 @@ ENV NODEGET_COMPONENT=$NODEGET_COMPONENT \
     NODEGET_PORT=2211 \
     NODEGET_LOG_FILTER=info \
     NODEGET_CONFIG_PATH=/etc/nodeget/config.toml \
+    NODEGET_DATA_DIR=/var/lib/nodeget \
     NODEGET_DATABASE_URL=sqlite:///var/lib/nodeget/nodeget.db?mode=rwc
 
 ENTRYPOINT ["/entrypoint"]

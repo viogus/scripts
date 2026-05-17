@@ -51,6 +51,12 @@ static int has_config_arg(int argc, char **argv) {
   return 0;
 }
 
+/* Check if first user arg is -h/--help/--version/-V (skip injection) */
+static int is_help_or_version(const char *arg) {
+  return !strcmp(arg, "-h") || !strcmp(arg, "--help")
+      || !strcmp(arg, "--version") || !strcmp(arg, "-V");
+}
+
 /* Generate UUID from /proc or fall back to auto_gen */
 static const char *resolve_uuid(void) {
   const char *v = getenv("NODEGET_SERVER_UUID");
@@ -192,11 +198,22 @@ int main(int argc, char **argv) {
   /* Build new argv: [binary] [subcmd?] [-c config] [user_args...] */
   char **user_argv = argv + 1;
   int user_argc = argc - 1;
+  int skip_all = 0;
+  const char *user_subcmd = NULL;
   has_subcmd = 0;
   inject_config = 1;
 
-  if (is_server && user_argc > 0 && user_argv[0][0] != '-') {
+  /* Detect -h/--help/--version: pass through, no injection at all */
+  if (user_argc > 0 && is_help_or_version(user_argv[0])) {
+    skip_all = 1;
+    inject_config = 0;
+  }
+
+  if (!skip_all && is_server && user_argc > 0 && user_argv[0][0] != '-') {
+    user_subcmd = user_argv[0];
     has_subcmd = 1;
+    /* version subcommand doesn't need config */
+    if (!strcmp(user_subcmd, "version")) inject_config = 0;
   }
 
   /* Check if user already passed -c/--config; if so, don't inject */
@@ -205,20 +222,21 @@ int main(int argc, char **argv) {
   }
 
   int total = 1; /* binary */
-  if (is_server && !has_subcmd) total += 1; /* serve */
-  if (is_server && has_subcmd) { total += 1; user_argc--; user_argv++; } /* user's subcmd */
+  if (is_server && !has_subcmd && !skip_all) total += 1; /* serve */
+  if (has_subcmd) { total += 1; user_argc--; user_argv++; } /* user's subcmd */
   if (inject_config) total += 2; /* -c config */
   total += user_argc; /* remaining user args */
 
   char **new_argv = calloc(total + 1, sizeof(char *));
+  if (!new_argv) { perror("calloc"); return 1; }
   int i = 0;
   new_argv[i++] = "/usr/bin/nodeget";
 
-  if (is_server) {
+  if (is_server && !skip_all) {
     if (!has_subcmd) {
       new_argv[i++] = "serve";
     } else {
-      new_argv[i++] = user_argv[-1]; /* user's subcmd, already advanced */
+      new_argv[i++] = (char *)user_subcmd;
     }
   }
 

@@ -58,7 +58,10 @@ jobs:
           else
             VER=$(curl -s https://api.github.com/repos/GenshinMinecraft/NodeGet/releases/latest \
               | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
-            [ -z "$VER" ] && VER="0.2.11"
+            if [ -z "$VER" ]; then
+              echo "::warning::Failed to fetch latest NodeGet version, falling back to 0.2.11"
+              VER="0.2.11"
+            fi
             echo "nodeget_version=$VER" >> $GITHUB_OUTPUT
           fi
 
