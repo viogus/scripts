@@ -153,7 +153,7 @@ static void write_config(const char *path, const char *data_dir) {
 int main(int argc, char **argv) {
   const char *component, *config_path, *data_dir;
   struct stat st;
-  int is_server, user_argc, has_subcmd, inject_config;
+  int is_server, has_subcmd, inject_config;
 
   component = env_or("NODEGET_COMPONENT", "nodeget-server");
   is_server = strcmp(component, "nodeget-server") == 0;
@@ -173,12 +173,6 @@ int main(int argc, char **argv) {
               config_path);
       return 1;
     }
-    mkdir_p(config_path);
-    /* Remove the config file if mkdir_p created it as a directory */
-    if (stat(config_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-      /* The parent dirs exist, now remove the dir entry so fopen creates a file */
-      /* Actually, mkdir_p creates the leaf as a dir. Rework: create parent only. */
-    }
     /* Ensure parent directory exists */
     {
       char parent[4096];
@@ -196,9 +190,8 @@ int main(int argc, char **argv) {
   }
 
   /* Build new argv: [binary] [subcmd?] [-c config] [user_args...] */
-  int user_argc_total = argc - 1;
   char **user_argv = argv + 1;
-  int user_argc = user_argc_total;
+  int user_argc = argc - 1;
   has_subcmd = 0;
   inject_config = 1;
 
