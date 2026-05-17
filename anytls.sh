@@ -24,95 +24,6 @@ TZ_DEFAULT="Asia/Shanghai"
 SCRIPT_VERSION="1.0.0"
 
 # ============================================
-# 颜色
-# ============================================
-[ -z "${RED:-}" ] && {
-RED='[0;31m'
-GREEN='[0;32m'
-YELLOW='[0;33m'
-CYAN='[0;36m'
-BLUE='[0;34m'
-RESET='[0m'
-}
-
-OK="${GREEN}[OK]${RESET}"
-ERROR="${RED}[ERROR]${RESET}"
-WARN="${YELLOW}[WARN]${RESET}"
-INFO="${CYAN}[INFO]${RESET}"
-
-print_ok(){ echo -e "${OK}${BLUE} $1 ${RESET}"; }
-print_info(){ echo -e "${INFO}${CYAN} $1 ${RESET}"; }
-print_error(){ echo -e "${ERROR} $1 ${RESET}"; }
-print_warn(){ echo -e "${WARN} $1 ${RESET}"; }
-
-judge(){ if [[ 0 -eq $? ]]; then print_ok "$1 完成"; else print_error "$1 失败"; exit 1; fi; }
-trap 'echo -e "
-${WARN} 已中断"; exit 1' INT
-
-# ============================================
-# 工具函数
-# ============================================
-
-ensure_root() {
-    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-        print_error "必须使用 root 运行本脚本!"
-        exit 1
-    fi
-}
-
-has_cmd(){ command -v "$1" >/dev/null 2>&1; }
-
-# 加载共享库（本地 > 系统 > GitHub > 内联兜底）
-LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-if [ -f "$LIB_DIR/svc-utils.sh" ]; then
-    . "$LIB_DIR/svc-utils.sh"
-elif [ -f /usr/local/lib/svc-utils.sh ]; then
-    . /usr/local/lib/svc-utils.sh
-else
-    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
-    if curl -fsSL --connect-timeout 5 --max-time 15 \
-        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
-        -o "$TMP_LIB" 2>/dev/null; then
-        . "$TMP_LIB"
-    fi
-    rm -f "$TMP_LIB"
-fi
-
-# Init 检测（结果缓存在 _INIT_TYPE）
-if ! command -v svc_start >/dev/null 2>&1; then
-_INIT_TYPE=""
-detect_init() {
-    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
-    if has_cmd systemctl && [[ -d /run/systemd/system ]]; then
-        _INIT_TYPE="systemd"
-    elif has_cmd rc-service; then
-        _INIT_TYPE="openrc"
-    else
-        _INIT_TYPE="systemd"
-    fi
-    echo "$_INIT_TYPE"
-}
-
-# 服务操作包装器
-svc_start()   { [[ "$(detect_init)" == "openrc" ]] && { rc-service "$1" start; return; }; systemctl start "$1"; }
-svc_stop()    { [[ "$(detect_init)" == "openrc" ]] && { rc-service "$1" stop 2>/dev/null || true; return; }; systemctl stop "$1" 2>/dev/null || true; }
-svc_restart() { [[ "$(detect_init)" == "openrc" ]] && { rc-service "$1" restart; return; }; systemctl restart "$1"; }
-svc_enable()  { [[ "$(detect_init)" == "openrc" ]] && { rc-update add "$1" default >/dev/null 2>&1 || true; return; }; systemctl enable "$1" >/dev/null 2>&1 || true; }
-svc_disable() { [[ "$(detect_init)" == "openrc" ]] && { rc-update del "$1" default >/dev/null 2>&1 || true; return; }; systemctl disable "$1" 2>/dev/null || true; }
-svc_is_active() {
-    if [[ "$(detect_init)" == "openrc" ]]; then
-        if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi
-    else
-        if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi
-    fi
-}
-svc_reload()  { [[ "$(detect_init)" != "openrc" ]] && systemctl daemon-reload; }
-svc_main_pid() {
-    if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"
-    else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi
-}
-fi  # end inline svc fallback
-
 get_arch() {
     local arch_raw; arch_raw=$(uname -m)
     case "$arch_raw" in
@@ -185,15 +96,6 @@ read_port_interactive() {
         if is_port_used "$input"; then echo "端口 $input 已被占用"; continue; fi
         echo "$input"; break
     done
-}
-
-get_ip() {
-    local ip4 ip6
-    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
-    [[ -n "${ip4}" ]] && { echo "${ip4}"; return; }
-    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
-    [[ -n "${ip6}" ]] && { echo "${ip6}"; return; }
-    curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
 }
 
 get_latest_version() {

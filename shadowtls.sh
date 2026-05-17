@@ -8,15 +8,6 @@ set -euo pipefail
 # 描述: 这个脚本用于安装和管理 ShadowTLS V3
 # =========================================
 
-# 定义颜色代码
-[ -z "${RED:-}" ] && {
-RED='[0;31m'
-GREEN='[0;32m'
-YELLOW='[0;33m'
-CYAN='[0;36m'
-RESET='[0m'
-}
-
 # 定义系统路径
 INSTALL_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
@@ -29,46 +20,6 @@ SNELL_CONF_FILE="${SNELL_CONF_DIR}/users/snell-main.conf"
 USERS_DIR="${SNELL_CONF_DIR}/users"
 SSRUST_CONF="/usr/local/etc/ss-rust/config.json"
 
-# 检查是否以 root 权限运行
-check_root() {
-    if [ "$(id -u)" != "0" ]; then
-        echo -e "${RED}请以 root 权限运行此脚本${RESET}"
-        exit 1
-    fi
-}
-
-# ============================================
-# 加载共享库（本地 > 系统 > GitHub > 内联兜底）
-LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-if [ -f "$LIB_DIR/svc-utils.sh" ]; then
-    . "$LIB_DIR/svc-utils.sh"
-elif [ -f /usr/local/lib/svc-utils.sh ]; then
-    . /usr/local/lib/svc-utils.sh
-else
-    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
-    if curl -fsSL --connect-timeout 5 --max-time 15 \
-        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
-        -o "$TMP_LIB" 2>/dev/null; then
-        . "$TMP_LIB"
-    fi
-    rm -f "$TMP_LIB"
-fi
-# ============================================
-if ! command -v svc_start >/dev/null 2>&1; then
-
-_INIT_TYPE=""
-detect_init() {
-    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
-    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
-        _INIT_TYPE="systemd"
-    elif command -v rc-service >/dev/null 2>&1; then
-        _INIT_TYPE="openrc"
-    else
-        _INIT_TYPE="systemd"
-    fi
-    echo "$_INIT_TYPE"
-}
-
 get_service_dir() {
     if [[ "$(detect_init)" == "openrc" ]]; then
         echo "/etc/init.d"
@@ -77,26 +28,7 @@ get_service_dir() {
     fi
 }
 
-svc_start()   { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" start; else systemctl start "$1"; fi; }
-svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
-svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
-svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
-svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
-svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi; else if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi; fi; }
-svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || echo "inactive"; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
-svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
-svc_list_match() { if [[ "$(detect_init)" == "openrc" ]]; then rc-status -s 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; else systemctl list-units --type=service --all --no-legend 2>/dev/null | grep -E "$1" | awk '{print $1}' || true; fi; }
-svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d'=' -f2; fi; }
-fi  # end inline svc fallback
 svc_unit_file() { if [[ "$(detect_init)" == "openrc" ]]; then [[ -f "/etc/init.d/$1" ]]; else [[ -f "/etc/systemd/system/$1.service" ]]; fi; }
-svc_cat() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/etc/init.d/$1" 2>/dev/null; else systemctl cat "$1" 2>/dev/null; fi; }
-svc_file_path() {
-    local name="$1"
-    if [[ -f "/etc/init.d/${name}" ]]; then echo "/etc/init.d/${name}"
-    elif [[ -f "/etc/systemd/system/${name}.service" ]]; then echo "/etc/systemd/system/${name}.service"
-    else echo ""; fi
-}
-svc_find_services() { find /etc/systemd/system /etc/init.d -name "$1" 2>/dev/null || true; }
 svc_find_active_services() {
     if [[ "$(detect_init)" == "openrc" ]]; then
         rc-status -s 2>/dev/null | grep -E "$1" | awk '{print $1}' || true
@@ -1395,7 +1327,7 @@ ${CYAN}ShadowTLS 管理菜单${RESET}"
 }
 
 # 检查root权限
-check_root
+ensure_root
 
 # 如果直接运行此脚本，则显示主菜单
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

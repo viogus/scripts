@@ -17,21 +17,90 @@ BLUE='[0;34m'
 RESET='[0m'
 }
 
-# === 新框架 (Phase 1) ===
-# 从 GitHub 下载框架，不留本地文件
-GITHUB_RAW="https://raw.githubusercontent.com/viogus/scripts/main"
+# ============================================
+# 通用工具函数（所有服务脚本共用）
+# ============================================
 
-fw_download() {
-    local tmp; tmp=$(mktemp /tmp/fw-XXXXXX)
-    if curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_RAW}/$1" -o "$tmp" 2>/dev/null; then
-        echo "$tmp"
-    else
-        rm -f "$tmp"
-        return 1
+OK="${GREEN}[OK]${RESET}"
+ERROR="${RED}[ERROR]${RESET}"
+WARN="${YELLOW}[WARN]${RESET}"
+INFO="${CYAN}[INFO]${RESET}"
+
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+ensure_root() {
+    if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+        echo -e "${RED}请以 root 权限运行此脚本${RESET}"
+        exit 1
     fi
 }
 
+get_ip() {
+    local ip4 ip6
+    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    [ -n "${ip4}" ] && { echo "${ip4}"; return; }
+    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
+    [ -n "${ip6}" ] && { echo "${ip6}"; return; }
+    curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
+}
 
+detect_os() {
+    if grep -qi "alpine" /etc/os-release 2>/dev/null; then echo "alpine"
+    elif grep -qi "debian\|ubuntu" /etc/os-release 2>/dev/null; then echo "debian"
+    elif grep -qi "centos\|red hat\|rhel\|alma\|rocky\|fedora\|amazon" /etc/os-release 2>/dev/null; then echo "rhel"
+    else echo "unknown"; fi
+}
+
+_INIT_TYPE=""
+detect_init() {
+    if [ -n "$_INIT_TYPE" ]; then echo "$_INIT_TYPE"; return; fi
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        _INIT_TYPE="systemd"
+    elif command -v rc-service >/dev/null 2>&1; then
+        _INIT_TYPE="openrc"
+    else
+        _INIT_TYPE="systemd"
+    fi
+    echo "$_INIT_TYPE"
+}
+
+print_ok(){ echo -e "${OK}${BLUE} $1 ${RESET}"; }
+print_info(){ echo -e "${INFO}${CYAN} $1 ${RESET}"; }
+print_error(){ echo -e "${ERROR} $1 ${RESET}"; }
+print_warn(){ echo -e "${WARN} $1 ${RESET}"; }
+judge(){ if [[ 0 -eq $? ]]; then print_ok "$1 完成"; else print_error "$1 失败"; exit 1; fi; }
+trap 'echo -e "${WARN} 已中断"; exit 1' INT
+
+svc_start()   { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" start; else systemctl start "$1"; fi; }
+svc_stop()    { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
+svc_restart() { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
+svc_enable()  { if [ "$(detect_init)" = "openrc" ]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
+svc_disable() { if [ "$(detect_init)" = "openrc" ]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
+
+svc_is_active() {
+    if [ "$(detect_init)" = "openrc" ]; then
+        if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi
+    else
+        if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi
+    fi
+}
+
+svc_status()  { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
+svc_reload()  { if [ "$(detect_init)" != "openrc" ]; then systemctl daemon-reload; fi; }
+
+svc_main_pid() {
+    if [ "$(detect_init)" = "openrc" ]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"
+    else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi
+}
+
+svc_list()    { ls /etc/systemd/system/"$1"*.service /etc/init.d/"$1"* 2>/dev/null | sed 's|.*/||; s/\.service$//' | sort -u; }
+svc_cat()     { if [ "$(detect_init)" = "openrc" ]; then cat "/etc/init.d/$1" 2>/dev/null; else systemctl cat "$1" 2>/dev/null; fi; }
+svc_file_path() {
+    if [ -f "/etc/init.d/${1}" ]; then echo "/etc/init.d/${1}"
+    elif [ -f "/etc/systemd/system/${1}.service" ]; then echo "/etc/systemd/system/${1}.service"
+    else echo ""; fi
+}
+svc_find_services() { find /etc/systemd/system /etc/init.d -name "$1" 2>/dev/null || true; }
 
 # 当前版本号
 current_version="4.0"
@@ -153,64 +222,10 @@ get_cpu_usage() {
     echo "$cpu_usage"
 }
 
-# 检查是否以 root 权限运行
-check_root() {
-    if [ "$(id -u)" != "0" ]; then
-        echo -e "${RED}请以 root 权限运行此脚本${RESET}"
-        exit 1
-    fi
-}
-
-# ============================================
-# Init 系统检测 & 服务操作包装器
-# 加载共享库（本地 > 系统 > GitHub > 内联兜底）
-LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-if [ -f "$LIB_DIR/svc-utils.sh" ]; then
-    . "$LIB_DIR/svc-utils.sh"
-elif [ -f /usr/local/lib/svc-utils.sh ]; then
-    . /usr/local/lib/svc-utils.sh
-else
-    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
-    if curl -fsSL --connect-timeout 5 --max-time 15 \
-        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
-        -o "$TMP_LIB" 2>/dev/null; then
-        . "$TMP_LIB"
-    fi
-    rm -f "$TMP_LIB"
-fi
-# ============================================
-if ! command -v svc_start >/dev/null 2>&1; then
-
-_INIT_TYPE=""
-detect_init() {
-    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
-    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
-        _INIT_TYPE="systemd"
-    elif command -v rc-service >/dev/null 2>&1; then
-        _INIT_TYPE="openrc"
-    else
-        _INIT_TYPE="systemd"
-    fi
-    echo "$_INIT_TYPE"
-}
-
-svc_start()   { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" start; else systemctl start "$1"; fi; }
-svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
-svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
-svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
-svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
-svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi; else if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi; fi; }
-svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
-svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
-svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d= -f2; fi; }
-svc_list()    { ls /etc/systemd/system/$1*.service /etc/init.d/$1* 2>/dev/null | sed 's|.*/||; s/\.service$//' | sort -u; }
-svc_cat()     { if [[ "$(detect_init)" == "openrc" ]]; then cat "/etc/init.d/$1" 2>/dev/null; else systemctl cat "$1" 2>/dev/null; fi; }
-
 # ============================================
 # 服务状态检查
 # ============================================
 
-fi  # end inline svc fallback
 check_and_show_status() {
     local cpu_cores=$(nproc)
 
@@ -404,7 +419,16 @@ run_service_script() {
     local name="$1" url="$2"
     local tmp; tmp=$(mktemp)
     if curl -sL --connect-timeout 10 --max-time 30 "$url" -o "$tmp"; then
-        bash "$tmp"; rm -f "$tmp"
+        {
+            declare -p RED GREEN YELLOW CYAN BLUE RESET OK ERROR WARN INFO 2>/dev/null
+            declare -f has_cmd ensure_root get_ip detect_os detect_init \
+                print_ok print_info print_error print_warn judge \
+                svc_start svc_stop svc_restart svc_enable svc_disable \
+                svc_is_active svc_status svc_reload svc_main_pid \
+                svc_list svc_cat svc_file_path svc_find_services 2>/dev/null
+            cat "$tmp"
+        } | bash
+        rm -f "$tmp"
     else
         echo -e "${RED}下载 ${name} 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
     fi
@@ -526,17 +550,7 @@ uninstall_frp() {
     echo -e "${GREEN}frp 卸载完成！${RESET}"
 }
 
-# IP 检测（供 surge_export_all 使用）
-at_get_ip() {
-    local ip4 ip6
-    ip4=$(curl -s --connect-timeout 5 --max-time 10 -4 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
-    [[ -n "${ip4}" ]] && { echo "${ip4}"; return; }
-    ip6=$(curl -s --connect-timeout 5 --max-time 10 -6 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^ip=/{print $2}')
-    [[ -n "${ip6}" ]] && { echo "${ip6}"; return; }
-    curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || echo "未知IP"
-}
-
-# ============================================
+	# ============================================
 # Surge 配置导出（所有服务）
 # ============================================
 
@@ -546,7 +560,7 @@ surge_export_all() {
     echo -e "${CYAN}         Surge 代理配置汇总${RESET}"
     echo -e "${CYAN}============================================${RESET}"
 
-    local ip; ip="$(at_get_ip 2>/dev/null || echo "服务器IP")"
+    local ip; ip="$(get_ip 2>/dev/null || echo "服务器IP")"
     echo -e "${YELLOW}服务器 IP: ${ip}${RESET}
 "
 
@@ -704,67 +718,20 @@ ${YELLOW}=== 卸载功能 ===${RESET}"
 ${YELLOW}=== 系统功能 ===${RESET}"
     echo -e "${GREEN}14.${RESET} 更新脚本"
     echo -e "${GREEN}15.${RESET} 输出 Surge 配置"
-	    echo -e "${GREEN}16.${RESET} [新] 统一管理模式 (测试中)"
     echo -e "${GREEN}0.${RESET} 退出"
 
     echo -e "${CYAN}============================================${RESET}"
     echo -e "${GREEN}退出脚本后，输入 menu 可重新进入${RESET}"
     echo -e "${CYAN}============================================${RESET}"
-    read -rp "请输入选项 [0-16]: " num
+    read -rp "请输入选项 [0-15]: " num
 }
 
 # ============================================
 # 主程序入口
 # ============================================
 
-# === 统一框架模式 (从 GitHub 动态加载) ===
-run_framework_mode() {
-    local fw_tmp svc_tmp conf_tmp
-    echo -e "${CYAN}正在加载统一管理框架...${RESET}"
-
-    fw_tmp=$(fw_download "lib/framework.sh") || {
-        echo -e "${RED}下载 framework.sh 失败，请检查网络${RESET}"
-        read -rp "按回车返回..." _
-        return
-    }
-    . "$fw_tmp"
-
-    svc_tmp=$(mktemp -d /tmp/fw-services-XXXXXX)
-    local confs="anytls hysteria2"
-    for c in $confs; do
-        conf_tmp=$(fw_download "services/${c}.conf") && mv "$conf_tmp" "${svc_tmp}/${c}.conf"
-    done
-
-    show_all_status "$svc_tmp"
-
-    echo -e "${CYAN}可用服务:${RESET}"
-    local i=1
-    local confs_list=()
-    for conf in "${svc_tmp}"/*.conf; do
-        [[ -f "$conf" ]] || continue
-        . "$conf"
-        echo -e "${GREEN}${i}.${RESET} ${DISPLAY}"
-        confs_list+=("$conf")
-        ((i++))
-    done
-
-    if [[ ${#confs_list[@]} -eq 0 ]]; then
-        echo -e "${YELLOW}没有可用的服务配置${RESET}"
-        rm -rf "$svc_tmp" "$fw_tmp"
-        read -rp "按回车返回..." _
-        return
-    fi
-
-    echo ""
-    read -rp "选择服务 (1-$((i-1)), 0 返回): " svc_choice
-    if [[ "${svc_choice:-0}" != "0" ]] && [[ "$svc_choice" -ge 1 ]] && [[ "$svc_choice" -le ${#confs_list[@]} ]]; then
-        show_service_submenu "${confs_list[$((svc_choice-1))]}"
-    fi
-
-    rm -rf "$svc_tmp" "$fw_tmp"
-}
-
-check_root
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+ensure_root
 check_dependencies
 install_global_command
 
@@ -786,11 +753,11 @@ while true; do
         13) uninstall_frp ;;
         14) update_script ;;
         15) surge_export_all ;;
-        16) run_framework_mode ;;
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
-        *) echo -e "${RED}请输入正确的选项 [0-16]${RESET}" ;;
+        *) echo -e "${RED}请输入正确的选项 [0-15]${RESET}" ;;
     esac
     echo -e "
 ${CYAN}按任意键返回主菜单...${RESET}"
     read -n 1 -s -r
 done
+fi

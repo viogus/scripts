@@ -13,53 +13,7 @@ CONFIG_FILE="$CONFIG_DIR/config.json"
 META_FILE="$CONFIG_DIR/vless-meta.conf"
 VLESS_CMD="/usr/local/bin/vless"
 
-# root 校验
-if [[ $EUID -ne 0 ]]; then
-  echo "请使用 root 运行此脚本"
-  exit 1
-fi
-
-# ================= Init 系统检测 =================
-
-# 加载共享库（本地 > 系统 > GitHub > 内联兜底）
-LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-if [ -f "$LIB_DIR/svc-utils.sh" ]; then
-    . "$LIB_DIR/svc-utils.sh"
-elif [ -f /usr/local/lib/svc-utils.sh ]; then
-    . /usr/local/lib/svc-utils.sh
-else
-    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
-    if curl -fsSL --connect-timeout 5 --max-time 15 \
-        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
-        -o "$TMP_LIB" 2>/dev/null; then
-        . "$TMP_LIB"
-    fi
-    rm -f "$TMP_LIB"
-fi
-
-if ! command -v svc_start >/dev/null 2>&1; then
-_INIT_TYPE=""
-detect_init() {
-  if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
-  if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
-    _INIT_TYPE="systemd"
-  elif command -v rc-service >/dev/null 2>&1; then
-    _INIT_TYPE="openrc"
-  else
-    _INIT_TYPE="systemd"
-  fi
-  echo "$_INIT_TYPE"
-}
-
-svc_start()   { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" start; else systemctl start "$1"; fi; }
-svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
-svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
-svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
-svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
-svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
-svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
-svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi; else if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi; fi; }
-fi  # end inline svc fallback
+ensure_root
 
 write_openrc_xray() {
   cat > "/etc/init.d/xray" << 'OPENRCEOF'
@@ -170,13 +124,31 @@ install_vless_cmd() {
 
   cat > "$VLESS_CMD" << 'EOFSCRIPT'
 #!/bin/bash
+set -euo pipefail
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[0;33m'
+CYAN='[0;36m'
+RESET='[0m'
 if [ "$(id -u)" != "0" ]; then
-  echo "请以 root 运行 vless"
+  echo -e "${RED}请以 root 运行 vless${RESET}"
   exit 1
 fi
+if [ -f /usr/local/bin/menu.sh ]; then
+    . /usr/local/bin/menu.sh
+fi
 TMP=$(mktemp)
-curl -fsSL https://raw.githubusercontent.com/viogus/scripts/main/vless.sh -o "$TMP"
-bash "$TMP"
+curl -fsSL --connect-timeout 10 --max-time 30 \
+    https://raw.githubusercontent.com/viogus/scripts/main/vless.sh -o "$TMP"
+{
+    declare -p RED GREEN YELLOW CYAN BLUE RESET OK ERROR WARN INFO 2>/dev/null
+    declare -f has_cmd ensure_root get_ip detect_os detect_init \
+        print_ok print_info print_error print_warn judge \
+        svc_start svc_stop svc_restart svc_enable svc_disable \
+        svc_is_active svc_status svc_reload svc_main_pid \
+        svc_list svc_cat svc_file_path svc_find_services 2>/dev/null
+    cat "$TMP"
+} | bash
 rm -f "$TMP"
 EOFSCRIPT
 

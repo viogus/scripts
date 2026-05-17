@@ -28,24 +28,13 @@ MAINLAND_EXTRACT_SCRIPT="/usr/local/bin/extract-cn-ip-from-mmdb.py"
 MAINLAND_BLOCK_REPO_URL="https://raw.githubusercontent.com/viogus/scripts/main/block-mainland.sh"
 MAINLAND_EXTRACT_REPO_URL="https://raw.githubusercontent.com/viogus/scripts/main/extract-cn-ip-from-mmdb.py"
 
-# 颜色定义
-[ -z "${RED:-}" ] && {
-RED='[0;31m'
-GREEN='[0;32m'
-YELLOW='[1;33m'
-BLUE='[0;34m'
-CYAN='[0;36m'
-PLAIN='[0m'
-RESET='[0m'
-BOLD='[1m'
-}
-RED_BG='[41;37m'
+# 状态提示（ss-2022 专用中文标签）
+SUCCESS="${GREEN}[成功]${RESET}"
+WARNING="${YELLOW}[警告]${RESET}"
+INFO="${GREEN}[信息]${RESET}"
+ERROR="${RED}[错误]${RESET}"
 
-# 状态提示
-INFO="${GREEN}[信息]${PLAIN}"
-ERROR="${RED}[错误]${PLAIN}"
-WARNING="${YELLOW}[警告]${PLAIN}"
-SUCCESS="${GREEN}[成功]${PLAIN}"
+error_exit() { echo -e "${ERROR} $1" >&2; exit 1; }
 
 # 系统信息（detect_os/detect_arch 写入，全程只读）
 OS_TYPE=""
@@ -59,62 +48,6 @@ SS_METHOD=""
 SS_TFO=""
 SS_DNS=""
 
-# 错误处理函数
-error_exit() {
-    echo -e "${ERROR} $1" >&2
-    exit 1
-}
-
-# 检查 root 权限
-check_root() {
-    if [[ $EUID != 0 ]]; then
-        error_exit "当前非ROOT账号(或没有ROOT权限)，无法继续操作，请使用 sudo su 命令获取临时ROOT权限"
-    fi
-}
-
-# ============================================
-# 加载共享库（本地 > 系统 > GitHub > 内联兜底）
-LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/lib"
-if [ -f "$LIB_DIR/svc-utils.sh" ]; then
-    . "$LIB_DIR/svc-utils.sh"
-elif [ -f /usr/local/lib/svc-utils.sh ]; then
-    . /usr/local/lib/svc-utils.sh
-else
-    TMP_LIB=$(mktemp /tmp/svc-utils-XXXXXX)
-    if curl -fsSL --connect-timeout 5 --max-time 15 \
-        https://raw.githubusercontent.com/viogus/scripts/main/lib/svc-utils.sh \
-        -o "$TMP_LIB" 2>/dev/null; then
-        . "$TMP_LIB"
-    fi
-    rm -f "$TMP_LIB"
-fi
-# ============================================
-if ! command -v svc_start >/dev/null 2>&1; then
-
-_INIT_TYPE=""
-detect_init() {
-    if [[ -n "$_INIT_TYPE" ]]; then echo "$_INIT_TYPE"; return; fi
-    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
-        _INIT_TYPE="systemd"
-    elif command -v rc-service >/dev/null 2>&1; then
-        _INIT_TYPE="openrc"
-    else
-        _INIT_TYPE="systemd"
-    fi
-    echo "$_INIT_TYPE"
-}
-
-svc_start()   { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" start; else systemctl start "$1"; fi; }
-svc_stop()    { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
-svc_restart() { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
-svc_enable()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
-svc_disable() { if [[ "$(detect_init)" == "openrc" ]]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
-svc_is_active() { if [[ "$(detect_init)" == "openrc" ]]; then if rc-service "$1" status >/dev/null 2>&1; then echo "active"; else echo "inactive"; return 1; fi; else if systemctl is-active --quiet "$1" 2>/dev/null; then echo "active"; else echo "inactive"; return 1; fi; fi; }
-svc_status()  { if [[ "$(detect_init)" == "openrc" ]]; then rc-service "$1" status 2>/dev/null || true; else systemctl status "$1" --no-pager 2>/dev/null || true; fi; }
-svc_reload()  { if [[ "$(detect_init)" != "openrc" ]]; then systemctl daemon-reload; fi; }
-svc_main_pid() { if [[ "$(detect_init)" == "openrc" ]]; then cat "/run/${1}.pid" 2>/dev/null || echo "0"; else systemctl show -p MainPID "$1" 2>/dev/null | cut -d'=' -f2; fi; }
-
-fi  # end inline svc fallback
 write_openrc_init_ss() {
     cat > "/etc/init.d/ss-rust" << OPENRCEOF
 #!/sbin/openrc-run
@@ -138,7 +71,7 @@ OPENRCEOF
     chown nobody:nobody /var/log/ss-rust.log /var/log/ss-rust.err 2>/dev/null || chown nobody /var/log/ss-rust.log /var/log/ss-rust.err 2>/dev/null || true
 }
 
-# 检测操作系统
+# 检测操作系统（覆盖注入的公共版本，额外写入 OS_TYPE 全局变量）
 detect_os() {
     if grep -qi "alpine" /etc/os-release 2>/dev/null; then
         OS_TYPE="alpine"
@@ -1329,7 +1262,7 @@ Before_Start_Menu() {
 Start_Menu() {
     while true; do
         clear
-        check_root
+        ensure_root
         detect_os
         action=${1:-}
     echo -e "${GREEN}============================================${RESET}"
