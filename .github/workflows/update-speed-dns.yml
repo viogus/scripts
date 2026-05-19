@@ -2,7 +2,7 @@ name: Update speed.cdf.mba DNS (China Unicom Best IP)
 
 on:
   schedule:
-    - cron: "13 */3 * * *"   # every 3 hours at minute 13
+    - cron: "13 */3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -29,7 +29,6 @@ jobs:
             exit 1
           fi
 
-          # validate IPv4 format
           if ! echo "$BEST_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "[speed-dns] ERROR: invalid IP: $BEST_IP"
             exit 1
@@ -38,13 +37,70 @@ jobs:
           echo "target_ip=$BEST_IP" >> "$GITHUB_OUTPUT"
           echo "[speed-dns] best China Unicom IP: $BEST_IP"
 
-      - name: Update Cloudflare DNS record
-        uses: rez0n/create-dns-record@v2.2
-        with:
-          type: "A"
-          name: "speed.cdf.mba"
-          content: ${{ steps.pick.outputs.target_ip }}
-          ttl: 1
-          proxied: false
-          token: ${{ secrets.CLOUDFLARE_TOKEN }}
-          zone: ${{ secrets.CLOUDFLARE_ZONE }}
+      - name: Update Cloudflare DNS
+        shell: bash
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_TOKEN }}
+          ZONE_NAME: ${{ secrets.CF_ZONE_NAME }}
+          ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          RECORD_NAME: speed.cdf.mba
+          TARGET_IP: ${{ steps.pick.outputs.target_ip }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CF_TOKEN}" ]; then
+            echo "[cf] ERROR: CLOUDFLARE_TOKEN secret is empty"
+            exit 1
+          fi
+
+          AUTH="Authorization: Bearer ${CF_TOKEN}"
+          BASE="https://api.cloudflare.com/client/v4"
+
+          # Resolve zone ID: use ZONE_ID secret, or lookup by ZONE_NAME
+          ZID="${ZONE_ID:-}"
+          if [ -z "${ZID}" ]; then
+            if [ -z "${ZONE_NAME:-}" ]; then
+              echo "[cf] ERROR: set CF_ZONE_ID or CF_ZONE_NAME secret"
+              exit 1
+            fi
+            echo "[cf] looking up zone ID for ${ZONE_NAME}..."
+            ZID=$(curl -fsSL -H "${AUTH}" -H "Content-Type: application/json" \
+              "${BASE}/zones?name=${ZONE_NAME}" \
+              | jq -r '.result[0].id')
+            if [ -z "${ZID}" ] || [ "${ZID}" = "null" ]; then
+              echo "[cf] ERROR: zone ${ZONE_NAME} not found"
+              exit 1
+            fi
+            echo "[cf] zone ID: ${ZID}"
+          fi
+
+          # Find existing DNS record
+          echo "[cf] looking up record: ${RECORD_NAME}"
+          REC_ID=$(curl -fsSL -H "${AUTH}" -H "Content-Type: application/json" \
+            "${BASE}/zones/${ZID}/dns_records?type=A&name=${RECORD_NAME}" \
+            | jq -r '.result[0].id')
+
+          if [ -z "${REC_ID}" ] || [ "${REC_ID}" = "null" ]; then
+            # Create new record
+            echo "[cf] record not found, creating..."
+            RESP=$(curl -fsSL -X POST \
+              -H "${AUTH}" -H "Content-Type: application/json" \
+              "${BASE}/zones/${ZID}/dns_records" \
+              -d "{\"type\":\"A\",\"name\":\"${RECORD_NAME}\",\"content\":\"${TARGET_IP}\",\"ttl\":1,\"proxied\":false}")
+          else
+            # Update existing record
+            echo "[cf] updating record ${REC_ID}..."
+            RESP=$(curl -fsSL -X PUT \
+              -H "${AUTH}" -H "Content-Type: application/json" \
+              "${BASE}/zones/${ZID}/dns_records/${REC_ID}" \
+              -d "{\"type\":\"A\",\"name\":\"${RECORD_NAME}\",\"content\":\"${TARGET_IP}\",\"ttl\":1,\"proxied\":false}")
+          fi
+
+          SUCCESS=$(echo "$RESP" | jq -r '.success')
+          if [ "$SUCCESS" != "true" ]; then
+            ERRORS=$(echo "$RESP" | jq -r '.errors[].message')
+            echo "[cf] API error: $ERRORS"
+            exit 1
+          fi
+
+          echo "[cf] DNS record updated: ${RECORD_NAME} -> ${TARGET_IP}"
