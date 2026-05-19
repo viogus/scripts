@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode:
+        component:
           - frps
           - frpc
 
@@ -66,7 +66,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.mode }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component }}
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.version.outputs.frp_version }}
@@ -78,7 +78,7 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           build-args: |
             FRP_VERSION=${{ steps.version.outputs.frp_version }}
-            FRP_MODE=${{ matrix.mode }}
+            FRP_COMPONENT=${{ matrix.component }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           push: true
