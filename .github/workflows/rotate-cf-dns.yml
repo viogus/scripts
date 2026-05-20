@@ -59,11 +59,11 @@ jobs:
           UTC_HOUR=$(date -u +%H)
           TARGET_IP=""
 
-          # 北京时间 01:03 ≈ UTC 17点触发
-          # 北京时间 13:03 ≈ UTC 5点触发
+          # cron: 0 17 UTC -> 北京时间 01:00
+          # cron: 3 5  UTC -> 北京时间 13:03
           if [ "$UTC_HOUR" = "17" ]; then
             TARGET_IP="$IP1"
-          elif [ "$UTC_HOUR" = "5" ]; then
+          elif [ "$UTC_HOUR" = "05" ]; then
             TARGET_IP="$IP2"
           else
             echo "Skip unexpected trigger hour: $UTC_HOUR UTC"
