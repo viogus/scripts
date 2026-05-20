@@ -22,7 +22,8 @@ jobs:
           BEST_IP=$(curl -fsSL --connect-timeout 10 --max-time 30 "$URL" \
             | grep '联通' \
             | head -1 \
-            | cut -d'#' -f1)
+            | cut -d'#' -f1 \
+            | xargs)
 
           if [ -z "$BEST_IP" ]; then
             echo "[speed-dns] ERROR: no China Unicom IP found"

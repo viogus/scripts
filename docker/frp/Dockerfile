@@ -10,7 +10,7 @@ RUN sh /tmp/build-frp.sh
 
 COPY entrypoint.c /tmp/
 RUN gcc -static -s -O2 -DFRP_MODE=\"${FRP_COMPONENT}\" -o /entrypoint /tmp/entrypoint.c && \
-    strip --strip-all /entrypoint || true
+    strip --strip-all /entrypoint || echo "WARN: strip entrypoint failed" >&2
 
 FROM scratch
 COPY --from=downloader /usr/bin/frp /usr/bin/frp
