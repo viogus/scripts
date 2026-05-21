@@ -53,7 +53,7 @@ detect_os() {
 
 _INIT_TYPE=""
 detect_init() {
-    if [ -n "$_INIT_TYPE" ]; then echo "$_INIT_TYPE"; return; fi
+    if [ -n "${_INIT_TYPE:-}" ]; then echo "$_INIT_TYPE"; return; fi
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
         _INIT_TYPE="systemd"
     elif command -v rc-service >/dev/null 2>&1; then
@@ -418,17 +418,19 @@ update_script() {
 run_service_script() {
     local name="$1" url="$2"
     local tmp; tmp=$(mktemp)
+    local exec_file="${tmp}.sh"
     if curl -sL --connect-timeout 10 --max-time 30 "$url" -o "$tmp"; then
         {
-            declare -p RED GREEN YELLOW CYAN BLUE RESET OK ERROR WARN INFO 2>/dev/null
+            declare -p RED GREEN YELLOW CYAN BLUE RESET OK ERROR WARN INFO _INIT_TYPE 2>/dev/null || true
             declare -f has_cmd ensure_root get_ip detect_os detect_init \
                 print_ok print_info print_error print_warn judge \
                 svc_start svc_stop svc_restart svc_enable svc_disable \
                 svc_is_active svc_status svc_reload svc_main_pid \
-                svc_list svc_cat svc_file_path svc_find_services 2>/dev/null
+                svc_list svc_cat svc_file_path svc_find_services 2>/dev/null || true
             cat "$tmp"
-        } | bash
-        rm -f "$tmp"
+        } > "$exec_file"
+        bash "$exec_file"
+        rm -f "$tmp" "$exec_file"
     else
         echo -e "${RED}下载 ${name} 管理脚本失败，请检查网络${RESET}"; rm -f "$tmp"
     fi
