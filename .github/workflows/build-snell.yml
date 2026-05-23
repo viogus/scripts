@@ -8,7 +8,7 @@ on:
       - 'docker/snell/**'
       - '.github/workflows/build-snell.yml'
   schedule:
-    - cron: '17 3 * * 0'
+    - cron: '37 3 * * *'
   workflow_dispatch:
     inputs:
       snell_version:

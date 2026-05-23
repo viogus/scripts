@@ -8,7 +8,7 @@ on:
       - 'docker/frp/**'
       - '.github/workflows/build-frp.yml'
   schedule:
-    - cron: '0 0 * * 0'
+    - cron: '17 0 * * *'
   workflow_dispatch:
     inputs:
       frp_version:
