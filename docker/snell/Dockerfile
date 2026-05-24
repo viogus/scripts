@@ -37,26 +37,30 @@ RUN <<'SRC'
   mkdir -p /runtime/root/usr/local/bin /runtime/root/lib
   cp /tmp/snell/snell-server /runtime/root/usr/local/bin/snell-server
   chmod +x /runtime/root/usr/local/bin/snell-server
-  strip --strip-all /runtime/root/usr/local/bin/snell-server || echo "[snell] WARN: strip binary failed" >&2
 
   mkdir -p /runtime/root/lib
 
   # discover and copy dynamic linker + shared libs via ldd
-  LDD_OUT=$(ldd /runtime/root/usr/local/bin/snell-server)
+  LDD_OUT=$(ldd /runtime/root/usr/local/bin/snell-server 2>&1) || true
 
-  LD_PATH=$(echo "$LDD_OUT" | awk '/^\s+\// && !/=>/ {print $1; exit}')
-  if [ -z "$LD_PATH" ] || [ ! -e "$LD_PATH" ]; then
-    echo "[snell] ERROR: cannot find dynamic linker" >&2
-    echo "$LDD_OUT" >&2; exit 1
+  if echo "$LDD_OUT" | grep -q 'not a dynamic executable\|statically linked'; then
+    echo "[snell] static binary, no libs needed"
+  else
+    LD_PATH=$(echo "$LDD_OUT" | awk '/^\s+\// && !/=>/ {print $1; exit}')
+    if [ -n "$LD_PATH" ] && [ -e "$LD_PATH" ]; then
+      mkdir -p "/runtime/root$(dirname "$LD_PATH")"
+      cp -L "$LD_PATH" "/runtime/root${LD_PATH}"
+      echo "[snell] ld: $LD_PATH"
+    else
+      echo "[snell] WARN: no dynamic linker found, ldd output:" >&2
+      echo "$LDD_OUT" >&2
+    fi
+
+    for lib in $(echo "$LDD_OUT" | awk '/=> \// {print $3}'); do
+      cp -L "$lib" /runtime/root/lib/
+      echo "[snell] lib: $lib"
+    done
   fi
-  mkdir -p "/runtime/root$(dirname "$LD_PATH")"
-  cp -L "$LD_PATH" "/runtime/root${LD_PATH}"
-  echo "[snell] ld: $LD_PATH"
-
-  for lib in $(echo "$LDD_OUT" | awk '/=> \// {print $3}'); do
-    cp -L "$lib" /runtime/root/lib/
-    echo "[snell] lib: $lib"
-  done
 
   echo "[snell] libraries staged:"
   ls -la /runtime/root/lib/
