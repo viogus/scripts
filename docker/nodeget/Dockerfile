@@ -3,21 +3,29 @@ ARG NODEGET_VERSION=0.2.11
 ARG TARGETARCH
 ARG NODEGET_COMPONENT=nodeget-server
 
-RUN apk add --no-cache curl binutils gcc musl-dev
+RUN apk add --no-cache curl binutils gcc musl-dev upx
 
 COPY build-nodeget.sh /tmp/
 RUN sh /tmp/build-nodeget.sh
 
+RUN upx --best --lzma /usr/bin/nodeget || echo "WARN: upx nodeget failed" >&2
+
 COPY entrypoint.c /tmp/
 RUN gcc -static -s -O2 -o /entrypoint /tmp/entrypoint.c && \
     strip --strip-all /entrypoint || true
+
+# agent needs ca-cert for outbound WSS; server (SQLite only) does not
+ARG NODEGET_COMPONENT=nodeget-server
+RUN mkdir -p /tmp/certs && \
+    if [ "$NODEGET_COMPONENT" != "nodeget-server" ]; then \
+      cp /etc/ssl/certs/ca-certificates.crt /tmp/certs/; fi
 
 FROM scratch
 ARG NODEGET_COMPONENT=nodeget-server
 
 COPY --from=downloader /usr/bin/nodeget /usr/bin/nodeget
 COPY --from=downloader /entrypoint /entrypoint
-COPY --from=downloader /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=downloader /tmp/certs/ /etc/ssl/certs/
 
 ENV NODEGET_COMPONENT=$NODEGET_COMPONENT \
     NODEGET_PORT=2211 \

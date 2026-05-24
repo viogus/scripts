@@ -7,21 +7,11 @@ RUN <<'SRC'
   set -eu
 
   case "${TARGETARCH}" in
-    amd64)
-      SNELL_ARCH=amd64
-      GNU_TRIPLET=x86_64-linux-gnu
-      LD_DST=/lib/ld-linux-x86-64.so.2
-      ;;
-    arm64)
-      SNELL_ARCH=aarch64
-      GNU_TRIPLET=aarch64-linux-gnu
-      LD_DST=/lib/ld-linux-aarch64.so.1
-      ;;
+    amd64)   SNELL_ARCH=amd64 ;;
+    arm64)   SNELL_ARCH=aarch64 ;;
     arm)
       if [ "${TARGETVARIANT}" = "v7" ]; then
         SNELL_ARCH=armv7l
-        GNU_TRIPLET=arm-linux-gnueabihf
-        LD_DST=/lib/ld-linux-armhf.so.3
       else
         echo "Unsupported arm variant: ${TARGETVARIANT}" >&2; exit 1
       fi
@@ -44,35 +34,28 @@ RUN <<'SRC'
 
   unzip -q /tmp/snell.zip -d /tmp/snell
 
-  mkdir -p /runtime/root/usr/local/bin /runtime/root/lib /runtime/root/usr/lib
+  mkdir -p /runtime/root/usr/local/bin /runtime/root/lib
   cp /tmp/snell/snell-server /runtime/root/usr/local/bin/snell-server
   chmod +x /runtime/root/usr/local/bin/snell-server
+  strip --strip-all /runtime/root/usr/local/bin/snell-server || echo "[snell] WARN: strip binary failed" >&2
 
-  LIB_DIR=/lib/${GNU_TRIPLET}
-  USR_LIB_DIR=/usr/lib/${GNU_TRIPLET}
+  mkdir -p /runtime/root/lib
 
-  # dynamic linker
-  LD_SRC="${LIB_DIR}/$(basename ${LD_DST})"
-  mkdir -p "$(dirname /runtime/root${LD_DST})"
-  if [ -e "$LD_SRC" ]; then
-    cp -a "$LD_SRC" "/runtime/root${LD_DST}"
-  else
-    echo "[snell] WARNING: ld not at $LD_SRC, trying $LD_DST" >&2
-    cp -a "$LD_DST" "/runtime/root${LD_DST}"
+  # discover and copy dynamic linker + shared libs via ldd
+  LDD_OUT=$(ldd /runtime/root/usr/local/bin/snell-server)
+
+  LD_PATH=$(echo "$LDD_OUT" | awk '/^\s+\// && !/=>/ {print $1; exit}')
+  if [ -z "$LD_PATH" ] || [ ! -e "$LD_PATH" ]; then
+    echo "[snell] ERROR: cannot find dynamic linker" >&2
+    echo "$LDD_OUT" >&2; exit 1
   fi
+  mkdir -p "/runtime/root$(dirname "$LD_PATH")"
+  cp -L "$LD_PATH" "/runtime/root${LD_PATH}"
+  echo "[snell] ld: $LD_PATH"
 
-  # core glibc + gcc runtime
-  for lib in \
-    "${LIB_DIR}/libc.so.6" \
-    "${LIB_DIR}/libm.so.6" \
-    "${USR_LIB_DIR}/libstdc++.so.6" \
-    "${LIB_DIR}/libgcc_s.so.1"; do
-    if [ -e "$lib" ]; then cp -L "$lib" /runtime/root/lib/; fi
-  done
-
-  # libdl/libpthread merged into libc since glibc 2.34 — symlink stubs
-  for stub in libdl.so.2 libpthread.so.0; do
-    ln -sf libc.so.6 "/runtime/root/lib/${stub}"
+  for lib in $(echo "$LDD_OUT" | awk '/=> \// {print $3}'); do
+    cp -L "$lib" /runtime/root/lib/
+    echo "[snell] lib: $lib"
   done
 
   echo "[snell] libraries staged:"
