@@ -3,12 +3,10 @@ ARG NODEGET_VERSION=0.2.11
 ARG TARGETARCH
 ARG NODEGET_COMPONENT=nodeget-server
 
-RUN apk add --no-cache curl binutils gcc musl-dev upx
+RUN apk add --no-cache curl binutils gcc musl-dev
 
 COPY build-nodeget.sh /tmp/
 RUN sh /tmp/build-nodeget.sh
-
-RUN upx --best --lzma /usr/bin/nodeget || echo "WARN: upx nodeget failed" >&2
 
 COPY entrypoint.c /tmp/
 RUN gcc -static -s -O2 -o /entrypoint /tmp/entrypoint.c && \
