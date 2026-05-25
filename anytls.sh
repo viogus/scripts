@@ -231,10 +231,10 @@ install_anytls() {
     mkdir -p "$CONFIG_DIR"
 
     print_info "正在安装依赖..."
-    os_install; judge "依赖安装"
+    os_install || judge "依赖安装"
 
     print_info "正在处理防火墙..."
-    close_wall; judge "防火墙处理"
+    close_wall || judge "防火墙处理"
 
     print_info "正在检测系统架构..."
     local arch latest url filename out
@@ -252,8 +252,7 @@ install_anytls() {
     mkdir -p "${SNAP_DIR}"
 
     print_info "正在下载 AnyTLS..."
-    curl -L --connect-timeout 10 --max-time 120 -o "$out" "$url"
-    judge "下载AnyTLS"
+    curl -L --connect-timeout 10 --max-time 120 -o "$out" "$url" || judge "下载AnyTLS"
 
     unzip -o "$out" -d "$SNAP_DIR" >/dev/null
     install -D -m755 "${SNAP_DIR}/anytls-server" "$BINARY"
@@ -310,8 +309,7 @@ update_anytls() {
     mkdir -p "${SNAP_DIR}"
 
     print_info "正在下载 AnyTLS..."
-    curl -L --connect-timeout 10 --max-time 120 -o "$out" "$url"
-    judge "下载AnyTLS"
+    curl -L --connect-timeout 10 --max-time 120 -o "$out" "$url" || judge "下载AnyTLS"
 
     unzip -o "$out" -d "$SNAP_DIR" >/dev/null
     install -D -m755 "${SNAP_DIR}/anytls-server" "$BINARY"

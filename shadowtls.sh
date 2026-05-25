@@ -65,15 +65,15 @@ OPENRCEOF
 # 安装必要的工具
 install_requirements() {
     if [ -x "$(command -v apt)" ]; then
-        apt update && apt install -y wget curl jq
+        apt update && apt install -y wget curl jq qrencode
     elif [ -x "$(command -v dnf)" ]; then
-        dnf install -y wget curl jq
+        dnf install -y wget curl jq qrencode
     elif [ -x "$(command -v yum)" ]; then
-        yum install -y wget curl jq
+        yum install -y wget curl jq qrencode
     elif [ -x "$(command -v apk)" ]; then
-        apk update && apk add --no-cache wget curl jq
+        apk update && apk add --no-cache wget curl jq qrencode
     else
-        echo -e "${RED}未支持的包管理器，请手动安装 wget curl jq${RESET}"
+        echo -e "${RED}未支持的包管理器，请手动安装 wget curl jq qrencode${RESET}"
         exit 1
     fi
 }
@@ -275,10 +275,12 @@ generate_random_port() {
 # 检查端口是否被占用
 check_port_usage() {
     local port=$1
-    if netstat -tuln | grep -q ":${port}"; then
-        return 0  # 端口被占用
+    if has_cmd ss; then
+        ss -tuln | grep -q ":${port}" && return 0
+    elif has_cmd netstat; then
+        netstat -tuln | grep -q ":${port}" && return 0
     fi
-    return 1     # 端口未被占用
+    return 1
 }
 
 # 获取已使用的 ShadowTLS 端口
@@ -947,12 +949,14 @@ ${GREEN}Surge 配置：${RESET}"
                                 echo -e "
 ${GREEN}服务状态：正在运行${RESET}"
                                 # 检查端口占用情况
-                                local port_usage=$(netstat -tuln | grep ":${stls_port}")
+                                local port_usage
+                                port_usage=$(ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null || true)
+                                port_usage=$(echo "$port_usage" | grep ":${stls_port}" || true)
                                 local port_count=$(echo "$port_usage" | wc -l)
                                 if [ "$port_count" -gt 1 ]; then
                                     echo -e "${RED}警告：端口 ${stls_port} 被多个服务占用！${RESET}"
                                     echo -e "${YELLOW}端口占用情况：${RESET}"
-                                    netstat -tuln | grep ":${stls_port}"
+                                    (ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null || true) | grep ":${stls_port}" || true
                                 fi
                             else
                                 echo -e "

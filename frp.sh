@@ -93,9 +93,14 @@ download_frp() {
 
     mkdir -p "${CONF_DIR}"
     tar -xzf "${tmp}/${file_name}.tar.gz" -C "$tmp"
-    cp "${tmp}/${file_name}/frps" "${FRPS_BIN}" 2>/dev/null || true
-    cp "${tmp}/${file_name}/frpc" "${FRPC_BIN}" 2>/dev/null || true
-    chmod +x "${FRPS_BIN}" "${FRPC_BIN}" 2>/dev/null || true
+    if [ -f "${tmp}/${file_name}/frps" ]; then
+        cp "${tmp}/${file_name}/frps" "${FRPS_BIN}"
+        chmod +x "${FRPS_BIN}"
+    fi
+    if [ -f "${tmp}/${file_name}/frpc" ]; then
+        cp "${tmp}/${file_name}/frpc" "${FRPC_BIN}"
+        chmod +x "${FRPC_BIN}"
+    fi
 
     rm -rf "$tmp"
     print_ok "frp 二进制安装完成"

@@ -686,7 +686,7 @@ modify_config() {
  ${GREEN}6.${RESET}  修改 全部配置" && echo
     
     read -e -p "(默认：取消)：" modify
-    [[ -z "${modify}" ]] && echo "已取消..." && Start_Menu
+    [[ -z "${modify}" ]] && echo "已取消..." && return
     
     case "${modify}" in
         1)
