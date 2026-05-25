@@ -58,7 +58,9 @@ jobs:
 
       - name: Clone upstream repo
         run: |
-          git clone --depth 1 --branch "v${{ steps.version.outputs.version }}" \
+          # clone main branch (tag v0.2.7 has pyproject.toml bug: dependencies
+          # misplaced under [project.urls]). version is for labeling only.
+          git clone --depth 1 \
             "https://github.com/${{ env.UPSTREAM_REPO }}.git" /tmp/upstream
           cp docker/tradingagents/Dockerfile docker/tradingagents/.dockerignore /tmp/upstream/
 
