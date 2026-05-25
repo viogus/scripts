@@ -56,7 +56,8 @@ jobs:
           if [ -n "${{ inputs.frp_version }}" ]; then
             echo "frp_version=${{ inputs.frp_version }}" >> $GITHUB_OUTPUT
           else
-            VER=$(curl -s https://api.github.com/repos/fatedier/frp/releases/latest \
+            VER=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/fatedier/frp/releases/latest \
               | jq -r '.tag_name | ltrimstr("v")')
             if [ -z "$VER" ] || [ "$VER" = "null" ]; then
               echo "WARN: failed to fetch latest frp version, using fallback" >&2

@@ -56,7 +56,8 @@ jobs:
           if [ -n "${{ inputs.nodeget_version }}" ]; then
             echo "nodeget_version=${{ inputs.nodeget_version }}" >> $GITHUB_OUTPUT
           else
-            VER=$(curl -s https://api.github.com/repos/GenshinMinecraft/NodeGet/releases/latest \
+            VER=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/GenshinMinecraft/NodeGet/releases/latest \
               | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
             if [ -z "$VER" ]; then
               echo "::warning::Failed to fetch latest NodeGet version, falling back to 0.2.11"
