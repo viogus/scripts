@@ -4,6 +4,25 @@ Multi-Agent A-stock trading analysis framework. Daily automated build, multi-arc
 
 ## Quick Start
 
+### Docker Compose (recommended)
+
+```bash
+# 1. create .env file with your API keys
+cp .env.example .env
+# edit .env, set at least one API key
+
+# 2. run CLI mode
+docker compose -f docker-compose.yml run --rm tradingagents
+
+# 3. or run web UI (Streamlit on http://localhost:8501)
+docker compose -f docker-compose.yml --profile web up tradingagents-web
+
+# 4. or run with local Ollama
+docker compose -f docker-compose.yml --profile ollama run --rm tradingagents-ollama
+```
+
+### Docker Run
+
 ```bash
 # pull image
 docker pull ghcr.io/viogus/tradingagents:latest
@@ -23,7 +42,7 @@ docker run -it --rm \
 
 ## Supported LLM Providers
 
-Set one of these env vars:
+Set one of these env vars in `.env` or via `-e`:
 
 | Provider | Env Var |
 |----------|---------|
