@@ -35,7 +35,6 @@ done
 [ -f /tmp/nodeget ] || { echo "[nodeget] download failed" >&2; exit 1; }
 
 cp /tmp/nodeget /usr/bin/nodeget
-strip --strip-all /usr/bin/nodeget || true
 chmod +x /usr/bin/nodeget
 rm -f /tmp/nodeget
 
