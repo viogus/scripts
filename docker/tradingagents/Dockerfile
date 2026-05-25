@@ -9,7 +9,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /build
 COPY . .
 # install setuptools first to avoid isolation env version mismatch
-RUN pip install --no-cache-dir 'setuptools>=61.0' wheel
+RUN pip install --no-cache-dir 'setuptools>=61.0,<82' wheel
 RUN pip install --no-cache-dir --no-build-isolation .
 
 FROM python:3.12-slim
