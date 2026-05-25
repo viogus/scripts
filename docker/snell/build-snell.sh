@@ -86,19 +86,6 @@ ls -la /runtime/root/lib/
 echo "[snell] verifying runtime deps:"
 ldd /runtime/root/usr/local/bin/snell-server 2>&1 || true
 
-EP_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "${EP_DIR}/entrypoint.c" ]; then
-  echo "[snell] compiling static entrypoint"
-  gcc -static -s -O2 -o /runtime/root/entrypoint "${EP_DIR}/entrypoint.c"
-  strip --strip-all /runtime/root/entrypoint 2>/dev/null || true
-elif [ -f /tmp/entrypoint.c ]; then
-  echo "[snell] compiling static entrypoint"
-  gcc -static -s -O2 -o /runtime/root/entrypoint /tmp/entrypoint.c
-  strip --strip-all /runtime/root/entrypoint 2>/dev/null || true
-else
-  echo "[snell] WARNING: entrypoint.c not found, entrypoint not compiled" >&2
-fi
-
 rm -rf /tmp/snell /tmp/snell.zip
 apt-get purge -y wget unzip gcc libc6-dev && apt-get autoremove -y && apt-get clean
 rm -rf /var/lib/apt/lists/*

@@ -1371,11 +1371,14 @@ initial_check
 # 多用户管理
 setup_multi_user() {
     echo -e "${CYAN}正在执行多用户管理脚本...${RESET}"
-    bash <(curl -sL https://raw.githubusercontent.com/viogus/scripts/main/multi-user.sh)
-    
-    # 多用户管理脚本执行完毕后会自动返回这里
+    local tmpfile
+    tmpfile=$(mktemp) || { echo -e "${RED}创建临时文件失败${RESET}" >&2; return 1; }
+    curl -sL https://raw.githubusercontent.com/viogus/scripts/main/multi-user.sh -o "$tmpfile"
+    bash "$tmpfile"
+    rm -f "$tmpfile"
+
     echo -e "${GREEN}多用户管理操作完成${RESET}"
-    sleep 1  # 给用户一点时间看到提示
+    sleep 1
 }
 
 # 主菜单
@@ -1417,23 +1420,27 @@ ${YELLOW}=== 系统功能 ===${RESET}"
 #开启bbr
 setup_bbr() {
     echo -e "${CYAN}正在获取并执行 BBR 管理脚本...${RESET}"
-    
-    # 直接从远程执行BBR脚本
-    bash <(curl -sL https://raw.githubusercontent.com/viogus/scripts/main/bbr.sh)
-    
-    # BBR 脚本执行完毕后会自动返回这里
+    local tmpfile
+    tmpfile=$(mktemp) || { echo -e "${RED}创建临时文件失败${RESET}" >&2; return 1; }
+    curl -sL https://raw.githubusercontent.com/viogus/scripts/main/bbr.sh -o "$tmpfile"
+    bash "$tmpfile"
+    rm -f "$tmpfile"
+
     echo -e "${GREEN}BBR 管理操作完成${RESET}"
-    sleep 1  # 给用户一点时间看到提示
+    sleep 1
 }
 
 # ShadowTLS管理
 setup_shadowtls() {
     echo -e "${CYAN}正在执行 ShadowTLS 管理脚本...${RESET}"
-    bash <(curl -sL https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh)
-    
-    # ShadowTLS 脚本执行完毕后会自动返回这里
+    local tmpfile
+    tmpfile=$(mktemp) || { echo -e "${RED}创建临时文件失败${RESET}" >&2; return 1; }
+    curl -sL https://raw.githubusercontent.com/viogus/scripts/main/shadowtls.sh -o "$tmpfile"
+    bash "$tmpfile"
+    rm -f "$tmpfile"
+
     echo -e "${GREEN}ShadowTLS 管理操作完成${RESET}"
-    sleep 1  # 给用户一点时间看到提示
+    sleep 1
 }
 
 # 获取 Snell 端口
