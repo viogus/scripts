@@ -552,6 +552,60 @@ uninstall_frp() {
     echo -e "${GREEN}frp 卸载完成！${RESET}"
 }
 
+
+# ============================================
+# NodeGet 卸载
+# ============================================
+
+uninstall_nodeget() {
+    echo -e "${CYAN}正在卸载 NodeGet...${RESET}"
+    local init; init=$(detect_init)
+
+    if [[ -f "/usr/local/bin/nodeget-server" ]] || [[ -f "/usr/local/etc/nodeget/nodeget-server.toml" ]]; then
+        svc_stop nodeget-server 2>/dev/null || true
+        svc_disable nodeget-server 2>/dev/null || true
+        if [[ "$init" == "openrc" ]]; then
+            rc-update del nodeget-server default >/dev/null 2>&1 || true
+            rm -f "/etc/init.d/nodeget-server"
+        elif [[ "$init" == "procd" ]]; then
+            /etc/init.d/nodeget-server stop 2>/dev/null || true
+            /etc/init.d/nodeget-server disable 2>/dev/null || true
+            rm -f "/etc/init.d/nodeget-server"
+        else
+            rm -f "/etc/systemd/system/nodeget-server.service"
+        fi
+        rm -f /usr/local/bin/nodeget-server
+        rm -f /var/log/nodeget-server.log
+        echo -e "${GREEN}nodeget-server 已卸载${RESET}"
+    else
+        echo -e "${YELLOW}nodeget-server 未安装${RESET}"
+    fi
+
+    if [[ -f "/usr/local/bin/nodeget-agent" ]] || [[ -f "/usr/local/etc/nodeget/nodeget-agent.toml" ]]; then
+        svc_stop nodeget-agent 2>/dev/null || true
+        svc_disable nodeget-agent 2>/dev/null || true
+        if [[ "$init" == "openrc" ]]; then
+            rc-update del nodeget-agent default >/dev/null 2>&1 || true
+            rm -f "/etc/init.d/nodeget-agent"
+        elif [[ "$init" == "procd" ]]; then
+            /etc/init.d/nodeget-agent stop 2>/dev/null || true
+            /etc/init.d/nodeget-agent disable 2>/dev/null || true
+            rm -f "/etc/init.d/nodeget-agent"
+        else
+            rm -f "/etc/systemd/system/nodeget-agent.service"
+        fi
+        rm -f /usr/local/bin/nodeget-agent
+        rm -f /var/log/nodeget-agent.log
+        echo -e "${GREEN}nodeget-agent 已卸载${RESET}"
+    else
+        echo -e "${YELLOW}nodeget-agent 未安装${RESET}"
+    fi
+
+    svc_reload 2>/dev/null || true
+    print_info "数据目录保留: /var/lib/nodeget-server /var/lib/nodeget-agent (如需删除请手动操作)"
+    echo -e "${GREEN}NodeGet 卸载完成！${RESET}"
+}
+
 	# ============================================
 # Surge 配置导出（所有服务）
 # ============================================
@@ -706,26 +760,28 @@ show_menu() {
     echo -e "${GREEN}5.${RESET} AnyTLS 安装管理"
     echo -e "${GREEN}6.${RESET} Hysteria 2 安装管理"
     echo -e "${GREEN}7.${RESET} frp 安装管理 (frps/frpc)"
+    echo -e "${GREEN}8.${RESET} NodeGet 安装管理 (Server/Agent)"
 
     echo -e "
 ${YELLOW}=== 卸载功能 ===${RESET}"
-    echo -e "${GREEN}8.${RESET} 卸载 Snell"
-    echo -e "${GREEN}9.${RESET} 卸载 SS-2022"
-    echo -e "${GREEN}10.${RESET} 卸载 ShadowTLS"
-    echo -e "${GREEN}11.${RESET} 卸载 AnyTLS"
-    echo -e "${GREEN}12.${RESET} 卸载 Hysteria 2"
-    echo -e "${GREEN}13.${RESET} 卸载 frp (frps/frpc)"
+    echo -e "${GREEN}9.${RESET} 卸载 Snell"
+    echo -e "${GREEN}10.${RESET} 卸载 SS-2022"
+    echo -e "${GREEN}11.${RESET} 卸载 ShadowTLS"
+    echo -e "${GREEN}12.${RESET} 卸载 AnyTLS"
+    echo -e "${GREEN}13.${RESET} 卸载 Hysteria 2"
+    echo -e "${GREEN}14.${RESET} 卸载 frp (frps/frpc)"
+    echo -e "${GREEN}15.${RESET} 卸载 NodeGet"
 
     echo -e "
 ${YELLOW}=== 系统功能 ===${RESET}"
-    echo -e "${GREEN}14.${RESET} 更新脚本"
-    echo -e "${GREEN}15.${RESET} 输出 Surge 配置"
+    echo -e "${GREEN}16.${RESET} 更新脚本"
+    echo -e "${GREEN}17.${RESET} 输出 Surge 配置"
     echo -e "${GREEN}0.${RESET} 退出"
 
     echo -e "${CYAN}============================================${RESET}"
     echo -e "${GREEN}退出脚本后，输入 menu 可重新进入${RESET}"
     echo -e "${CYAN}============================================${RESET}"
-    read -rp "请输入选项 [0-15]: " num
+    read -rp "请输入选项 [0-17]: " num
 }
 
 # ============================================
@@ -747,16 +803,18 @@ while true; do
         5) run_service_script "AnyTLS" "https://raw.githubusercontent.com/viogus/scripts/main/anytls.sh" ;;
         6) run_service_script "Hysteria 2" "https://raw.githubusercontent.com/viogus/scripts/main/hysteria2.sh" ;;
         7) run_service_script "frp" "https://raw.githubusercontent.com/viogus/scripts/main/frp.sh" ;;
-        8) uninstall_snell ;;
-        9) uninstall_ss_rust ;;
-        10) uninstall_shadowtls ;;
-        11) uninstall_anytls ;;
-        12) uninstall_hysteria ;;
-        13) uninstall_frp ;;
-        14) update_script ;;
-        15) surge_export_all ;;
+        8) run_service_script "NodeGet" "https://raw.githubusercontent.com/viogus/scripts/main/nodeget.sh" ;;
+        9) uninstall_snell ;;
+        10) uninstall_ss_rust ;;
+        11) uninstall_shadowtls ;;
+        12) uninstall_anytls ;;
+        13) uninstall_hysteria ;;
+        14) uninstall_frp ;;
+        15) uninstall_nodeget ;;
+        16) update_script ;;
+        17) surge_export_all ;;
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
-        *) echo -e "${RED}请输入正确的选项 [0-15]${RESET}" ;;
+        *) echo -e "${RED}请输入正确的选项 [0-17]${RESET}" ;;
     esac
     echo -e "
 ${CYAN}按任意键返回主菜单...${RESET}"
