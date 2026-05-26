@@ -163,7 +163,8 @@ get_latest_version() {
     local ver
     ver=$(curl -s --connect-timeout 10 --max-time 30 \
         "https://api.github.com/repos/${NG_REPO}/releases/latest" 2>/dev/null \
-        | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/') || true
+        | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([0-9.]+)".*/\1/p' \
+        | head -1) || true
     if [ -z "$ver" ]; then
         ver="0.4.0"
         print_warn "无法获取最新版本号，使用默认版本: v${ver}"
