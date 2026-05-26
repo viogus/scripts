@@ -95,11 +95,17 @@ trap 'echo -e "${WARN} 已中断"; exit 1' INT
 
 get_arch() {
     case "$(uname -m)" in
-        x86_64|amd64)   echo "x86_64" ;;
-        aarch64|arm64)  echo "aarch64" ;;
-        armv7l)         echo "armv7" ;;
-        armv6l)         echo "arm" ;;
-        i386|i686)      echo "i686" ;;
+        x86_64|amd64)       echo "x86_64" ;;
+        aarch64|arm64)      echo "aarch64" ;;
+        armv7l)             echo "armv7" ;;
+        armv6l)             echo "arm" ;;
+        i386|i686)          echo "i686" ;;
+        riscv64|riscv64gc)  echo "riscv64gc" ;;
+        ppc64|powerpc64)    echo "powerpc64" ;;
+        ppc64le|powerpc64le) echo "powerpc64le" ;;
+        s390x)              echo "s390x" ;;
+        sparc64)            echo "sparc64" ;;
+        thumbv7neon)        echo "thumbv7neon" ;;
         *) print_error "不支持的架构: $(uname -m)"; exit 1 ;;
     esac
 }
@@ -172,6 +178,16 @@ get_latest_version() {
     echo "$ver"
 }
 
+# 验证 release 中存在指定二进制
+# 返回 0 = 存在, 1 = 不存在
+check_asset() {
+    local fname="$1"
+    local ver="$2"
+    curl -s --connect-timeout 10 --max-time 30 \
+        "https://api.github.com/repos/${NG_REPO}/releases/tags/v${ver}" 2>/dev/null \
+        | grep -qF "\"name\": \"${fname}\""
+}
+
 download_binary() {
     local component="$1"   # server or agent
     local ver="$2"
@@ -179,6 +195,17 @@ download_binary() {
     local dest="$4"
 
     local fname="nodeget-${component}-linux-${target}"
+
+    # 校验该架构/组件组合是否存在
+    if ! check_asset "$fname" "$ver"; then
+        local asset_arch="${target%%-*}"
+        print_error "NodeGet release v${ver} 中未找到: ${fname}"
+        if [ "$component" = "server" ] && { [ "$asset_arch" = "arm" ] || [ "$asset_arch" = "i686" ]; }; then
+            print_info "Server 仅提供 x86_64、aarch64、armv7 架构，请更换设备或使用 Agent"
+        fi
+        exit 1
+    fi
+
     local url="https://github.com/${NG_REPO}/releases/download/v${ver}/${fname}"
 
     print_info "下载 ${fname} (v${ver})..."
