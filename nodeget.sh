@@ -645,6 +645,46 @@ install_agent() {
 }
 
 # ============================================
+# 升级 (仅更新二进制，保留配置)
+# ============================================
+
+upgrade_nodeget_server() {
+    if [[ ! -x "${NG_SERVER_BIN}" ]] || [[ ! -f "${NG_SERVER_CONF}" ]]; then
+        print_warn "nodeget-server 未安装，请先安装"; return
+    fi
+
+    local ver; ver=$(get_latest_version)
+    local target; target=$(get_target)
+    print_info "当前架构: ${target}, 目标版本: v${ver}"
+
+    svc_op "${NG_SERVER_SERVICE}" stop
+    download_binary "server" "$ver" "$target" "${NG_SERVER_BIN}"
+    svc_op "${NG_SERVER_SERVICE}" start
+
+    if svc_op "${NG_SERVER_SERVICE}" status >/dev/null 2>&1; then
+        print_ok "nodeget-server 升级到 v${ver} 完成"
+    else
+        print_warn "升级后服务启动失败，请检查: systemctl status ${NG_SERVER_SERVICE}"
+    fi
+}
+
+upgrade_nodeget_agent() {
+    if [[ ! -x "${NG_AGENT_BIN}" ]] || [[ ! -f "${NG_AGENT_CONF}" ]]; then
+        print_warn "nodeget-agent 未安装，请先安装"; return
+    fi
+
+    local ver; ver=$(get_latest_version)
+    local target; target=$(get_target)
+    print_info "当前架构: ${target}, 目标版本: v${ver}"
+
+    svc_op "${NG_AGENT_SERVICE}" stop
+    download_binary "agent" "$ver" "$target" "${NG_AGENT_BIN}"
+    svc_op "${NG_AGENT_SERVICE}" start
+
+    print_ok "nodeget-agent 升级到 v${ver} 完成"
+}
+
+# ============================================
 # 卸载
 # ============================================
 
@@ -752,9 +792,12 @@ show_menu() {
     echo -e "${GREEN}12.${RESET} 查看 Agent 配置"
     echo -e "${GREEN}13.${RESET} 查看 Server UUID"
     echo -e "---"
+    echo -e "${GREEN}14.${RESET} 更新 Server (保留配置)"
+    echo -e "${GREEN}15.${RESET} 更新 Agent (保留配置)"
+    echo -e "---"
     echo -e "${GREEN}0.${RESET} 退出"
     hr
-    read -rp "请输入选项 [0-13]: " choice
+    read -rp "请输入选项 [0-15]: " choice
 
     case "${choice}" in
         1) install_server; pause ;;
@@ -780,8 +823,10 @@ show_menu() {
                 print_warn "Server 未安装"
             fi
             pause ;;
+        14) upgrade_nodeget_server; pause ;;
+        15) upgrade_nodeget_agent; pause ;;
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
-        *) echo -e "${RED}无效选项${RESET}"; pause ;;
+        *) echo -e "${RED}无效选项 [0-15]${RESET}"; pause ;;
     esac
 }
 
