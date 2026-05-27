@@ -129,7 +129,7 @@ get_libc() {
 
 # ARM 硬浮点检测
 has_hardfloat() {
-    ldd --version 2>&1 | grep -qi 'hard float'
+    command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi 'hard float'
 }
 
 get_target() {
@@ -212,6 +212,11 @@ download_binary() {
 
     local tmp; tmp=$(mktemp -d)
     if curl -L --connect-timeout 10 --max-time 300 -o "${tmp}/${fname}" "$url" 2>/dev/null; then
+        if ! file "${tmp}/${fname}" 2>/dev/null | grep -q "ELF"; then
+            print_error "下载文件损坏或非 ELF 二进制: ${tmp}/${fname}"
+            rm -rf "$tmp"
+            exit 1
+        fi
         install -m 0755 "${tmp}/${fname}" "$dest"
         rm -rf "$tmp"
         print_ok "二进制安装完成: ${dest}"
@@ -221,6 +226,11 @@ download_binary() {
         print_warn "GitHub 直连失败，尝试代理..."
         local proxy_url="https://install.nodeget.com/releases/${fname}?tag=v${ver}"
         if curl -L --connect-timeout 10 --max-time 300 -o "${dest}" "$proxy_url" 2>/dev/null; then
+            if ! file "${dest}" 2>/dev/null | grep -q "ELF"; then
+                print_error "代理下载文件损坏或非 ELF 二进制: ${dest}"
+                rm -f "$dest"
+                exit 1
+            fi
             chmod +x "$dest"
             print_ok "二进制安装完成 (代理): ${dest}"
         else
@@ -284,8 +294,6 @@ OPENRCEOF
 
 write_procd() {
     local name="$1" bin="$2" args="$3"
-    # args 中的 -c /path 需要拆分，procd 用 procd_append_param command
-    # 将 bin 和 args 拆分到 procd_set_param command 中
     cat > "/etc/init.d/${name}" << PROCDEOF
 #!/bin/sh /etc/rc.common
 USE_PROCD=1
@@ -293,8 +301,7 @@ START=95
 
 start_service() {
     procd_open_instance
-    procd_set_param command ${bin}
-    procd_append_param command ${args}
+    procd_set_param command ${bin} ${args}
     procd_set_param respawn
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -415,9 +422,9 @@ svc_op() {
             esac ;;
         status)
             case "$init" in
-                systemd) systemctl status "$name" --no-pager 2>/dev/null || true ;;
-                openrc)  rc-service "$name" status 2>/dev/null || true ;;
-                procd)   /etc/init.d/${name} status 2>/dev/null || true ;;
+                systemd) systemctl status "$name" --no-pager 2>/dev/null ;;
+                openrc)  rc-service "$name" status 2>/dev/null ;;
+                procd)   /etc/init.d/${name} status 2>/dev/null ;;
             esac ;;
     esac
 }
@@ -570,7 +577,7 @@ install_server() {
     token="${token:-未知}"
     account_password=$(echo "$init_out" | sed -nE 's/.*Root Password:\s*//p' | head -1)
     account_password="${account_password:-未知}"
-    final_uuid=$("${NG_SERVER_BIN}" get-uuid -c "${NG_SERVER_CONF}" 2>/dev/null | tail -n 1)
+    final_uuid=$("${NG_SERVER_BIN}" get-uuid -c "${NG_SERVER_CONF}" 2>/dev/null | tail -n 1) || final_uuid=""
 
     # 安装服务 (serve 子命令)
     install_service "${NG_SERVER_SERVICE}" "${NG_SERVER_BIN}" \
@@ -664,7 +671,7 @@ upgrade_nodeget_server() {
     if svc_op "${NG_SERVER_SERVICE}" status >/dev/null 2>&1; then
         print_ok "nodeget-server 升级到 v${ver} 完成"
     else
-        print_warn "升级后服务启动失败，请检查: systemctl status ${NG_SERVER_SERVICE}"
+        print_warn "升级后服务启动失败，请检查: ${NG_SERVER_SERVICE} 服务状态"
     fi
 }
 
