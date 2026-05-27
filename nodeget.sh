@@ -111,6 +111,11 @@ get_arch() {
 }
 
 get_libc() {
+    # ldd 不可用时默认 musl（常见于 Alpine/OpenWrt）
+    if ! command -v ldd >/dev/null 2>&1; then
+        echo "musl"
+        return
+    fi
     if ldd --version 2>&1 | grep -qi musl; then
         echo "musl"
         return
@@ -118,9 +123,13 @@ get_libc() {
     # glibc 版本检查，< 2.25 退回 musl
     local glibc_ver
     glibc_ver=$(ldd --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1 || echo "0")
-    local lowest
-    lowest=$(printf '%s\n%s\n' "2.25" "$glibc_ver" | sort -V | head -n1)
-    if [ "$lowest" != "2.25" ]; then
+    # POSIX 版本比较：按 . 分割逐段比较
+    local required_major=2 required_minor=25
+    local cur_major cur_minor
+    cur_major=$(echo "$glibc_ver" | cut -d. -f1)
+    cur_minor=$(echo "$glibc_ver" | cut -d. -f2)
+    if [ "${cur_major:-0}" -lt "$required_major" ] || \
+       { [ "${cur_major:-0}" -eq "$required_major" ] && [ "${cur_minor:-0}" -lt "$required_minor" ]; }; then
         echo "musl"
     else
         echo "gnu"
@@ -688,7 +697,11 @@ upgrade_nodeget_agent() {
     download_binary "agent" "$ver" "$target" "${NG_AGENT_BIN}"
     svc_op "${NG_AGENT_SERVICE}" start
 
-    print_ok "nodeget-agent 升级到 v${ver} 完成"
+    if svc_op "${NG_AGENT_SERVICE}" status >/dev/null 2>&1; then
+        print_ok "nodeget-agent 升级到 v${ver} 完成"
+    else
+        print_warn "升级后服务启动失败，请检查: ${NG_AGENT_SERVICE} 服务状态"
+    fi
 }
 
 # ============================================
@@ -729,12 +742,14 @@ show_status() {
     echo ""
     echo -e "${CYAN}--- NodeGet 服务状态 ---${RESET}"
 
+    local init_type; init_type=$(detect_init)
+
     # Server
     if [[ -x "${NG_SERVER_BIN}" ]] && [[ -f "${NG_SERVER_CONF}" ]]; then
         local active="停止"
-        if [ "$(detect_init)" = "openrc" ]; then
+        if [ "$init_type" = "openrc" ]; then
             rc-service "${NG_SERVER_SERVICE}" status >/dev/null 2>&1 && active="运行中" || true
-        elif [ "$(detect_init)" = "procd" ]; then
+        elif [ "$init_type" = "procd" ]; then
             /etc/init.d/${NG_SERVER_SERVICE} running 2>/dev/null && active="运行中" || true
         else
             systemctl is-active --quiet "${NG_SERVER_SERVICE}" 2>/dev/null && active="运行中" || true
@@ -748,9 +763,9 @@ show_status() {
     # Agent
     if [[ -x "${NG_AGENT_BIN}" ]] && [[ -f "${NG_AGENT_CONF}" ]]; then
         local active="停止"
-        if [ "$(detect_init)" = "openrc" ]; then
+        if [ "$init_type" = "openrc" ]; then
             rc-service "${NG_AGENT_SERVICE}" status >/dev/null 2>&1 && active="运行中" || true
-        elif [ "$(detect_init)" = "procd" ]; then
+        elif [ "$init_type" = "procd" ]; then
             /etc/init.d/${NG_AGENT_SERVICE} running 2>/dev/null && active="运行中" || true
         else
             systemctl is-active --quiet "${NG_AGENT_SERVICE}" 2>/dev/null && active="运行中" || true
@@ -825,7 +840,7 @@ show_menu() {
             pause ;;
         13)
             if [ -x "${NG_SERVER_BIN}" ] && [ -f "${NG_SERVER_CONF}" ]; then
-                "${NG_SERVER_BIN}" get-uuid -c "${NG_SERVER_CONF}" 2>/dev/null | tail -n 1
+                "${NG_SERVER_BIN}" get-uuid -c "${NG_SERVER_CONF}" 2>/dev/null | tail -n 1 || true
             else
                 print_warn "Server 未安装"
             fi
