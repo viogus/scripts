@@ -56,8 +56,8 @@ jobs:
           INPUT_VER: ${{ inputs.snell_version }}
         run: |
           MAJOR="${{ matrix.major }}"
+          FORCE=false
           if [ -n "${INPUT_VER:-}" ]; then
-            # Manual override: extract major from input, skip if mismatch
             INPUT_MAJOR=$(echo "$INPUT_VER" | cut -d. -f1)
             if [ "$INPUT_MAJOR" != "$MAJOR" ]; then
               echo "Skip: input v${INPUT_VER} != matrix v${MAJOR}" >&2
@@ -65,6 +65,7 @@ jobs:
               exit 0
             fi
             VER="$INPUT_VER"
+            FORCE=true
           else
             P="snell-server-v${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*"
             VER=$(curl -s https://manual.nssurge.com/others/snell.html \
@@ -78,9 +79,28 @@ jobs:
           fi
           echo "snell_version=$VER" >> $GITHUB_OUTPUT
           echo "major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "force=$FORCE" >> $GITHUB_OUTPUT
+
+      - name: Check if version already built
+        if: steps.version.outputs.skip != 'true'
+        id: check
+        run: |
+          if [ "${{ steps.version.outputs.force }}" = "true" ]; then
+            echo "Manual dispatch, forcing rebuild"
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          TAG="ghcr.io/${{ github.repository_owner }}/snell-server:v${{ steps.version.outputs.snell_version }}"
+          if docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $TAG not found, building"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Generate tags
-        if: steps.version.outputs.skip != 'true'
+        if: steps.version.outputs.skip != 'true' && steps.check.outputs.skip != 'true'
         id: tags
         run: |
           IMG="${{ env.REGISTRY }}/${{ github.repository_owner }}/snell-server"
@@ -94,7 +114,7 @@ jobs:
           echo "list=${TAGS}" >> $GITHUB_OUTPUT
 
       - name: Build and push
-        if: steps.version.outputs.skip != 'true'
+        if: steps.version.outputs.skip != 'true' && steps.check.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: docker/snell

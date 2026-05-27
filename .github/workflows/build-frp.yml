@@ -55,6 +55,7 @@ jobs:
         run: |
           if [ -n "${{ inputs.frp_version }}" ]; then
             echo "frp_version=${{ inputs.frp_version }}" >> $GITHUB_OUTPUT
+            echo "force=true" >> $GITHUB_OUTPUT
           else
             VER=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               https://api.github.com/repos/fatedier/frp/releases/latest \
@@ -64,9 +65,28 @@ jobs:
               VER="0.68.1"
             fi
             echo "frp_version=$VER" >> $GITHUB_OUTPUT
+            echo "force=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if version already built
+        id: check
+        run: |
+          if [ "${{ steps.version.outputs.force }}" = "true" ]; then
+            echo "Manual dispatch, forcing rebuild"
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          TAG="ghcr.io/${{ github.repository_owner }}/${{ matrix.component }}:${{ steps.version.outputs.frp_version }}"
+          if docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $TAG not found, building"
+            echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Extract metadata
+        if: steps.check.outputs.skip != 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -76,6 +96,7 @@ jobs:
             type=raw,value=${{ steps.version.outputs.frp_version }}
 
       - name: Build and push
+        if: steps.check.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: docker/frp
