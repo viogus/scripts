@@ -7,11 +7,21 @@ RUN <<'SRC'
   set -eu
 
   case "${TARGETARCH}" in
-    amd64)   SNELL_ARCH=amd64 ;;
-    arm64)   SNELL_ARCH=aarch64 ;;
+    amd64)
+      SNELL_ARCH=amd64
+      GNU_TRIPLET=x86_64-linux-gnu
+      LD_DST=/lib64/ld-linux-x86-64.so.2
+      ;;
+    arm64)
+      SNELL_ARCH=aarch64
+      GNU_TRIPLET=aarch64-linux-gnu
+      LD_DST=/lib/ld-linux-aarch64.so.1
+      ;;
     arm)
       if [ "${TARGETVARIANT}" = "v7" ]; then
         SNELL_ARCH=armv7l
+        GNU_TRIPLET=arm-linux-gnueabihf
+        LD_DST=/lib/ld-linux-armhf.so.3
       else
         echo "Unsupported arm variant: ${TARGETVARIANT}" >&2; exit 1
       fi
@@ -20,7 +30,7 @@ RUN <<'SRC'
   esac
 
   apt-get update && apt-get install -y --no-install-recommends \
-    wget unzip ca-certificates gcc libc6-dev binutils
+    wget unzip ca-certificates gcc libc6-dev
 
   URL="https://dl.nssurge.com/snell/snell-server-v${SNELL_VERSION}-linux-${SNELL_ARCH}.zip"
   echo "[snell] downloading v${SNELL_VERSION} for linux/${SNELL_ARCH}"
@@ -40,45 +50,36 @@ RUN <<'SRC'
 
   mkdir -p /runtime/root/lib
 
-  # discover and copy dynamic linker + shared libs via readelf
-  BIN=/runtime/root/usr/local/bin/snell-server
+  # copy dynamic linker + core glibc libs unconditionally
+  # snell v5 ELF claims static but uses dlopen at runtime — must have libs on disk
 
-  # 1. 从 ELF .interp 读取动态链接器路径
-  INTERP=$(readelf -l "$BIN" 2>/dev/null \
-    | awk '/Requesting program interpreter:/ {gsub(/.*: /, ""); gsub(/]/, ""); print}')
-
-  # 2. 从 ELF .dynamic 读取 NEEDED 共享库
-  NEEDED=$(readelf -d "$BIN" 2>/dev/null \
-    | grep 'NEEDED' \
-    | awk '{gsub(/\[|\]/, ""); print $NF}' \
-    | sort -u)
-
-  if [ -z "$INTERP" ] && [ -z "$NEEDED" ]; then
-    echo "[snell] static binary, no libs needed"
+  LD_SRC="/lib/${GNU_TRIPLET}/$(basename ${LD_DST})"
+  mkdir -p "/runtime/root$(dirname ${LD_DST})"
+  if [ -e "$LD_SRC" ]; then
+    cp -a "$LD_SRC" "/runtime/root${LD_DST}"
   else
-    if [ -n "$INTERP" ] && [ -e "$INTERP" ]; then
-      mkdir -p "/runtime/root$(dirname "$INTERP")"
-      cp -L "$INTERP" "/runtime/root${INTERP}"
-      echo "[snell] ld: $INTERP"
-    elif [ -n "$INTERP" ]; then
-      echo "[snell] WARN: INTERP=$INTERP not found on builder" >&2
-    fi
-
-    if [ -n "$NEEDED" ]; then
-      echo "[snell] NEEDED: $NEEDED"
-      for lib in $NEEDED; do
-        LIB_PATH=$(ldconfig -p 2>/dev/null \
-          | grep -F "$lib" | head -1 \
-          | awk '{for(i=1;i<=NF;i++) if($i=="=>") {print $(i+1); exit}}')
-        if [ -n "$LIB_PATH" ] && [ -e "$LIB_PATH" ]; then
-          cp -L "$LIB_PATH" /runtime/root/lib/
-          echo "[snell] lib: $lib -> $LIB_PATH"
-        else
-          echo "[snell] WARN: cannot resolve $lib" >&2
-        fi
-      done
-    fi
+    cp -a "$LD_DST" "/runtime/root${LD_DST}"
   fi
+  echo "[snell] ld: ${LD_DST}"
+
+  LIB_DIR="/lib/${GNU_TRIPLET}"
+  USR_LIB_DIR="/usr/lib/${GNU_TRIPLET}"
+
+  for lib in \
+    "${LIB_DIR}/libc.so.6" \
+    "${LIB_DIR}/libm.so.6" \
+    "${USR_LIB_DIR}/libstdc++.so.6" \
+    "${LIB_DIR}/libgcc_s.so.1"; do
+    if [ -e "$lib" ]; then
+      cp -L "$lib" /runtime/root/lib/
+      echo "[snell] lib: $lib"
+    fi
+  done
+
+  # stubs for libs merged into libc since glibc 2.34
+  for stub in libdl.so.2 libpthread.so.0; do
+    ln -sf libc.so.6 "/runtime/root/lib/${stub}"
+  done
 
   echo "[snell] libraries staged:"
   ls -la /runtime/root/lib/
