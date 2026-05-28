@@ -1,7 +1,7 @@
 FROM debian:stable-slim AS builder
 
 ARG TARGETARCH TARGETVARIANT
-ARG SNELL_VERSION=5.0.1
+ARG SNELL_VERSION
 
 RUN <<'SRC'
   set -eu
@@ -40,15 +40,13 @@ RUN <<'SRC'
     echo "[snell] attempt $i failed, retrying..." >&2
     sleep 5
   done
-  [ -f /tmp/snell.zip ] || { echo "[snell] download failed" >&2; exit 1; }
+  [ -s /tmp/snell.zip ] || { echo "[snell] download failed" >&2; exit 1; }
 
   unzip -q /tmp/snell.zip -d /tmp/snell
 
   mkdir -p /runtime/root/usr/local/bin /runtime/root/lib
   cp /tmp/snell/snell-server /runtime/root/usr/local/bin/snell-server
   chmod +x /runtime/root/usr/local/bin/snell-server
-
-  mkdir -p /runtime/root/lib
 
   # copy dynamic linker + core glibc libs unconditionally
   # snell v5 ELF claims static but uses dlopen at runtime — must have libs on disk

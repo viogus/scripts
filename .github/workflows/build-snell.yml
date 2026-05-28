@@ -69,9 +69,9 @@ jobs:
           else
             P="snell-server-v${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*"
             VER=$(curl -s https://manual.nssurge.com/others/snell.html \
-              | grep -oP "$P" \
-              | grep -oP "${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*" \
-              | grep -v b | sort -Vr | head -1) || true
+              | sed -nE "s/.*($P).*/\1/p" \
+              | sed -nE "s/.*(${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*).*/\1/p" \
+              | grep -v b | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1) || true
             if [ -z "$VER" ]; then
               echo "[snell] WARNING: scrape failed, using fallback ${MAJOR}.0.1" >&2
               VER="${MAJOR}.0.1"
@@ -108,6 +108,7 @@ jobs:
           MAJOR="${{ steps.version.outputs.major }}"
 
           TAGS="${IMG}:v${V},${IMG}:v${MAJOR}"
+          # bump MAJOR when v6+ becomes latest
           if [ "$MAJOR" = "5" ]; then
             TAGS="${TAGS},${IMG}:latest"
           fi
