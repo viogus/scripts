@@ -111,8 +111,8 @@ jobs:
           if [ "$MAJOR" = "5" ]; then
             TAGS="${TAGS},${IMG}:latest"
           fi
-          # manual dispatch with explicit version → mark as stable
-          if [ "${{ steps.version.outputs.force }}" = "true" ]; then
+          # v5 manual dispatch with explicit version → mark as stable
+          if [ "$MAJOR" = "5" ] && [ "${{ steps.version.outputs.force }}" = "true" ]; then
             TAGS="${TAGS},${IMG}:stable"
           fi
           echo "list=${TAGS}" >> $GITHUB_OUTPUT
