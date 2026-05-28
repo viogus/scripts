@@ -40,32 +40,44 @@ RUN <<'SRC'
 
   mkdir -p /runtime/root/lib
 
-  # discover and copy dynamic linker + shared libs
-  LDD_OUT=$(ldd /runtime/root/usr/local/bin/snell-server 2>&1) || true
+  # discover and copy dynamic linker + shared libs via readelf
+  BIN=/runtime/root/usr/local/bin/snell-server
 
-  if echo "$LDD_OUT" | grep -q 'not a dynamic executable\|statically linked'; then
+  # 1. 从 ELF .interp 读取动态链接器路径
+  INTERP=$(readelf -l "$BIN" 2>/dev/null \
+    | awk '/Requesting program interpreter:/ {gsub(/.*: /, ""); gsub(/]/, ""); print}')
+
+  # 2. 从 ELF .dynamic 读取 NEEDED 共享库
+  NEEDED=$(readelf -d "$BIN" 2>/dev/null \
+    | grep 'NEEDED' \
+    | awk '{gsub(/\[|\]/, ""); print $NF}' \
+    | sort -u)
+
+  if [ -z "$INTERP" ] && [ -z "$NEEDED" ]; then
     echo "[snell] static binary, no libs needed"
   else
-    # 优先从 ELF .interp 读动态链接器路径，ldd 输出格式跨平台不稳定
-    LD_PATH=$(readelf -l /runtime/root/usr/local/bin/snell-server 2>/dev/null \
-      | awk '/Requesting program interpreter:/ {gsub(/.*: /, ""); gsub(/]/, ""); print}')
-    if [ -z "$LD_PATH" ]; then
-      # fallback: ldd 解析，兼容 带/不带 => 两种格式
-      LD_PATH=$(echo "$LDD_OUT" | awk '/^\s+\// {sub(/ =>.*/, ""); print $1; exit}')
-    fi
-    if [ -n "$LD_PATH" ] && [ -e "$LD_PATH" ]; then
-      mkdir -p "/runtime/root$(dirname "$LD_PATH")"
-      cp -L "$LD_PATH" "/runtime/root${LD_PATH}"
-      echo "[snell] ld: $LD_PATH"
-    else
-      echo "[snell] WARN: no dynamic linker found at $LD_PATH" >&2
-      echo "$LDD_OUT" >&2
+    if [ -n "$INTERP" ] && [ -e "$INTERP" ]; then
+      mkdir -p "/runtime/root$(dirname "$INTERP")"
+      cp -L "$INTERP" "/runtime/root${INTERP}"
+      echo "[snell] ld: $INTERP"
+    elif [ -n "$INTERP" ]; then
+      echo "[snell] WARN: INTERP=$INTERP not found on builder" >&2
     fi
 
-    for lib in $(echo "$LDD_OUT" | awk '/=> \// {print $3}'); do
-      cp -L "$lib" /runtime/root/lib/
-      echo "[snell] lib: $lib"
-    done
+    if [ -n "$NEEDED" ]; then
+      echo "[snell] NEEDED: $NEEDED"
+      for lib in $NEEDED; do
+        LIB_PATH=$(ldconfig -p 2>/dev/null \
+          | grep -F "$lib" | head -1 \
+          | awk '{for(i=1;i<=NF;i++) if($i=="=>") {print $(i+1); exit}}')
+        if [ -n "$LIB_PATH" ] && [ -e "$LIB_PATH" ]; then
+          cp -L "$LIB_PATH" /runtime/root/lib/
+          echo "[snell] lib: $lib -> $LIB_PATH"
+        else
+          echo "[snell] WARN: cannot resolve $lib" >&2
+        fi
+      done
+    fi
   fi
 
   echo "[snell] libraries staged:"
