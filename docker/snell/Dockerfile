@@ -30,7 +30,7 @@ RUN <<'SRC'
   esac
 
   apt-get update && apt-get install -y --no-install-recommends \
-    wget unzip ca-certificates gcc libc6-dev upx-ucl
+    wget unzip ca-certificates gcc libc6-dev
 
   URL="https://dl.nssurge.com/snell/snell-server-v${SNELL_VERSION}-linux-${SNELL_ARCH}.zip"
   echo "[snell] downloading v${SNELL_VERSION} for linux/${SNELL_ARCH}"
@@ -47,12 +47,6 @@ RUN <<'SRC'
   mkdir -p /runtime/root/usr/local/bin /runtime/root/lib
   cp /tmp/snell/snell-server /runtime/root/usr/local/bin/snell-server
   chmod +x /runtime/root/usr/local/bin/snell-server
-
-  # UPX compress — reduces binary size ~50%
-  SIZE_BEFORE=$(wc -c < /runtime/root/usr/local/bin/snell-server)
-  upx --best --lzma /runtime/root/usr/local/bin/snell-server 2>&1 || echo "[snell] WARN: upx failed, continuing with uncompressed binary" >&2
-  SIZE_AFTER=$(wc -c < /runtime/root/usr/local/bin/snell-server)
-  echo "[snell] upx: ${SIZE_BEFORE} -> ${SIZE_AFTER}"
 
   mkdir -p /runtime/root/lib
 
