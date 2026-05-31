@@ -1,0 +1,24 @@
+services:
+  aimili-vpngate:
+    image: ghcr.io/viogus/aimili-vpngate:latest
+    restart: unless-stopped
+    ports:
+      - "8787:8787"   # web panel
+      - "7928:7928"   # SOCKS5/HTTP proxy
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.conf.all.rp_filter=2
+      - net.ipv4.conf.default.rp_filter=2
+    volumes:
+      - aimili-data:/opt/aimilivpn/vpngate_data
+    environment:
+      - WEB_PORT=8787
+      # - WEB_USERNAME=admin
+      # - WEB_PASSWORD=your_password
+      # - SECRET_PATH=mysecret
+
+volumes:
+  aimili-data:
