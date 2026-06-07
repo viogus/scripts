@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+  schedule:
+    - cron: '53 3 1 * *'
   workflow_dispatch:
     inputs:
       alpine_version_major:
@@ -155,6 +157,8 @@ jobs:
 
           if [ "${{ github.event_name }}" = "push" ]; then
             TAG_NAME="${{ github.ref_name }}"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            TAG_NAME="monthly-$(date +%Y%m)"
           else
             TAG_NAME="manual-$(date +%s)"
           fi
