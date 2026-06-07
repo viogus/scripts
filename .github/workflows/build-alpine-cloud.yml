@@ -193,11 +193,13 @@ jobs:
           echo "Release tag: ${TAG_NAME}"
           ls -lh alpine-custom.qcow2
 
+          NOTES="Custom Alpine Linux image optimized for Alibaba Cloud ECS. Based on Alpine ${ALPINE_REAL_VER:-${ALPINE_VERSION_FULL}}."
+
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release create "$TAG_NAME" \
               --title "Custom Alpine Linux Cloud Image ${TAG_NAME}" \
-              --notes "Custom Alpine Linux image optimized for Alibaba Cloud ECS. Based on Alpine ${ALPINE_REAL_VER:-${ALPINE_VERSION_FULL}}."
+              --notes "$NOTES"
           fi
 
           gh release upload "$TAG_NAME" alpine-custom.qcow2 --clobber
-          gh release edit "$TAG_NAME" --latest
+          gh release edit "$TAG_NAME" --latest --notes "$NOTES"
