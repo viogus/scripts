@@ -93,6 +93,7 @@ jobs:
           set -euxo pipefail
           export LIBGUESTFS_DEBUG=1
           export LIBGUESTFS_TRACE=1
+          export LIBGUESTFS_BACKEND=direct
 
           sudo virt-customize -a alpine-base.qcow2 \
             --smp 2 \
