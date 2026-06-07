@@ -64,6 +64,10 @@ jobs:
           echo "Image: ${FILE_NAME}"
           echo "URL: ${DOWNLOAD_URL}"
 
+          # extract actual Alpine version for release notes (e.g. 3.23.4 from generic_alpine-3.23.4-...)
+          ALPINE_REAL_VER="$(echo "${FILE_NAME}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          echo "ALPINE_REAL_VER=${ALPINE_REAL_VER}" >> "$GITHUB_ENV"
+
           wget -O alpine-base.qcow2 "${DOWNLOAD_URL}"
 
       - name: Validate downloaded image
@@ -119,7 +123,7 @@ jobs:
             --run-command "sed -i 's/#*PasswordAuthentication.*/PasswordAuthentication no/g' /etc/ssh/sshd_config" \
             --append-line '/etc/ssh/sshd_config:UseDNS no' \
             --run-command "if [ -f /boot/extlinux.conf ]; then sed -i 's/\(APPEND .*\)/\1 net.ifnames=0 console=tty0 console=ttyS0,115200n8/' /boot/extlinux.conf; else echo 'skip: /boot/extlinux.conf not found'; fi" \
-            --run-command 'mkdir -p /etc/modules-load.d && modprobe tcp_bbr && echo tcp_bbr > /etc/modules-load.d/bbr.conf' \
+            --run-command 'mkdir -p /etc/modules-load.d && echo tcp_bbr > /etc/modules-load.d/bbr.conf' \
             --run-command "printf '%s\n' \
               'net.core.default_qdisc = fq' \
               'net.ipv4.tcp_congestion_control = bbr' \
@@ -192,7 +196,7 @@ jobs:
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release create "$TAG_NAME" \
               --title "Custom Alpine Linux Cloud Image ${TAG_NAME}" \
-              --notes "Custom Alpine Linux image optimized for Alibaba Cloud ECS. Based on Alpine ${ALPINE_VERSION_FULL}."
+              --notes "Custom Alpine Linux image optimized for Alibaba Cloud ECS. Based on Alpine ${ALPINE_REAL_VER:-${ALPINE_VERSION_FULL}}."
           fi
 
           gh release upload "$TAG_NAME" alpine-custom.qcow2 --clobber
