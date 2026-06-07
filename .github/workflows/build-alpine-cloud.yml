@@ -100,7 +100,7 @@ jobs:
           sudo virt-customize -a alpine-base.qcow2 \
             --smp 2 \
             --timezone Asia/Hong_Kong \
-            --install sudo,chrony,cloud-init,cloud-utils-growpart \
+            --install sudo,chrony,cloud-init,cloud-utils-growpart,ethtool \
             --run-command "mkdir -p /etc/cloud/cloud.cfg.d && printf '%s\n' \
               'growpart:' \
               '  mode: auto' \
@@ -119,6 +119,29 @@ jobs:
             --run-command "sed -i 's/#*PasswordAuthentication.*/PasswordAuthentication no/g' /etc/ssh/sshd_config" \
             --append-line '/etc/ssh/sshd_config:UseDNS no' \
             --run-command "if [ -f /boot/extlinux.conf ]; then sed -i 's/\(APPEND .*\)/\1 net.ifnames=0 console=tty0 console=ttyS0,115200n8/' /boot/extlinux.conf; else echo 'skip: /boot/extlinux.conf not found'; fi" \
+            --run-command 'mkdir -p /etc/modules-load.d && modprobe tcp_bbr && echo tcp_bbr > /etc/modules-load.d/bbr.conf' \
+            --run-command "printf '%s\n' \
+              'net.core.default_qdisc = fq' \
+              'net.ipv4.tcp_congestion_control = bbr' \
+              > /etc/sysctl.d/99-bbr.conf" \
+            --run-command "printf '%s\n' \
+              '# universal-optimize: safe network tuning' \
+              'net.core.rmem_default = 4194304' \
+              'net.core.wmem_default = 4194304' \
+              'net.core.optmem_max = 8388608' \
+              'net.core.netdev_max_backlog = 50000' \
+              'net.core.somaxconn = 16384' \
+              'net.ipv4.ip_local_port_range = 10240 65535' \
+              'net.ipv4.udp_mem = 8192 16384 32768' \
+              'net.ipv4.udp_rmem_min = 131072' \
+              'net.ipv4.udp_wmem_min = 131072' \
+              > /etc/sysctl.d/99-universal-net.conf" \
+            --run-command "printf '%s\n' \
+              '* soft nofile 1048576' \
+              '* hard nofile 1048576' \
+              '* soft nproc unlimited' \
+              '* hard nproc unlimited' \
+              > /etc/security/limits.d/99-universal.conf" \
             --run-command 'rc-update add chronyd default || true' \
             --run-command 'rc-update add cloud-init default || true' \
             --run-command 'rc-update add cloud-config default || true' \
