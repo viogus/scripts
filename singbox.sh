@@ -5,6 +5,7 @@
 # 网站：github.com/viogus
 # 描述: sing-box 一键管理脚本（服务端 / 客户端）
 # 适配: Debian/Ubuntu (apt) / RHEL系 (dnf/yum) / Alpine (apk)
+# 服务端: HTTP/2 CONNECT 代理 (Surge HTTP proxy + TLS)
 # init: systemd / openrc
 # =========================================
 set -euo pipefail
@@ -52,14 +53,14 @@ install_deps() {
     case "$os_type" in
         debian)
             apt-get update -y
-            DEBIAN_FRONTEND=noninteractive apt-get install -y curl wget tar
+            DEBIAN_FRONTEND=noninteractive apt-get install -y curl wget tar openssl
             ;;
         rhel)
-            yum -y install curl wget tar 2>/dev/null || dnf -y install curl wget tar
+            yum -y install curl wget tar openssl 2>/dev/null || dnf -y install curl wget tar openssl
             ;;
         alpine)
             apk update
-            apk add --no-cache curl wget tar
+            apk add --no-cache curl wget tar openssl
             ;;
         *) print_error "不支持的操作系统"; exit 1 ;;
     esac
@@ -230,7 +231,7 @@ gen_password() {
 }
 
 # ============================================
-# 安装 sing-box 服务端 (Shadowsocks)
+# 安装 sing-box 服务端 (HTTP/2 CONNECT proxy)
 # ============================================
 
 install_server() {
@@ -243,30 +244,65 @@ install_server() {
     install_deps
     download_singbox
 
-    local port method password
-    read -rp "请输入监听端口 [随机 1025-65535]: " port
-    if [[ -z "$port" ]]; then
-        port=$(od -An -N2 -i /dev/urandom 2>/dev/null | tr -d ' ' || true)
-        port="${port:-0}"
-        port=$(( (port < 0 ? -port : port) % 64511 + 1025 ))
-        print_info "随机端口: ${port}"
-    fi
+    local port username password cert_path key_path
+    read -rp "请输入监听端口 [443]: " port
+    port="${port:-443}"
 
-    echo -e "${CYAN}加密方式:${RESET}"
-    echo "  1) 2022-blake3-aes-256-gcm (推荐, 高安全)"
-    echo "  2) 2022-blake3-aes-128-gcm"
-    echo "  3) 2022-blake3-chacha20-poly1305"
-    read -rp "请选择 [1]: " method_choice
-    case "${method_choice:-1}" in
-        1) method="2022-blake3-aes-256-gcm" ;;
-        2) method="2022-blake3-aes-128-gcm" ;;
-        3) method="2022-blake3-chacha20-poly1305" ;;
-        *) method="2022-blake3-aes-256-gcm" ;;
+    print_info "HTTP/2 CONNECT 代理需要 TLS 证书。"
+    echo -e "${CYAN}证书选项:${RESET}"
+    echo "  1) 自动生成自签名证书 (推荐, 简单)"
+    echo "  2) 使用已有证书文件"
+    read -rp "请选择 [1]: " cert_choice
+    case "${cert_choice:-1}" in
+        1)
+            cert_path="${CONF_DIR}/cert.crt"
+            key_path="${CONF_DIR}/private.key"
+            if [[ ! -f "${cert_path}" ]] || [[ ! -f "${key_path}" ]]; then
+                print_info "正在生成自签名证书 (10年有效)..."
+                openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+                    -keyout "${key_path}" \
+                    -out "${cert_path}" \
+                    -subj "/CN=sing-box" \
+                    -addext "subjectAltName=DNS:sing-box,IP:127.0.0.1" 2>/dev/null || {
+                    print_error "证书生成失败"
+                    return 1
+                }
+                chmod 600 "${key_path}"
+                print_ok "自签名证书已生成"
+            fi
+            ;;
+        2)
+            read -rp "证书文件路径 (.crt): " cert_path
+            read -rp "私钥文件路径 (.key): " key_path
+            if [[ ! -f "${cert_path}" ]] || [[ ! -f "${key_path}" ]]; then
+                print_error "证书文件不存在"
+                return 1
+            fi
+            ;;
+        *)
+            cert_path="${CONF_DIR}/cert.crt"
+            key_path="${CONF_DIR}/private.key"
+            openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+                -keyout "${key_path}" \
+                -out "${cert_path}" \
+                -subj "/CN=sing-box" \
+                -addext "subjectAltName=DNS:sing-box,IP:127.0.0.1" 2>/dev/null || {
+                print_error "证书生成失败"
+                return 1
+            }
+            chmod 600 "${key_path}"
+            ;;
     esac
 
-    read -rp "请输入密码 (留空自动生成): " password
+    read -rp "设置用户名 [自动生成]: " username
+    if [[ -z "$username" ]]; then
+        username=$(gen_password 8)
+        print_info "已生成用户名: ${username}"
+    fi
+
+    read -rp "设置密码 (留空自动生成): " password
     if [[ -z "$password" ]]; then
-        password=$(gen_password 32)
+        password=$(gen_password 24)
         print_info "已生成随机密码: ${password}"
     fi
 
@@ -280,12 +316,21 @@ install_server() {
   },
   "inbounds": [
     {
-      "type": "shadowsocks",
-      "tag": "ss-in",
+      "type": "http",
+      "tag": "http-in",
       "listen": "::",
       "listen_port": ${port},
-      "method": "${method}",
-      "password": "${password}"
+      "users": [
+        {
+          "username": "${username}",
+          "password": "${password}"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "${cert_path}",
+        "key_path": "${key_path}"
+      }
     }
   ]
 }
@@ -367,22 +412,22 @@ show_server_config() {
     if [[ -f "${SB_SERVER_CONF}" ]]; then
         local ip; ip=$(get_ip 2>/dev/null || echo "服务器IP")
         local port; port=$(sed -n 's/.*"listen_port"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
-        local method; method=$(sed -n 's/.*"method"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
-        local password; password=$(sed -n 's/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
+        local username; username=$(sed -n '/"users"/,/]/{s/.*"username"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p;}' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
+        local password; password=$(sed -n '/"users"/,/]/{s/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p;}' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
 
         echo -e "${YELLOW}服务端:${RESET}"
-        echo -e "  协议: Shadowsocks"
+        echo -e "  协议: HTTP/2 CONNECT (TLS)"
         echo -e "  地址: ${ip}:${port}"
-        echo -e "  加密: ${method}"
+        echo -e "  用户: ${username}"
         echo -e "  密码: ${password}"
 
         echo ""
         echo -e "${YELLOW}Surge 客户端:${RESET}"
-        echo "Proxy-SS = ss, ${ip}, ${port}, encrypt-method=${method}, password=${password}"
+        echo "Proxy-HTTP = http, ${ip}, ${port}, username=${username}, password=${password}, tls=true"
 
         echo ""
         echo -e "${YELLOW}Shadowrocket:${RESET}"
-        echo "ss://$(echo -n "${method}:${password}@${ip}:${port}" | base64 -w0 2>/dev/null || echo -n "${method}:${password}@${ip}:${port}" | base64)#sing-box"
+        echo "类型: HTTP (https), 地址: ${ip}, 端口: ${port}, 用户: ${username}, 密码: ${password}"
 
         echo ""
         echo -e "${YELLOW}配置文件: ${SB_SERVER_CONF}${RESET}"
@@ -449,7 +494,7 @@ show_menu() {
 
     show_status
 
-    echo -e "${GREEN}1.${RESET} 安装/重装 sing-box 服务端 (Shadowsocks)"
+    echo -e "${GREEN}1.${RESET} 安装/重装 sing-box 服务端 (HTTP/2 CONNECT)"
     echo -e "${GREEN}2.${RESET} 安装/重装 sing-box 客户端 (Mixed: HTTP+SOCKS5)"
     echo -e "---"
     echo -e "${GREEN}3.${RESET} 卸载 sing-box"
