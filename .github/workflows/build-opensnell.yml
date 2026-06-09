@@ -1,0 +1,107 @@
+name: Build & Push OpenSnell Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker/opensnell/**'
+      - '.github/workflows/build-opensnell.yml'
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      opensnell_version:
+        description: 'OpenSnell version tag (e.g. v1.0.2)'
+        required: false
+        default: ''
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine OpenSnell version
+        id: version
+        run: |
+          if [ -n "${{ inputs.opensnell_version }}" ]; then
+            echo "opensnell_version=${{ inputs.opensnell_version }}" >> $GITHUB_OUTPUT
+          else
+            VER=$(curl -s https://api.github.com/repos/missuo/opensnell/releases/latest \
+              | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+            if [ -z "$VER" ]; then
+              echo "::warning::Failed to fetch latest OpenSnell version, falling back to v1.0.2"
+              VER="v1.0.2"
+            fi
+            echo "opensnell_version=$VER" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if image already published
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          VER="${{ steps.version.outputs.opensnell_version }}"
+          EXISTS=$(gh api "orgs/${{ github.repository_owner }}/packages/container/opensnell-server/versions" \
+            --jq '.[].metadata.container.tags[]' 2>/dev/null | grep -Fx "${VER}" || true)
+
+          if [ -n "$EXISTS" ]; then
+            echo "Tag opensnell-server:${VER} already published, skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag opensnell-server:${VER} not found, building..."
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up QEMU
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.check.outputs.skip != 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/opensnell-server
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.opensnell_version }}
+
+      - name: Build and push
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/opensnell
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          build-args: |
+            OPENSNELL_VERSION=${{ steps.version.outputs.opensnell_version }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          provenance: false

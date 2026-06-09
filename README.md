@@ -145,6 +145,29 @@ services:
 | `PSK` | 随机 32 位 | 预共享密钥 |
 | `OBFS` | `off` | 混淆模式 |
 
+### opensnell-server
+
+`ghcr.io/viogus/opensnell-server` — Snell v4/v5 协议的 Go 开源实现，完全兼容官方 snell-server。~6MB，`FROM scratch`。
+
+```yaml
+services:
+  opensnell-server:
+    image: ghcr.io/viogus/opensnell-server:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - SNELL_LISTEN=0.0.0.0:2333
+      - SNELL_PSK=your_psk
+```
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `SNELL_LISTEN` | `0.0.0.0:2333` | 监听地址:端口 |
+| `SNELL_PSK` | 随机 24 位 | 预共享密钥 |
+| `SNELL_OBFS` | `off` | `off` / `http` / `tls` |
+| `SNELL_UDP` | `true` | UDP-over-TCP |
+| `SNELL_QUIC` | `true` | QUIC 代理模式 |
+
 ## 许可
 
 MIT License
