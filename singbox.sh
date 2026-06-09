@@ -1,0 +1,490 @@
+#!/usr/bin/env bash
+# =========================================
+# 作者: viogus
+# 日期: 2026年6月
+# 网站：github.com/viogus
+# 描述: sing-box 一键管理脚本（服务端 / 客户端）
+# 适配: Debian/Ubuntu (apt) / RHEL系 (dnf/yum) / Alpine (apk)
+# init: systemd / openrc
+# =========================================
+set -euo pipefail
+
+# ============================================
+# 常量
+# ============================================
+CONF_DIR="/usr/local/etc/sing-box"
+SB_BIN="/usr/local/bin/sing-box"
+SB_SERVER_CONF="${CONF_DIR}/server.json"
+SB_CLIENT_CONF="${CONF_DIR}/client.json"
+SB_SERVICE_NAME="sing-box"
+SCRIPT_VERSION="1.0.0"
+
+get_version() {
+    local ver
+    ver=$(curl -s --connect-timeout 10 --max-time 30 \
+        https://api.github.com/repos/SagerNet/sing-box/releases/latest 2>/dev/null \
+        | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/') || true
+    if [[ -z "$ver" ]]; then
+        ver="1.13.13"
+        print_warn "无法获取最新版本号，使用默认版本: v${ver}"
+    fi
+    echo "$ver"
+}
+
+get_arch() {
+    local m; m=$(uname -m)
+    case "$m" in
+        x86_64|amd64) echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        armv7l|armv6l) echo "armv7" ;;
+        *) print_error "不支持的架构: $m"; exit 1 ;;
+    esac
+}
+
+# ============================================
+# 安装依赖
+# ============================================
+
+install_deps() {
+    local os_type; os_type=$(detect_os)
+    print_info "检测到系统类型: ${os_type}"
+
+    case "$os_type" in
+        debian)
+            apt-get update -y
+            DEBIAN_FRONTEND=noninteractive apt-get install -y curl wget tar
+            ;;
+        rhel)
+            yum -y install curl wget tar 2>/dev/null || dnf -y install curl wget tar
+            ;;
+        alpine)
+            apk update
+            apk add --no-cache curl wget tar
+            ;;
+        *) print_error "不支持的操作系统"; exit 1 ;;
+    esac
+}
+
+# ============================================
+# 下载 sing-box 二进制
+# ============================================
+
+download_singbox() {
+    local ver arch
+    ver=$(get_version)
+    arch=$(get_arch)
+    local file_name="sing-box-${ver}-linux-${arch}"
+    local url="https://github.com/SagerNet/sing-box/releases/download/v${ver}/${file_name}.tar.gz"
+    local tmp; tmp=$(mktemp -d)
+
+    print_info "sing-box 版本: v${ver} 架构: ${arch}"
+    print_info "正在下载 sing-box..."
+
+    if ! curl -L --connect-timeout 10 --max-time 120 -o "${tmp}/${file_name}.tar.gz" "$url" 2>/dev/null; then
+        print_warn "GitHub 直连失败，尝试镜像..."
+        local mirror_url="https://ghfast.top/${url}"
+        curl -L --connect-timeout 10 --max-time 120 -o "${tmp}/${file_name}.tar.gz" "$mirror_url" || {
+            print_error "下载失败，请检查网络"
+            rm -rf "$tmp"
+            exit 1
+        }
+    fi
+
+    mkdir -p "${CONF_DIR}"
+    tar -xzf "${tmp}/${file_name}.tar.gz" -C "$tmp"
+    # tar.gz structure: sing-box-{ver}-linux-{arch}/sing-box
+    local extract_dir="${tmp}/${file_name}"
+    if [ -d "$extract_dir" ] && [ -f "${extract_dir}/sing-box" ]; then
+        cp "${extract_dir}/sing-box" "${SB_BIN}"
+        chmod +x "${SB_BIN}"
+    else
+        # fallback: find the binary
+        local found; found=$(find "$tmp" -name "sing-box" -type f 2>/dev/null | head -1)
+        if [ -z "$found" ]; then
+            print_error "未找到 sing-box 二进制文件"
+            rm -rf "$tmp"
+            exit 1
+        fi
+        cp "$found" "${SB_BIN}"
+        chmod +x "${SB_BIN}"
+    fi
+
+    rm -rf "$tmp"
+    print_ok "sing-box 二进制安装完成 ($(file "${SB_BIN}" | awk -F ',' '{print $2}' || true))"
+}
+
+# ============================================
+# init 模板
+# ============================================
+
+write_systemd() {
+    local name="$1" conf="$2"
+    cat > "/etc/systemd/system/${name}.service" << SYSTEMDEOF
+[Unit]
+Description=sing-box Service
+Documentation=https://sing-box.sagernet.org
+After=network.target
+
+[Service]
+Type=simple
+User=nobody
+ExecStart=${SB_BIN} run -c ${conf}
+Restart=on-failure
+RestartSec=10s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMDEOF
+}
+
+write_openrc() {
+    local name="$1" conf="$2"
+    cat > "/etc/init.d/${name}" << OPENRCEOF
+#!/sbin/openrc-run
+name="${name}"
+description="sing-box Service"
+supervisor="supervise-daemon"
+command="${SB_BIN}"
+command_args="run -c ${conf}"
+command_user="nobody"
+pidfile="/run/${name}.pid"
+output_log="/var/log/${name}.log"
+error_log="/var/log/${name}.err"
+
+depend() {
+    need networking
+}
+OPENRCEOF
+    chmod +x "/etc/init.d/${name}"
+}
+
+install_service() {
+    local name="$1" conf="$2"
+    local init; init=$(detect_init)
+
+    if [[ "$init" == "openrc" ]]; then
+        write_openrc "$name" "$conf"
+        rc-update add "$name" default >/dev/null 2>&1 || true
+        rc-service "$name" restart || rc-service "$name" start
+        if rc-service "$name" status 2>/dev/null; then
+            print_ok "${name} 服务已启动 (OpenRC)"
+        else
+            print_warn "${name} 服务启动，请检查状态"
+        fi
+    else
+        write_systemd "$name" "$conf"
+        systemctl daemon-reload
+        systemctl enable "$name" >/dev/null 2>&1 || true
+        systemctl restart "$name" || systemctl start "$name"
+        if systemctl is-active --quiet "$name" 2>/dev/null; then
+            print_ok "${name} 服务已启动 (systemd)"
+        else
+            print_warn "${name} 服务启动，请检查状态"
+        fi
+    fi
+}
+
+remove_service() {
+    local name="$1"
+    local init; init=$(detect_init)
+    if [[ "$init" == "openrc" ]]; then
+        rc-service "$name" stop 2>/dev/null || true
+        rc-update del "$name" default >/dev/null 2>&1 || true
+        rm -f "/etc/init.d/${name}"
+    else
+        systemctl stop "$name" 2>/dev/null || true
+        systemctl disable "$name" >/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/${name}.service"
+        systemctl daemon-reload
+    fi
+    rm -f "/var/log/${name}.log" "/var/log/${name}.err"
+}
+
+svc_op() {
+    local name="$1" op="$2"
+    local init; init=$(detect_init)
+    case "$op" in
+        start)
+            if [[ "$init" == "openrc" ]]; then rc-service "$name" start; else systemctl start "$name"; fi ;;
+        stop)
+            if [[ "$init" == "openrc" ]]; then rc-service "$name" stop; else systemctl stop "$name"; fi ;;
+        restart)
+            if [[ "$init" == "openrc" ]]; then rc-service "$name" restart; else systemctl restart "$name"; fi ;;
+        status)
+            if [[ "$init" == "openrc" ]]; then rc-service "$name" status 2>/dev/null || true
+            else systemctl status "$name" --no-pager 2>/dev/null || true; fi ;;
+    esac
+}
+
+# ============================================
+# 密码生成
+# ============================================
+
+gen_password() {
+    local len="${1:-32}"
+    tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c "$len" || {
+        date +%s%N | md5sum | cut -c1-"$len" 2>/dev/null || echo "$(date +%s%N | sha256sum | cut -c1-"$len")"
+    }
+}
+
+# ============================================
+# 安装 sing-box 服务端 (Shadowsocks)
+# ============================================
+
+install_server() {
+    if [[ -f "${SB_BIN}" ]] && [[ -f "${SB_SERVER_CONF}" ]]; then
+        read -rp "sing-box 服务端已安装，是否重装？(y/N): " ans
+        [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
+        remove_service "${SB_SERVICE_NAME}"
+    fi
+
+    install_deps
+    download_singbox
+
+    local port method password
+    read -rp "请输入监听端口 [随机 1025-65535]: " port
+    if [[ -z "$port" ]]; then
+        port=$(( RANDOM % 64511 + 1025 ))
+        print_info "随机端口: ${port}"
+    fi
+
+    echo -e "${CYAN}加密方式:${RESET}"
+    echo "  1) 2022-blake3-aes-256-gcm (推荐, 高安全)"
+    echo "  2) 2022-blake3-aes-128-gcm"
+    echo "  3) 2022-blake3-chacha20-poly1305"
+    read -rp "请选择 [1]: " method_choice
+    case "${method_choice:-1}" in
+        1) method="2022-blake3-aes-256-gcm" ;;
+        2) method="2022-blake3-aes-128-gcm" ;;
+        3) method="2022-blake3-chacha20-poly1305" ;;
+        *) method="2022-blake3-aes-256-gcm" ;;
+    esac
+
+    read -rp "请输入密码 (留空自动生成): " password
+    if [[ -z "$password" ]]; then
+        password=$(gen_password 32)
+        print_info "已生成随机密码: ${password}"
+    fi
+
+    print_info "生成配置..."
+    mkdir -p "${CONF_DIR}"
+    cat > "${SB_SERVER_CONF}" << SSEOF
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "shadowsocks",
+      "tag": "ss-in",
+      "listen": "::",
+      "listen_port": ${port},
+      "method": "${method}",
+      "password": "${password}"
+    }
+  ]
+}
+SSEOF
+
+    install_service "${SB_SERVICE_NAME}" "${SB_SERVER_CONF}"
+    print_ok "sing-box 服务端安装完成！"
+    show_server_config
+}
+
+# ============================================
+# 安装 sing-box 客户端 (Mixed: HTTP + SOCKS5)
+# ============================================
+
+install_client() {
+    if [[ -f "${SB_BIN}" ]] && [[ -f "${SB_CLIENT_CONF}" ]]; then
+        read -rp "sing-box 客户端已安装，是否重装？(y/N): " ans
+        [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
+        remove_service "${SB_SERVICE_NAME}"
+    fi
+
+    install_deps
+    download_singbox
+
+    local port
+    read -rp "请输入本地监听端口 [2080]: " port
+    port="${port:-2080}"
+
+    print_info "生成配置..."
+    mkdir -p "${CONF_DIR}"
+    cat > "${SB_CLIENT_CONF}" << CLEOF
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": ${port}
+    }
+  ]
+}
+CLEOF
+
+    print_info "客户端配置已生成，请手动编辑 ${SB_CLIENT_CONF} 添加出站规则"
+
+    install_service "${SB_SERVICE_NAME}" "${SB_CLIENT_CONF}"
+    print_ok "sing-box 客户端安装完成！"
+    show_client_config
+}
+
+# ============================================
+# 卸载
+# ============================================
+
+uninstall_singbox() {
+    if [[ ! -f "${SB_BIN}" ]]; then
+        print_warn "sing-box 未安装"
+        return
+    fi
+    read -rp "确认卸载 sing-box？将删除二进制、配置和服务 (y/N): " ans
+    [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
+    remove_service "${SB_SERVICE_NAME}"
+    rm -f "${SB_BIN}"
+    rm -rf "${CONF_DIR}"
+    print_ok "sing-box 卸载完成"
+}
+
+# ============================================
+# 显示配置
+# ============================================
+
+show_server_config() {
+    echo ""
+    echo -e "${CYAN}=== sing-box 服务端配置 ===${RESET}"
+    if [[ -f "${SB_SERVER_CONF}" ]]; then
+        local ip; ip=$(get_ip 2>/dev/null || echo "服务器IP")
+        local port; port=$(sed -n 's/.*"listen_port"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
+        local method; method=$(sed -n 's/.*"method"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
+        local password; password=$(sed -n 's/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
+
+        echo -e "${YELLOW}服务端:${RESET}"
+        echo -e "  协议: Shadowsocks"
+        echo -e "  地址: ${ip}:${port}"
+        echo -e "  加密: ${method}"
+        echo -e "  密码: ${password}"
+
+        echo ""
+        echo -e "${YELLOW}Surge 客户端:${RESET}"
+        echo "Proxy-SS = ss, ${ip}, ${port}, encrypt-method=${method}, password=${password}"
+
+        echo ""
+        echo -e "${YELLOW}Shadowrocket:${RESET}"
+        echo "ss://$(echo -n "${method}:${password}@${ip}:${port}" | base64 -w0 2>/dev/null || echo -n "${method}:${password}@${ip}:${port}" | base64)#sing-box"
+
+        echo ""
+        echo -e "${YELLOW}配置文件: ${SB_SERVER_CONF}${RESET}"
+        cat "$SB_SERVER_CONF"
+    else
+        print_warn "sing-box 服务端未安装"
+    fi
+    echo -e "${CYAN}===============================${RESET}"
+}
+
+show_client_config() {
+    echo ""
+    echo -e "${CYAN}=== sing-box 客户端配置 ===${RESET}"
+    if [[ -f "${SB_CLIENT_CONF}" ]]; then
+        cat "$SB_CLIENT_CONF"
+    else
+        print_warn "sing-box 客户端未安装"
+    fi
+    echo -e "${CYAN}==============================${RESET}"
+}
+
+# ============================================
+# 状态
+# ============================================
+
+show_status() {
+    echo ""
+    echo -e "${CYAN}--- sing-box 服务状态 ---${RESET}"
+
+    if [[ -f "${SB_BIN}" ]]; then
+        local sb_active="停止"
+        local init; init=$(detect_init)
+        if [[ "$init" == "openrc" ]]; then
+            rc-service "${SB_SERVICE_NAME}" status >/dev/null 2>&1 && sb_active="运行中" || true
+        else
+            systemctl is-active --quiet "${SB_SERVICE_NAME}" 2>/dev/null && sb_active="运行中" || true
+        fi
+        local conf=""
+        [[ -f "${SB_SERVER_CONF}" ]] && conf="服务端"
+        [[ -f "${SB_CLIENT_CONF}" ]] && conf="客户端"
+        echo -e "${GREEN}[sing-box] 已安装 (${conf:-无配置})${RESET}  |  状态: ${sb_active}"
+        echo -e "  版本: $("${SB_BIN}" version 2>/dev/null | head -1 || echo "未知")"
+    else
+        echo -e "${YELLOW}[sing-box] 未安装${RESET}"
+    fi
+
+    echo -e "${CYAN}----------------------${RESET}"
+}
+
+# ============================================
+# 菜单
+# ============================================
+
+hr(){ printf '%*s\n' 44 '' | tr ' ' '='; }
+pause(){ read -rp "按回车返回菜单..." _; }
+
+show_menu() {
+    clear
+    hr
+    echo -e "${CYAN} sing-box 一键管理脚本  v${SCRIPT_VERSION}${RESET}"
+    echo -e "${CYAN} https://github.com/viogus/scripts${RESET}"
+    echo -e "${CYAN} 系统: $(detect_os)  |  架构: $(uname -m)${RESET}"
+    hr
+
+    show_status
+
+    echo -e "${GREEN}1.${RESET} 安装/重装 sing-box 服务端 (Shadowsocks)"
+    echo -e "${GREEN}2.${RESET} 安装/重装 sing-box 客户端 (Mixed: HTTP+SOCKS5)"
+    echo -e "---"
+    echo -e "${GREEN}3.${RESET} 卸载 sing-box"
+    echo -e "---"
+    echo -e "${GREEN}4.${RESET} 查看服务端配置"
+    echo -e "${GREEN}5.${RESET} 查看客户端配置"
+    echo -e "---"
+    echo -e "${GREEN}6.${RESET} 启动 sing-box"
+    echo -e "${GREEN}7.${RESET} 停止 sing-box"
+    echo -e "${GREEN}8.${RESET} 重启 sing-box"
+    echo -e "---"
+    echo -e "${GREEN}0.${RESET} 退出"
+    hr
+    read -rp "请输入选项 [0-8]: " choice
+
+    case "${choice}" in
+        1) install_server; pause ;;
+        2) install_client; pause ;;
+        3) uninstall_singbox; pause ;;
+        4) show_server_config; pause ;;
+        5) show_client_config; pause ;;
+        6) svc_op "${SB_SERVICE_NAME}" start; pause ;;
+        7) svc_op "${SB_SERVICE_NAME}" stop; pause ;;
+        8) svc_op "${SB_SERVICE_NAME}" restart; pause ;;
+        0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
+        *) echo -e "${RED}无效选项${RESET}"; pause ;;
+    esac
+}
+
+# ============================================
+# 主程序
+# ============================================
+
+main() {
+    ensure_root
+    while true; do
+        show_menu
+    done
+}
+
+main

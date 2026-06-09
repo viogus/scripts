@@ -4,7 +4,7 @@ set -euo pipefail
 # 作者: jinqians + viogus
 # 日期: 2026年5月
 # 网站：jinqians.com / github.com/viogus
-# 描述: 统一管理 Snell、SS-Rust、ShadowTLS、VLESS Reality、AnyTLS
+# 描述: 统一管理 Snell、SS-Rust、ShadowTLS、VLESS Reality、AnyTLS、Hysteria2、frp、NodeGet、sing-box
 # =========================================
 
 # 定义颜色代码
@@ -103,7 +103,7 @@ svc_file_path() {
 svc_find_services() { find /etc/systemd/system /etc/init.d -name "$1" 2>/dev/null || true; }
 
 # 当前版本号
-current_version="4.0"
+current_version="4.1"
 
 # ============================================
 # AnyTLS 常量
@@ -361,6 +361,20 @@ ${CYAN}=== 服务状态检查 ===${RESET}"
         echo -e "${YELLOW}Hysteria2 未安装${RESET}"
     fi
 
+
+    # --- sing-box ---
+    if [[ -f "/usr/local/bin/sing-box" ]]; then
+        local sb_running=0
+        if svc_is_active sing-box &> /dev/null; then
+            sb_running=1
+        fi
+        local sb_conf_label=""
+        [[ -f "/usr/local/etc/sing-box/server.json" ]] && sb_conf_label="服务端"
+        [[ -f "/usr/local/etc/sing-box/client.json" ]] && sb_conf_label="客户端"
+        echo -e "${GREEN}sing-box 已安装 (${sb_conf_label:-无配置})${RESET}  ${GREEN}运行中：${sb_running}/1${RESET}"
+    else
+        echo -e "${YELLOW}sing-box 未安装${RESET}"
+    fi
     echo -e "${CYAN}====================${RESET}
 "
 }
@@ -606,6 +620,31 @@ uninstall_nodeget() {
     echo -e "${GREEN}NodeGet 卸载完成！${RESET}"
 }
 
+uninstall_singbox() {
+    echo -e "${CYAN}正在卸载 sing-box...${RESET}"
+    if [[ -f "/usr/local/bin/sing-box" ]]; then
+        read -rp "确认卸载 sing-box？将删除二进制、配置和服务 (y/N): " ans
+        [[ "${ans:-N}" != [yY] ]] && { echo "已取消"; return; }
+        local init; init=$(detect_init)
+        if [[ "$init" == "openrc" ]]; then
+            rc-service sing-box stop 2>/dev/null || true
+            rc-update del sing-box default >/dev/null 2>&1 || true
+            rm -f "/etc/init.d/sing-box"
+        else
+            systemctl stop sing-box 2>/dev/null || true
+            systemctl disable sing-box >/dev/null 2>&1 || true
+            rm -f "/etc/systemd/system/sing-box.service"
+        fi
+        rm -f /usr/local/bin/sing-box
+        rm -rf /usr/local/etc/sing-box
+        rm -f "/var/log/sing-box.log" "/var/log/sing-box.err"
+        svc_reload 2>/dev/null || true
+        echo -e "${GREEN}sing-box 卸载完成！${RESET}"
+    else
+        echo -e "${YELLOW}sing-box 未安装${RESET}"
+    fi
+}
+
 	# ============================================
 # Surge 配置导出（所有服务）
 # ============================================
@@ -761,27 +800,29 @@ show_menu() {
     echo -e "${GREEN}6.${RESET} Hysteria 2 安装管理"
     echo -e "${GREEN}7.${RESET} frp 安装管理 (frps/frpc)"
     echo -e "${GREEN}8.${RESET} NodeGet 安装管理 (Server/Agent)"
+    echo -e "${GREEN}9.${RESET} sing-box 安装管理 (Server/Client)"
 
     echo -e "
 ${YELLOW}=== 卸载功能 ===${RESET}"
-    echo -e "${GREEN}9.${RESET} 卸载 Snell"
-    echo -e "${GREEN}10.${RESET} 卸载 SS-2022"
-    echo -e "${GREEN}11.${RESET} 卸载 ShadowTLS"
-    echo -e "${GREEN}12.${RESET} 卸载 AnyTLS"
-    echo -e "${GREEN}13.${RESET} 卸载 Hysteria 2"
-    echo -e "${GREEN}14.${RESET} 卸载 frp (frps/frpc)"
-    echo -e "${GREEN}15.${RESET} 卸载 NodeGet"
+    echo -e "${GREEN}10.${RESET} 卸载 Snell"
+    echo -e "${GREEN}11.${RESET} 卸载 SS-2022"
+    echo -e "${GREEN}12.${RESET} 卸载 ShadowTLS"
+    echo -e "${GREEN}13.${RESET} 卸载 AnyTLS"
+    echo -e "${GREEN}14.${RESET} 卸载 Hysteria 2"
+    echo -e "${GREEN}15.${RESET} 卸载 frp (frps/frpc)"
+    echo -e "${GREEN}16.${RESET} 卸载 NodeGet"
+    echo -e "${GREEN}17.${RESET} 卸载 sing-box"
 
     echo -e "
 ${YELLOW}=== 系统功能 ===${RESET}"
-    echo -e "${GREEN}16.${RESET} 更新脚本"
-    echo -e "${GREEN}17.${RESET} 输出 Surge 配置"
+    echo -e "${GREEN}18.${RESET} 更新脚本"
+    echo -e "${GREEN}19.${RESET} 输出 Surge 配置"
     echo -e "${GREEN}0.${RESET} 退出"
 
     echo -e "${CYAN}============================================${RESET}"
     echo -e "${GREEN}退出脚本后，输入 menu 可重新进入${RESET}"
     echo -e "${CYAN}============================================${RESET}"
-    read -rp "请输入选项 [0-17]: " num
+    read -rp "请输入选项 [0-19]: " num
 }
 
 # ============================================
@@ -804,17 +845,19 @@ while true; do
         6) run_service_script "Hysteria 2" "https://raw.githubusercontent.com/viogus/scripts/main/hysteria2.sh" ;;
         7) run_service_script "frp" "https://raw.githubusercontent.com/viogus/scripts/main/frp.sh" ;;
         8) run_service_script "NodeGet" "https://raw.githubusercontent.com/viogus/scripts/main/nodeget.sh" ;;
-        9) uninstall_snell ;;
-        10) uninstall_ss_rust ;;
-        11) uninstall_shadowtls ;;
-        12) uninstall_anytls ;;
-        13) uninstall_hysteria ;;
-        14) uninstall_frp ;;
-        15) uninstall_nodeget ;;
-        16) update_script ;;
-        17) surge_export_all ;;
+        9) run_service_script "sing-box" "https://raw.githubusercontent.com/viogus/scripts/main/singbox.sh" ;;
+        10) uninstall_snell ;;
+        11) uninstall_ss_rust ;;
+        12) uninstall_shadowtls ;;
+        13) uninstall_anytls ;;
+        14) uninstall_hysteria ;;
+        15) uninstall_frp ;;
+        16) uninstall_nodeget ;;
+        17) uninstall_singbox ;;
+        18) update_script ;;
+        19) surge_export_all ;;
         0) echo -e "${GREEN}感谢使用，再见！${RESET}"; exit 0 ;;
-        *) echo -e "${RED}请输入正确的选项 [0-17]${RESET}" ;;
+        *) echo -e "${RED}请输入正确的选项 [0-19]${RESET}" ;;
     esac
     echo -e "
 ${CYAN}按任意键返回主菜单...${RESET}"
