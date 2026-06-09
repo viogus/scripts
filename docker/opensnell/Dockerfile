@@ -33,11 +33,20 @@ COPY entrypoint.c /tmp/
 RUN gcc -static -s -O2 -o /entrypoint /tmp/entrypoint.c && \
     strip --strip-all /entrypoint || true
 
+# prepare non-root user files for scratch runtime
+RUN mkdir -p /runtime-etc/snell-server && \
+    chown 65534:65534 /runtime-etc/snell-server && \
+    echo "nobody:x:65534:65534:nobody:/:/sbin/nologin" > /runtime-etc/passwd && \
+    echo "nobody:x:65534:" > /runtime-etc/group
+
 FROM scratch
 
 COPY --from=builder /out/snell-server /usr/local/bin/snell-server
 COPY --from=builder /entrypoint /entrypoint
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /runtime-etc/ /etc/
+
+USER nobody
 
 ENV SNELL_LISTEN=0.0.0.0:2333 \
     SNELL_PSK="" \
