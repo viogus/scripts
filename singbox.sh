@@ -244,11 +244,12 @@ install_server() {
     install_deps
     download_singbox
 
-    local port username password cert_path key_path
+    local port cert_path key_path
     read -rp "请输入监听端口 [443]: " port
     port="${port:-443}"
 
-    print_info "HTTP/2 CONNECT 代理需要 TLS 证书。"
+    print_info "HTTP/2 CONNECT 代理需要 TLS 证书，用于加密传输。"
+    print_info "Surge h2-connect 不使用用户名/密码，靠 TLS 保证安全。"
     echo -e "${CYAN}证书选项:${RESET}"
     echo "  1) 自动生成自签名证书 (推荐, 简单)"
     echo "  2) 使用已有证书文件"
@@ -294,18 +295,6 @@ install_server() {
             ;;
     esac
 
-    read -rp "设置用户名 [自动生成]: " username
-    if [[ -z "$username" ]]; then
-        username=$(gen_password 8)
-        print_info "已生成用户名: ${username}"
-    fi
-
-    read -rp "设置密码 (留空自动生成): " password
-    if [[ -z "$password" ]]; then
-        password=$(gen_password 24)
-        print_info "已生成随机密码: ${password}"
-    fi
-
     print_info "生成配置..."
     mkdir -p "${CONF_DIR}"
     cat > "${SB_SERVER_CONF}" << SSEOF
@@ -320,12 +309,6 @@ install_server() {
       "tag": "http-in",
       "listen": "::",
       "listen_port": ${port},
-      "users": [
-        {
-          "username": "${username}",
-          "password": "${password}"
-        }
-      ],
       "tls": {
         "enabled": true,
         "certificate_path": "${cert_path}",
@@ -412,22 +395,25 @@ show_server_config() {
     if [[ -f "${SB_SERVER_CONF}" ]]; then
         local ip; ip=$(get_ip 2>/dev/null || echo "服务器IP")
         local port; port=$(sed -n 's/.*"listen_port"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
-        local username; username=$(sed -n '/"users"/,/]/{s/.*"username"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p;}' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
-        local password; password=$(sed -n '/"users"/,/]/{s/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p;}' "$SB_SERVER_CONF" 2>/dev/null || echo "?")
 
         echo -e "${YELLOW}服务端:${RESET}"
         echo -e "  协议: HTTP/2 CONNECT (TLS)"
         echo -e "  地址: ${ip}:${port}"
-        echo -e "  用户: ${username}"
-        echo -e "  密码: ${password}"
+        echo -e "  认证: 仅 TLS 加密，无用户名/密码"
 
         echo ""
-        echo -e "${YELLOW}Surge 客户端:${RESET}"
-        echo "Proxy-HTTP = http, ${ip}, ${port}, username=${username}, password=${password}, tls=true"
+        echo -e "${YELLOW}Surge (h2-connect):${RESET}"
+        echo "Proxy-H2 = h2-connect, ${ip}, ${port}, skip-cert-verify=true, max-streams=3"
 
         echo ""
-        echo -e "${YELLOW}Shadowrocket:${RESET}"
-        echo "类型: HTTP (https), 地址: ${ip}, 端口: ${port}, 用户: ${username}, 密码: ${password}"
+        echo -e "${YELLOW}Surge (http + tls, 兼容):${RESET}"
+        echo "Proxy-HTTP = http, ${ip}, ${port}, tls=true, skip-cert-verify=true"
+
+        echo ""
+        echo -e "${YELLOW}Tips:${RESET}"
+        echo "  自签名证书需 skip-cert-verify=true"
+        echo "  正式证书可去掉此参数，建议设置 sni= 域名"
+        echo "  max-streams 控制多路复用并发流数 (默认 3)"
 
         echo ""
         echo -e "${YELLOW}配置文件: ${SB_SERVER_CONF}${RESET}"

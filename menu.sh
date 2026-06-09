@@ -800,7 +800,7 @@ show_menu() {
     echo -e "${GREEN}6.${RESET} Hysteria 2 安装管理"
     echo -e "${GREEN}7.${RESET} frp 安装管理 (frps/frpc)"
     echo -e "${GREEN}8.${RESET} NodeGet 安装管理 (Server/Agent)"
-    echo -e "${GREEN}9.${RESET} sing-box 安装管理 (Server/Client)"
+    echo -e "${GREEN}9.${RESET} sing-box 安装管理 (h2-connect/Mixed)"
 
     echo -e "
 ${YELLOW}=== 卸载功能 ===${RESET}"
