@@ -76,6 +76,7 @@ download_singbox() {
     local file_name="sing-box-${ver}-linux-${arch}"
     local url="https://github.com/SagerNet/sing-box/releases/download/v${ver}/${file_name}.tar.gz"
     local tmp; tmp=$(mktemp -d)
+    trap 'rm -rf "${tmp}"' EXIT
 
     print_info "sing-box 版本: v${ver} 架构: ${arch}"
     print_info "正在下载 sing-box..."
@@ -85,32 +86,29 @@ download_singbox() {
         local mirror_url="https://ghfast.top/${url}"
         curl -L --connect-timeout 10 --max-time 120 -o "${tmp}/${file_name}.tar.gz" "$mirror_url" || {
             print_error "下载失败，请检查网络"
-            rm -rf "$tmp"
             exit 1
         }
     fi
 
     mkdir -p "${CONF_DIR}"
     tar -xzf "${tmp}/${file_name}.tar.gz" -C "$tmp"
-    # tar.gz structure: sing-box-{ver}-linux-{arch}/sing-box
     local extract_dir="${tmp}/${file_name}"
     if [ -d "$extract_dir" ] && [ -f "${extract_dir}/sing-box" ]; then
         cp "${extract_dir}/sing-box" "${SB_BIN}"
         chmod +x "${SB_BIN}"
     else
-        # fallback: find the binary
         local found; found=$(find "$tmp" -name "sing-box" -type f 2>/dev/null | head -1)
         if [ -z "$found" ]; then
             print_error "未找到 sing-box 二进制文件"
-            rm -rf "$tmp"
             exit 1
         fi
         cp "$found" "${SB_BIN}"
         chmod +x "${SB_BIN}"
     fi
 
+    trap - EXIT
     rm -rf "$tmp"
-    print_ok "sing-box 二进制安装完成 ($(file "${SB_BIN}" | awk -F ',' '{print $2}' || true))"
+    print_ok "sing-box 二进制安装完成"
 }
 
 # ============================================
@@ -144,9 +142,9 @@ write_openrc() {
 #!/sbin/openrc-run
 name="${name}"
 description="sing-box Service"
-supervisor="supervise-daemon"
 command="${SB_BIN}"
 command_args="run -c ${conf}"
+command_background="yes"
 command_user="nobody"
 pidfile="/run/${name}.pid"
 output_log="/var/log/${name}.log"
@@ -223,9 +221,12 @@ svc_op() {
 
 gen_password() {
     local len="${1:-32}"
-    tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c "$len" || {
-        date +%s%N | md5sum | cut -c1-"$len" 2>/dev/null || echo "$(date +%s%N | sha256sum | cut -c1-"$len")"
-    }
+    local pw
+    pw=$(tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c "$len" 2>/dev/null) || true
+    if [[ -z "${pw}" ]]; then
+        pw=$(date +%s%N 2>/dev/null | sha256sum 2>/dev/null | cut -c1-"$len") || true
+    fi
+    echo "${pw:-$(date +%s | sha256sum | cut -c1-"$len")}"
 }
 
 # ============================================
@@ -245,7 +246,9 @@ install_server() {
     local port method password
     read -rp "请输入监听端口 [随机 1025-65535]: " port
     if [[ -z "$port" ]]; then
-        port=$(( RANDOM % 64511 + 1025 ))
+        port=$(od -An -N2 -i /dev/urandom 2>/dev/null | tr -d ' ' || true)
+        port="${port:-0}"
+        port=$(( (port < 0 ? -port : port) % 64511 + 1025 ))
         print_info "随机端口: ${port}"
     fi
 
