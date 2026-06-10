@@ -5,8 +5,30 @@
 # 网站：github.com/viogus
 # 描述: sing-box 一键管理脚本（服务端 / 客户端）
 # 适配: Debian/Ubuntu (apt) / RHEL系 (dnf/yum) / Alpine (apk)
-# 服务端: HTTP/2 CONNECT 代理 (Surge HTTP proxy + TLS)
 # init: systemd / openrc
+#
+# === 服务端架构 (h2-connect + SNI auth) ===
+#
+# 无 SNI 认证模式:
+#   Surge ──TLS──▶ sing-box:443 (HTTP/2 CONNECT)
+#   简单直接，靠 TLS 加密。端口暴露即可连。
+#
+# SNI 认证模式 (推荐):
+#                         ┌─ SNI 匹配 ──▶ sing-box:1xxxx (localhost)
+#   Surge ──TLS──▶ nginx:443 ─┤
+#      sni=xxxx               └─ SNI 不匹配 ──▶ 127.0.0.1:1 (RST)
+#
+#   nginx stream 模块在 TLS 握手之前通过 ssl_preread 读取 SNI。
+#   SNI 正确才转发到 sing-box，否则直接 RST —— 连 TLS 握手都不发生。
+#   HTTP/2 多路复用: 1 个 TCP 连接承载多个并发请求。
+#   TLS 证书: 自签名/Cloudflare Origin/正式证书均可。
+#
+# === 客户端架构 ===
+#
+#   APP ──▶ sing-box mixed inbound (127.0.0.1:2080)
+#           HTTP + SOCKS5 双协议本地代理。
+#           用户需手动编辑出站规则 (outbounds) 添加代理链。
+#
 # =========================================
 set -euo pipefail
 
