@@ -638,6 +638,11 @@ uninstall_singbox() {
         rm -f /usr/local/bin/sing-box
         rm -rf /usr/local/etc/sing-box
         rm -f "/var/log/sing-box.log" "/var/log/sing-box.err"
+        # clean nginx SNI config if present
+        rm -f /etc/nginx/stream.d/sing-box.conf
+        if command -v nginx >/dev/null 2>&1; then
+            nginx -t >/dev/null 2>&1 && nginx -s reload 2>/dev/null || true
+        fi
         svc_reload 2>/dev/null || true
         echo -e "${GREEN}sing-box 卸载完成！${RESET}"
     else
@@ -800,7 +805,7 @@ show_menu() {
     echo -e "${GREEN}6.${RESET} Hysteria 2 安装管理"
     echo -e "${GREEN}7.${RESET} frp 安装管理 (frps/frpc)"
     echo -e "${GREEN}8.${RESET} NodeGet 安装管理 (Server/Agent)"
-    echo -e "${GREEN}9.${RESET} sing-box 安装管理 (h2-connect/Mixed)"
+    echo -e "${GREEN}9.${RESET} sing-box 安装管理 (h2-connect+SNI/Mixed)"
 
     echo -e "
 ${YELLOW}=== 卸载功能 ===${RESET}"
