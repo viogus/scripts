@@ -21,7 +21,8 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build:
+  # --- main oci-helper app ---
+  build-app:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -45,31 +46,13 @@ jobs:
             echo "oci_helper_version=$VER" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check if image already published
-        id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "skip=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          VER="${{ steps.version.outputs.oci_helper_version }}"
-          EXISTS=$(gh api "orgs/${{ github.repository_owner }}/packages/container/oci-helper/versions" \
-            --jq '.[].metadata.container.tags[]' 2>/dev/null | grep -Fx "main" || true)
-          # just check if any build exists; rebuild on every cron to stay fresh
-          echo "skip=false" >> $GITHUB_OUTPUT
-
       - name: Set up QEMU
-        if: steps.check.outputs.skip != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        if: steps.check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to ghcr.io
-        if: steps.check.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -77,7 +60,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
-        if: steps.check.outputs.skip != 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -87,13 +69,52 @@ jobs:
             type=raw,value=${{ steps.version.outputs.oci_helper_version }}
 
       - name: Build and push
-        if: steps.check.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: docker/oci-helper
           platforms: linux/amd64,linux/arm64
           build-args: |
             OCI_HELPER_VERSION=${{ steps.version.outputs.oci_helper_version }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          provenance: false
+
+  # --- websockify sidecar ---
+  build-ws:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/oci-helper-ws
+          tags: type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/oci-helper/websockify
+          platforms: linux/amd64,linux/arm64
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           push: true

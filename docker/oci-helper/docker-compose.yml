@@ -10,9 +10,19 @@ services:
     environment:
       - OCI_USERNAME=admin
       - OCI_PASSWORD=change-me
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8818"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   websockify:
-    image: ghcr.io/yohann0617/oci-helper-websockify:master
+    image: ghcr.io/viogus/oci-helper-ws:latest
     container_name: oci-helper-ws
     restart: unless-stopped
     ports:

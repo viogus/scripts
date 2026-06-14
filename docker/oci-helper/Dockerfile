@@ -22,13 +22,14 @@ RUN --mount=type=cache,target=/root/.m2 \
 FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app/oci-helper
-RUN mkdir -p keys
+RUN mkdir -p keys && chown -R 65534:65534 /app/oci-helper
 
 COPY --from=builder /app.jar /oci-helper.jar
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8818
-ENV JAVA_OPTS="-Xms256m -Xmx512m"
+ENV JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 --add-opens java.base/java.net=ALL-UNNAMED --add-opens java.base/sun.net.www.protocol.https=ALL-UNNAMED"
 
+USER 65534
 ENTRYPOINT ["/entrypoint.sh"]
