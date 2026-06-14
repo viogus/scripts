@@ -6,11 +6,10 @@ services:
     ports:
       - "8818:8818"
     volumes:
-      - ./application.yml:/app/oci-helper/application.yml
-      - ./oci-helper.db:/app/oci-helper/oci-helper.db
-      - ./keys:/app/oci-helper/keys
+      - oci-helper-data:/app/oci-helper
     environment:
-      - JAVA_OPTS=-Xms256m -Xmx512m
+      - OCI_USERNAME=admin
+      - OCI_PASSWORD=change-me
 
   websockify:
     image: ghcr.io/yohann0617/oci-helper-websockify:master
@@ -18,3 +17,6 @@ services:
     restart: unless-stopped
     ports:
       - "6080:6080"
+
+volumes:
+  oci-helper-data:

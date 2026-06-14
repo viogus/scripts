@@ -1,40 +1,24 @@
 # oci-helper Docker
 
-[oci-helper](https://github.com/Yohann0617/oci-helper) — Oracle Cloud Infrastructure 可视化管理面板。自建镜像，精简部署。
+[oci-helper](https://github.com/Yohann0617/oci-helper) — Oracle Cloud Infrastructure 可视化管理面板。
+
+自建镜像：Maven 源码编译 → JRE Alpine 运行时。entrypoint 自动生成配置，**零宿主机操作**即可部署。
 
 ## 优化对比
 
 | 维度 | 官方 | 本镜像 |
 |------|------|--------|
 | 容器数 | 3 (app + watcher + websockify) | 2 (app + websockify) |
-| 基础镜像 | 未知 (JDK) | eclipse-temurin:21-jre-alpine |
-| 构建 | 未知 | Maven 多阶段 (源码编译) |
+| 基础镜像 | JDK | eclipse-temurin:21-jre-alpine |
 | 预计大小 | ~400MB+ | ~250MB |
-| 更新器 | 独立 watcher 容器 | 无 (手动 `docker compose pull`) |
+| 部署前操作 | 下载 4 个文件，创建目录，编辑配置 | **零操作**，仅设 env |
+| 更新器 | 独立 watcher | 手动 `docker compose pull` |
 
 ## 快速部署
 
-```bash
-mkdir oci-helper && cd oci-helper
+### Portainer Stack
 
-# 1. 下载配置模板
-curl -LO https://github.com/Yohann0617/oci-helper/releases/download/deploy/application.yml
-
-# 2. 编辑账号密码
-vim application.yml  # 搜索 security.user 修改 name/password
-
-# 3. 下载 docker-compose.yml
-curl -LO https://raw.githubusercontent.com/viogus/scripts/main/docker/oci-helper/docker-compose.yml
-
-# 4. 创建 keys 目录并启动
-mkdir -p keys
-touch oci-helper.db
-docker compose up -d
-```
-
-访问 `http://<ip>:8818`
-
-## Portainer Stack
+直接粘贴，改 `OCI_PASSWORD`：
 
 ```yaml
 version: "3.8"
@@ -45,51 +29,73 @@ services:
     ports:
       - "8818:8818"
     volumes:
-      - /host/path/application.yml:/app/oci-helper/application.yml
-      - /host/path/oci-helper.db:/app/oci-helper/oci-helper.db
-      - /host/path/keys:/app/oci-helper/keys
+      - oci-helper-data:/app/oci-helper
     environment:
-      - JAVA_OPTS=-Xms256m -Xmx512m
+      - OCI_USERNAME=admin
+      - OCI_PASSWORD=your-secret-password
 
   websockify:
     image: ghcr.io/yohann0617/oci-helper-websockify:master
     restart: unless-stopped
     ports:
       - "6080:6080"
+
+volumes:
+  oci-helper-data:
 ```
 
-> 在 Portainer 中创建 stack 时，将 `/host/path/` 替换为实际宿主机路径。`application.yml` 和 `oci-helper.db` 需预先创建。
+Deploy 后访问 `http://<ip>:8818`，用上面的用户名密码登录。
+
+### docker-compose
+
+```bash
+mkdir oci-helper && cd oci-helper
+# 直接复制上面的 yaml 到 docker-compose.yml
+docker compose up -d
+```
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `OCI_USERNAME` | `admin` | 网页登录账号 |
+| `OCI_PASSWORD` | 随机 16 位 | 网页登录密码 |
 | `JAVA_OPTS` | `-Xms256m -Xmx512m` | JVM 参数 |
+
+> `OCI_PASSWORD` 留空则自动生成随机密码，查看日志获取：`docker logs oci-helper`
+
+## 自定义 application.yml
+
+如需更复杂的配置，挂载自定义 `application.yml`：
+
+```yaml
+volumes:
+  - ./application.yml:/app/oci-helper/application.yml
+  - oci-helper-data:/app/oci-helper
+```
+
+检测到已挂载配置文件时，跳过 env 自动生成。
 
 ## 持久化
 
-| 路径 | 说明 |
+数据全在 `/app/oci-helper/` 下：
+
+| 文件 | 说明 |
 |------|------|
-| `./application.yml` | 应用配置 (账号密码等) |
-| `./oci-helper.db` | SQLite 数据库 |
-| `./keys/` | OCI API 密钥 (.pem) |
+| `oci-helper.db` | SQLite 数据库 |
+| `keys/` | OCI API 密钥 (.pem) |
+| `application.yml` | 应用配置 (自动生成) |
 
-官方 install 脚本会拉取默认 `application.yml` 和 `oci-helper.db`。我们这里手动管理。
-
-## Nginx 反代 (推荐)
+## Nginx 反代
 
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name your-domain.com;
-
-    ssl_certificate     /path/to/cert.crt;
-    ssl_certificate_key /path/to/private.key;
+    server_name your.domain;
 
     location / {
         proxy_pass http://127.0.0.1:8818;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
@@ -102,10 +108,4 @@ server {
         proxy_read_timeout 10800s;
     }
 }
-```
-
-## 构建
-
-```bash
-docker build --build-arg OCI_HELPER_VERSION=v3.5.0 -t oci-helper .
 ```
