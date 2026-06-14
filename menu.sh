@@ -103,7 +103,7 @@ svc_file_path() {
 svc_find_services() { find /etc/systemd/system /etc/init.d -name "$1" 2>/dev/null || true; }
 
 # 当前版本号
-current_version="4.1"
+current_version="4.2"
 
 # ============================================
 # AnyTLS 常量
@@ -769,8 +769,26 @@ surge_export_all() {
         fi
     fi
 
+    # --- sing-box (h2-connect) ---
+    local sb_conf="/usr/local/etc/sing-box/server.json"
+    if [ -f "$sb_conf" ]; then
+        local sb_port; sb_port=$(sed -n 's/.*"listen_port"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$sb_conf" 2>/dev/null || echo "?")
+        local sb_listen; sb_listen=$(sed -n 's/.*"listen"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$sb_conf" 2>/dev/null || echo "::")
+        local sni=""
+        if [ "$sb_listen" = "127.0.0.1" ] && [ -f /etc/nginx/stream.d/sing-box.conf ]; then
+            sni=$(sed -nE 's/^[[:space:]]+([^[:space:]]+).*127\.0\.0\.1.*/\1/p' /etc/nginx/stream.d/sing-box.conf 2>/dev/null | head -1 || true)
+            local pub_port; pub_port=$(sed -nE 's/.*listen ([0-9]+).*/\1/p' /etc/nginx/stream.d/sing-box.conf 2>/dev/null || echo "$sb_port")
+        fi
+        echo -e "${GREEN}[sing-box h2-connect]${RESET}"
+        if [ -n "$sni" ]; then
+            echo "Proxy-H2 = h2-connect, ${ip}, ${pub_port:-$sb_port}, sni=${sni}, skip-cert-verify=true, max-streams=3"
+        else
+            echo "Proxy-H2 = h2-connect, ${ip}, ${sb_port}, skip-cert-verify=true, max-streams=3"
+        fi
+        echo ""
+    fi
+
     # --- VLESS Reality ---
-    # Surge 不支持 VLESS 协议，跳过
     if [ -f "/usr/local/etc/xray/config.json" ] || [ -d "/usr/local/etc/xray" ]; then
         echo -e "${YELLOW}[VLESS] Surge 不支持 VLESS 协议，无法导出。请使用支持 VLESS 的客户端。${RESET}
 "

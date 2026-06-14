@@ -91,7 +91,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: docker/oci-helper
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           build-args: |
             OCI_HELPER_VERSION=${{ steps.version.outputs.oci_helper_version }}
           labels: ${{ steps.meta.outputs.labels }}
