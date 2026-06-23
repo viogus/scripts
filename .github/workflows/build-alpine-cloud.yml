@@ -9,21 +9,21 @@ on:
   workflow_dispatch:
     inputs:
       alpine_version_major:
-        description: 'Alpine major version (e.g. v3.23)'
+        description: 'Alpine major version (e.g. v3.24)'
         type: string
-        default: 'v3.23'
+        default: 'v3.24'
       alpine_version_full:
-        description: 'Alpine full version (e.g. 3.23.3)'
+        description: 'Alpine full version (e.g. 3.24.1)'
         type: string
-        default: '3.23.3'
+        default: '3.24.1'
       alpine_release_rev:
         description: 'Alpine release revision (e.g. r0)'
         type: string
         default: 'r0'
 
 env:
-  ALPINE_VERSION_MAJOR: 'v3.23'
-  ALPINE_VERSION_FULL: '3.23.3'
+  ALPINE_VERSION_MAJOR: 'v3.24'
+  ALPINE_VERSION_FULL: '3.24.1'
   ALPINE_RELEASE_REV: 'r0'
 
 jobs:
@@ -64,7 +64,7 @@ jobs:
           echo "Image: ${FILE_NAME}"
           echo "URL: ${DOWNLOAD_URL}"
 
-          # extract actual Alpine version for release notes (e.g. 3.23.4 from generic_alpine-3.23.4-...)
+          # extract actual Alpine version for release notes (e.g. 3.24.1 from generic_alpine-3.24.1-...)
           ALPINE_REAL_VER="$(echo "${FILE_NAME}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
           echo "ALPINE_REAL_VER=${ALPINE_REAL_VER}" >> "$GITHUB_ENV"
 
