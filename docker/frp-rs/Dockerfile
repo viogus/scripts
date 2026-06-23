@@ -1,4 +1,4 @@
-ARG FRP_VERSION=0.1.0
+ARG FRP_VERSION=0.1.1
 
 FROM alpine:latest AS downloader
 ARG FRP_VERSION
