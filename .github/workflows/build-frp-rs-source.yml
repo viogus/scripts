@@ -29,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -52,7 +55,7 @@ jobs:
         with:
           context: docker/frp-rs
           file: docker/frp-rs/Dockerfile.source
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           build-args: |
             FRP_COMPONENT=${{ matrix.component }}
           labels: ${{ steps.meta.outputs.labels }}
