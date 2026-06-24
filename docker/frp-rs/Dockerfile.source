@@ -1,29 +1,50 @@
-FROM rust:1-alpine3.21 AS builder
+FROM --platform=$BUILDPLATFORM rust:1-slim-bookworm AS builder
+ARG TARGETARCH
 ARG FRP_COMPONENT=frps
 
-# Build dependencies (musl for static linking)
-RUN apk add --no-cache musl-dev
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libc6-dev wget ca-certificates
 
-# Download latest source tarball — no git clone needed
+# arm64 cross-compilation toolchain
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      apt-get install -y --no-install-recommends \
+        gcc-aarch64-linux-gnu libc6-dev-arm64-cross && \
+      rustup target add aarch64-unknown-linux-gnu; \
+    fi
+
+# Download and build source
 WORKDIR /src
 RUN wget -qO- "https://api.github.com/repos/viogus/frp-rs/tarball/HEAD" | tar xz --strip-components=1
 
-# Build the requested component
-RUN cargo build --release 2>&1
-RUN cp target/release/${FRP_COMPONENT} /usr/bin/frp && \
+# Build Rust binary (native or cross-compiled)
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+      cargo build --release --target aarch64-unknown-linux-gnu; \
+    else \
+      cargo build --release; \
+    fi
+
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      cp target/aarch64-unknown-linux-gnu/release/${FRP_COMPONENT} /usr/bin/frp; \
+    else \
+      cp target/release/${FRP_COMPONENT} /usr/bin/frp; \
+    fi && \
     strip /usr/bin/frp || true
 
-# --- Stage 2: Compile C entrypoint ---
-FROM alpine:3.21 AS entrypoint
-ARG FRP_COMPONENT=frps
-RUN apk add --no-cache gcc musl-dev
-COPY entrypoint.c /tmp/
-RUN gcc -static -s -O2 -DFRP_MODE=\"${FRP_COMPONENT}\" -o /entrypoint /tmp/entrypoint.c
+# Compile entrypoint (statically linked, cross-compiled for arm64)
+COPY entrypoint.c /tmp/entrypoint.c
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      aarch64-linux-gnu-gcc -static -s -O2 -DFRP_MODE=\"${FRP_COMPONENT}\" -o /entrypoint /tmp/entrypoint.c; \
+    else \
+      gcc -static -s -O2 -DFRP_MODE=\"${FRP_COMPONENT}\" -o /entrypoint /tmp/entrypoint.c; \
+    fi
 
-# --- Stage 3: Runtime image ---
+# --- Runtime stage ---
 FROM alpine:3.21
+# gcompat for glibc-linked arm64 binary
+RUN apk add --no-cache gcompat ca-certificates
 COPY --from=builder /usr/bin/frp /usr/bin/frp
-COPY --from=entrypoint /entrypoint /entrypoint
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /entrypoint /entrypoint
 ENV FRP_CONF=/app/frp.toml
 ENTRYPOINT ["/entrypoint"]
