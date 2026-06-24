@@ -20,8 +20,10 @@ RUN wget -qO- "https://api.github.com/repos/viogus/frp-rs/tarball/HEAD" | tar xz
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
       CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+      RUSTFLAGS="-C link-arg=-static-libgcc" \
       cargo build --release --target aarch64-unknown-linux-gnu; \
     else \
+      RUSTFLAGS="-C link-arg=-static-libgcc" \
       cargo build --release; \
     fi
 
