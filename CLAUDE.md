@@ -19,6 +19,9 @@ Never put binaries, configs, or data in `/usr/local/<service>/` — split by typ
 
 - Init dependency: `depend() { need networking }` — not `need net`
 - Package manager: `apk add --no-cache`
+- `ensure_openrc_base()` in `menu.sh` creates `/etc/init.d/hostname` if missing
+  — Alpine minimal installs lack it, which breaks the networking → hostname chain
+- `svc_start`/`svc_restart` call `ensure_openrc_base` before starting on openrc
 
 ## Script Conventions
 

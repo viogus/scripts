@@ -56,16 +56,18 @@ bash <(curl -fsSL https://raw.githubusercontent.com/viogus/scripts/main/hysteria
 
 二进制文件统一安装在 `/usr/local/bin/`。
 
-## 共享库
+## 共享函数
 
-`lib/svc-utils.sh` 提供统一的 init 检测和服务操作：
+公共函数定义在 `menu.sh`，通过 `run_service_script()` 注入到各服务脚本：
 
 ```bash
-# 加载链：本地 > 系统 > GitHub 下载 > 内联兜底
-source lib/svc-utils.sh
+# menu.sh 下载服务脚本时，将公共函数 declare -f 输出到脚本头部
+declare -f has_cmd detect_init detect_os ensure_openrc_base \
+    svc_start svc_stop svc_restart svc_enable svc_disable \
+    svc_is_active svc_status svc_reload svc_main_pid ...
 ```
 
-提供的公共函数：`detect_init`、`detect_os`、`svc_start/stop/restart/enable/disable`、`svc_is_active`、`svc_main_pid`、`get_ip`、`install_pkg`、`has_cmd` 等。
+提供的公共函数：`detect_init`、`detect_os`、`svc_start/stop/restart/enable/disable`、`svc_is_active`、`svc_main_pid`、`get_ip`、`has_cmd`、`ensure_openrc_base` 等。
 
 ## 客户端配置格式
 
@@ -85,12 +87,14 @@ source lib/svc-utils.sh
 
 多架构镜像（amd64/arm64/armv7），每周自动更新，推送到 [ghcr.io/viogus](https://github.com/viogus/scripts/pkgs/container/)。
 
-### frp（frps / frpc）
+### frp-rs（frps / frpc）
+
+基于 [viogus/frp-rs](https://github.com/viogus/frp-rs)，自写 Rust 实现，兼容 fatedier/frp V1 wire protocol。
 
 | 镜像 | 基础 | 大小 | 说明 |
 |------|------|------|------|
-| `ghcr.io/viogus/frps:latest` | scratch | ~15MB | frp 服务端 |
-| `ghcr.io/viogus/frpc:latest` | scratch | ~15MB | frp 客户端 |
+| `ghcr.io/viogus/frps:latest` | scratch | ~15MB | frp-rs 服务端 |
+| `ghcr.io/viogus/frpc:latest` | scratch | ~15MB | frp-rs 客户端 |
 
 ```yaml
 # docker-compose.yml
