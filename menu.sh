@@ -64,6 +64,31 @@ detect_init() {
     echo "$_INIT_TYPE"
 }
 
+# Alpine minimal installs often lack /etc/init.d/hostname,
+# which breaks the networking -> hostname dependency chain.
+ensure_openrc_base() {
+    if [ "$(detect_init)" != "openrc" ]; then return; fi
+    if [ ! -f /etc/init.d/hostname ]; then
+        cat > /etc/init.d/hostname <<'EOF'
+#!/sbin/openrc-run
+description="Set hostname"
+
+depend() {
+    need root
+}
+
+start() {
+    local h
+    h=$(cat /etc/hostname 2>/dev/null || echo "localhost")
+    hostname "$h"
+}
+EOF
+        chmod +x /etc/init.d/hostname
+        rc-update add hostname boot 2>/dev/null || true
+        rc-service hostname start 2>/dev/null || true
+    fi
+}
+
 print_ok(){ echo -e "${OK}${BLUE} $1 ${RESET}"; }
 print_info(){ echo -e "${INFO}${CYAN} $1 ${RESET}"; }
 print_error(){ echo -e "${ERROR} $1 ${RESET}"; }
@@ -71,9 +96,9 @@ print_warn(){ echo -e "${WARN} $1 ${RESET}"; }
 judge(){ if [[ 0 -eq $? ]]; then print_ok "$1 完成"; else print_error "$1 失败"; exit 1; fi; }
 trap 'echo -e "${WARN} 已中断"; exit 1' INT
 
-svc_start()   { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" start; else systemctl start "$1"; fi; }
+svc_start()   { if [ "$(detect_init)" = "openrc" ]; then ensure_openrc_base; rc-service "$1" start; else systemctl start "$1"; fi; }
 svc_stop()    { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" stop 2>/dev/null || true; else systemctl stop "$1" 2>/dev/null || true; fi; }
-svc_restart() { if [ "$(detect_init)" = "openrc" ]; then rc-service "$1" restart; else systemctl restart "$1"; fi; }
+svc_restart() { if [ "$(detect_init)" = "openrc" ]; then ensure_openrc_base; rc-service "$1" restart; else systemctl restart "$1"; fi; }
 svc_enable()  { if [ "$(detect_init)" = "openrc" ]; then rc-update add "$1" default >/dev/null 2>&1 || true; else systemctl enable "$1" >/dev/null 2>&1 || true; fi; }
 svc_disable() { if [ "$(detect_init)" = "openrc" ]; then rc-update del "$1" default >/dev/null 2>&1 || true; else systemctl disable "$1" 2>/dev/null || true; fi; }
 
@@ -437,6 +462,7 @@ run_service_script() {
         {
             declare -p RED GREEN YELLOW CYAN BLUE RESET OK ERROR WARN INFO _INIT_TYPE 2>/dev/null || true
             declare -f has_cmd ensure_root get_ip detect_os detect_init \
+                ensure_openrc_base \
                 print_ok print_info print_error print_warn judge \
                 svc_start svc_stop svc_restart svc_enable svc_disable \
                 svc_is_active svc_status svc_reload svc_main_pid \
