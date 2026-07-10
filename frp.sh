@@ -22,10 +22,10 @@ SCRIPT_VERSION="1.0.0"
 get_version() {
     local ver
     ver=$(curl -s --connect-timeout 10 --max-time 30 \
-        https://api.github.com/repos/fatedier/frp/releases/latest 2>/dev/null \
+        https://api.github.com/repos/viogus/frp-rs/releases/latest 2>/dev/null \
         | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/') || true
     if [[ -z "$ver" ]]; then
-        ver="0.68.1"
+        ver="0.2.2"
         print_warn "无法获取最新版本号，使用默认版本: v${ver}"
     fi
     echo "$ver"
@@ -34,9 +34,9 @@ get_version() {
 get_arch() {
     local m; m=$(uname -m)
     case "$m" in
-        x86_64|amd64) echo "amd64" ;;
-        aarch64|arm64) echo "arm64" ;;
-        armv7l|armv6l) echo "arm" ;;
+        x86_64|amd64)    echo "x86_64-unknown-linux-musl" ;;
+        aarch64|arm64)   echo "aarch64-unknown-linux-musl" ;;
+        armv7l|armv6l)   echo "armv7-unknown-linux-musleabihf" ;;
         *) print_error "不支持的架构: $m"; exit 1 ;;
     esac
 }
@@ -70,15 +70,15 @@ install_deps() {
 # ============================================
 
 download_frp() {
-    local ver arch
+    local ver rust_target
     ver=$(get_version)
-    arch=$(get_arch)
-    local file_name="frp_${ver}_linux_${arch}"
-    local url="https://github.com/fatedier/frp/releases/download/v${ver}/${file_name}.tar.gz"
+    rust_target=$(get_arch)
+    local file_name="frp-rs_v${ver}_${rust_target}"
+    local url="https://github.com/viogus/frp-rs/releases/download/v${ver}/${file_name}.tar.gz"
     local tmp; tmp=$(mktemp -d)
 
-    print_info "frp 版本: v${ver} 架构: ${arch}"
-    print_info "正在下载 frp..."
+    print_info "frp-rs 版本: v${ver} 目标: ${rust_target}"
+    print_info "正在下载 frp-rs..."
 
     # Try direct GitHub first, fallback to ghfast mirror
     if ! curl -L --connect-timeout 10 --max-time 120 -o "${tmp}/${file_name}.tar.gz" "$url" 2>/dev/null; then
@@ -92,18 +92,19 @@ download_frp() {
     fi
 
     mkdir -p "${CONF_DIR}"
+    # frp-rs tarball extracts frps/frpc at top level (no subdirectory)
     tar -xzf "${tmp}/${file_name}.tar.gz" -C "$tmp"
-    if [ -f "${tmp}/${file_name}/frps" ]; then
-        cp "${tmp}/${file_name}/frps" "${FRPS_BIN}"
+    if [ -f "${tmp}/frps" ]; then
+        cp "${tmp}/frps" "${FRPS_BIN}"
         chmod +x "${FRPS_BIN}"
     fi
-    if [ -f "${tmp}/${file_name}/frpc" ]; then
-        cp "${tmp}/${file_name}/frpc" "${FRPC_BIN}"
+    if [ -f "${tmp}/frpc" ]; then
+        cp "${tmp}/frpc" "${FRPC_BIN}"
         chmod +x "${FRPC_BIN}"
     fi
 
     rm -rf "$tmp"
-    print_ok "frp 二进制安装完成"
+    print_ok "frp-rs 二进制安装完成"
 }
 
 # ============================================
@@ -234,11 +235,16 @@ install_frps() {
     print_info "生成配置..."
     mkdir -p "${CONF_DIR}"
     cat > "${FRPS_CONF}" << FRPSEOF
-bindPort = ${port}
+bind_addr = "0.0.0.0"
+bind_port = ${port}
 
 FRPSEOF
     if [[ -n "${token:-}" ]]; then
-        echo "auth.token = \"${token}\"" >> "${FRPS_CONF}"
+        cat >> "${FRPS_CONF}" << FRPSEOF
+[auth]
+method = "token"
+token = "${token}"
+FRPSEOF
     fi
 
     install_service "frps" "${FRPS_BIN}" "${FRPS_CONF}"
@@ -272,12 +278,16 @@ install_frpc() {
     print_info "生成配置..."
     mkdir -p "${CONF_DIR}"
     cat > "${FRPC_CONF}" << FRPCEOF
-serverAddr = "${server_addr}"
-serverPort = ${server_port}
+server_addr = "${server_addr}"
+server_port = ${server_port}
 
 FRPCEOF
     if [[ -n "${token:-}" ]]; then
-        echo "auth.token = \"${token}\"" >> "${FRPC_CONF}"
+        cat >> "${FRPC_CONF}" << FRPCEOF
+[auth]
+method = "token"
+token = "${token}"
+FRPCEOF
     fi
 
     print_info "请手动编辑 ${FRPC_CONF} 添加代理规则 (如 [[proxies]])"

@@ -4,40 +4,38 @@ set -euo pipefail
 COMPONENT="${FRP_COMPONENT:-frps}"
 
 case "${TARGETARCH}" in
-  amd64) ARCH=amd64 ;;
-  arm64) ARCH=arm64 ;;
-  arm)   ARCH=arm ;;
+  amd64) RUST_TARGET="x86_64-unknown-linux-musl" ;;
+  arm64) RUST_TARGET="aarch64-unknown-linux-musl" ;;
+  arm)   RUST_TARGET="armv7-unknown-linux-musleabihf" ;;
   *)
     echo "Unsupported arch: ${TARGETARCH}" >&2
     exit 1
     ;;
 esac
 
-URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${ARCH}.tar.gz"
+URL="https://github.com/viogus/frp-rs/releases/download/v${FRP_VERSION}/frp-rs_v${FRP_VERSION}_${RUST_TARGET}.tar.gz"
 
-echo "[frp] downloading ${COMPONENT} v${FRP_VERSION} for linux/${ARCH}"
+echo "[frp-rs] downloading ${COMPONENT} v${FRP_VERSION} for ${RUST_TARGET}"
 
 for i in 1 2 3; do
   if curl -fsSL --connect-timeout 10 --max-time 120 \
-    -o /tmp/frp.tar.gz "$URL"; then
+    -o /tmp/frp-rs.tar.gz "$URL"; then
     break
   fi
-  echo "[frp] attempt $i failed, retrying..." >&2
+  echo "[frp-rs] attempt $i failed, retrying..." >&2
   sleep 5
 done
 
-[ -f /tmp/frp.tar.gz ] || { echo "[frp] download failed" >&2; exit 1; }
+[ -f /tmp/frp-rs.tar.gz ] || { echo "[frp-rs] download failed" >&2; exit 1; }
 
-mkdir -p /tmp/frp
-tar -xzf /tmp/frp.tar.gz -C /tmp/frp
+# frp-rs tarball extracts binaries at top level (frps, frpc)
+tar -xzf /tmp/frp-rs.tar.gz -C /tmp/
+[ -f "/tmp/${COMPONENT}" ] || { echo "[frp-rs] component not found: ${COMPONENT}" >&2; ls -la /tmp/ >&2; exit 1; }
 
-EXTRACT_DIR="/tmp/frp/frp_${FRP_VERSION}_linux_${ARCH}"
-[ -d "$EXTRACT_DIR" ] || { echo "[frp] extract dir not found: $EXTRACT_DIR" >&2; ls -la /tmp/frp/ >&2; exit 1; }
-
-cp "$EXTRACT_DIR/${COMPONENT}" /usr/bin/frp
+cp "/tmp/${COMPONENT}" /usr/bin/frp
 strip --strip-all /usr/bin/frp || echo "WARN: strip frp failed" >&2
 chmod +x /usr/bin/frp
 
-rm -rf /tmp/frp /tmp/frp.tar.gz
+rm -rf /tmp/frp-rs.tar.gz /tmp/frps /tmp/frpc
 
-echo "[frp] ${COMPONENT}: $(/usr/bin/frp --version 2>&1 || true)"
+echo "[frp-rs] ${COMPONENT}: $(/usr/bin/frp --version 2>&1 || true)"

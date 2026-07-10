@@ -1,6 +1,6 @@
-# frp Docker
+# frp-rs Docker
 
-[frp](https://github.com/fatedier/frp) 多架构 Docker 镜像，内置 C 入口点支持环境变量生成配置。
+[frp-rs](https://github.com/viogus/frp-rs) 多架构 Docker 镜像，内置 C 入口点支持环境变量生成配置。
 
 ## 镜像
 
@@ -24,9 +24,6 @@ services:
     environment:
       - FRP_BIND_PORT=7000
       - FRP_AUTH_TOKEN=your_token
-      - FRP_DASHBOARD_PORT=7500
-      - FRP_DASHBOARD_USER=admin
-      - FRP_DASHBOARD_PWD=secret
 ```
 
 **frpc：**
@@ -69,10 +66,6 @@ services:
 | `FRP_BIND_ADDR` | `0.0.0.0` | 监听地址 |
 | `FRP_BIND_PORT` | `7000` | 监听端口 |
 | `FRP_AUTH_TOKEN` | — | 认证 token |
-| `FRP_DASHBOARD_ADDR` | `0.0.0.0` | 面板地址 |
-| `FRP_DASHBOARD_PORT` | — | 面板端口（不设则不启用） |
-| `FRP_DASHBOARD_USER` | — | 面板用户名 |
-| `FRP_DASHBOARD_PWD` | — | 面板密码 |
 | `FRP_SUBDOMAIN_HOST` | — | 子域名后缀 |
 | `FRP_TLS_CERT_FILE` | — | TLS 证书文件 |
 | `FRP_TLS_KEY_FILE` | — | TLS 私钥文件 |
@@ -89,8 +82,20 @@ services:
 | `FRP_TUNNEL_LOCAL_IP` | `127.0.0.1` | 本地 IP |
 | `FRP_TUNNEL_LOCAL_PORT` | — | 本地端口 |
 | `FRP_TUNNEL_REMOTE_PORT` | — | 远程端口 |
-| `FRP_TUNNEL_BANDWIDTH_LIMIT` | — | 带宽限制（如 `1MB`） |
+
+## 与 Go frp 的配置格式差异
+
+frp-rs 使用原生配置格式（snake_case，分段式），与 fatedier/frp V1 wire protocol 兼容。
+
+| Go frp (fatedier) | frp-rs (viogus) |
+|-------------------|-----------------|
+| `auth.token = "x"` | `[auth]` / `method = "token"` / `token = "x"` |
+| `webServer.port = 7500` | `[web_server]` / `port = 7500` |
+| `bindAddr` / `bindPort` | `bind_addr` / `bind_port` |
+| `serverAddr` / `serverPort` | `server_addr` / `server_port` |
+
+环境变量生成的是 frp-rs 原生格式。挂载配置文件时请使用 frp-rs 格式（或 Go frp `[common]` 兼容格式）。
 
 ## 更新
 
-每周日自动抓取 [fatedier/frp](https://github.com/fatedier/frp/releases) 最新版本并重建。
+每周日自动抓取 [viogus/frp-rs](https://github.com/viogus/frp-rs/releases) 最新版本并重建。

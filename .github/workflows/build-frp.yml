@@ -58,11 +58,11 @@ jobs:
             echo "force=true" >> $GITHUB_OUTPUT
           else
             VER=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              https://api.github.com/repos/fatedier/frp/releases/latest \
+              https://api.github.com/repos/viogus/frp-rs/releases/latest \
               | jq -r '.tag_name | ltrimstr("v")')
             if [ -z "$VER" ] || [ "$VER" = "null" ]; then
               echo "WARN: failed to fetch latest frp version, using fallback" >&2
-              VER="0.68.1"
+              VER="0.2.2"
             fi
             echo "frp_version=$VER" >> $GITHUB_OUTPUT
             echo "force=false" >> $GITHUB_OUTPUT
