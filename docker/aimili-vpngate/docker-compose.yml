@@ -19,6 +19,8 @@ services:
       # - WEB_USERNAME=admin
       # - WEB_PASSWORD=your_password
       # - SECRET_PATH=mysecret
+      # - LOCAL_PROXY_USER=proxy_user      # SOCKS5/HTTP 代理认证
+      # - LOCAL_PROXY_PASS=proxy_pass      # 设置后代理需用户名密码
 
 volumes:
   aimili-data:

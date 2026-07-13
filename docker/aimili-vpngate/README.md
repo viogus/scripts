@@ -30,6 +30,8 @@ services:
       # - WEB_USERNAME=admin        # 可选，默认随机生成
       # - WEB_PASSWORD=your_pass    # 可选，默认随机生成
       # - SECRET_PATH=mysecret      # 可选，默认随机生成
+      # - LOCAL_PROXY_USER=proxy    # 可选，SOCKS5/HTTP 代理认证用户名
+      # - LOCAL_PROXY_PASS=pwd      # 可选，SOCKS5/HTTP 代理认证密码
 ```
 
 ### docker run
@@ -62,6 +64,8 @@ docker logs aimili-vpngate
 | `WEB_USERNAME` | 随机 12 位 | 登录用户名 |
 | `WEB_PASSWORD` | 随机 12 位 | 登录密码 |
 | `SECRET_PATH` | 随机 12 位 | URL 路径后缀 |
+| `LOCAL_PROXY_USER` | (空) | SOCKS5/HTTP 代理认证用户名。设置后代理必须认证。 |
+| `LOCAL_PROXY_PASS` | (空) | SOCKS5/HTTP 代理认证密码。设置后代理必须认证。 |
 
 首次启动时自动生成 `ui_auth.json` 并打印凭据。已持久化时跳过生成。
 
@@ -77,6 +81,10 @@ curl https://ipinfo.io
 
 # 或 SOCKS5
 export ALL_PROXY="socks5://127.0.0.1:7928"
+
+# 有认证时
+export ALL_PROXY="socks5://user:pass@127.0.0.1:7928"
+export http_proxy="http://user:pass@127.0.0.1:7928"
 ```
 
 ```python

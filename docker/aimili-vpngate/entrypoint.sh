@@ -26,6 +26,9 @@ JSON
     echo "  Username: $WEB_USERNAME"
     echo "  Password: $WEB_PASSWORD"
     echo "  Proxy:    socks5://<host>:7928"
+    if [ -n "${LOCAL_PROXY_USER:-}${LOCAL_PROXY_USERNAME:-}" ] && [ -n "${LOCAL_PROXY_PASS:-}${LOCAL_PROXY_PASSWORD:-}" ]; then
+        echo "  Auth:     ${LOCAL_PROXY_USER:-${LOCAL_PROXY_USERNAME:-}} / ${LOCAL_PROXY_PASS:-${LOCAL_PROXY_PASSWORD:-}}"
+    fi
     echo "============================================"
 fi
 
