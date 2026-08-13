@@ -2,6 +2,9 @@
 set -eu
 
 COMPONENT="${NODEGET_COMPONENT:-nodeget-server}"
+# 二进制来源仓库（owner/repo）。默认 viogus/NodeGet（含 TimescaleDB 时序优化；
+# 上游 GenshinMinecraft/NodeGet 的 release 不含该功能）。可用 NODEGET_REPO 覆盖。
+REPO="${NODEGET_REPO:-viogus/NodeGet}"
 
 case "${TARGETARCH}" in
   amd64) ARCH=x86_64 ;;
@@ -24,9 +27,9 @@ if [ "$ARCH" = "armv7" ]; then
   FALLBACK_URL="${BIN_GNU}"
 fi
 
-URL="https://github.com/GenshinMinecraft/NodeGet/releases/download/v${NODEGET_VERSION}/${BIN}"
+URL="https://github.com/${REPO}/releases/download/v${NODEGET_VERSION}/${BIN}"
 
-echo "[nodeget] downloading ${COMPONENT} v${NODEGET_VERSION} for linux/${ARCH}"
+echo "[nodeget] downloading ${COMPONENT} v${NODEGET_VERSION} for linux/${ARCH} from ${REPO}"
 
 for i in 1 2 3; do
   if curl -fsSL --connect-timeout 10 --max-time 120 \
@@ -40,7 +43,7 @@ done
 # armv7 fallback: try gnueabihf if musleabihf not found
 if [ ! -f /tmp/nodeget ] && [ -n "${FALLBACK_URL:-}" ]; then
   echo "[nodeget] musl not found, trying gnu: ${FALLBACK_URL}" >&2
-  URL="https://github.com/GenshinMinecraft/NodeGet/releases/download/v${NODEGET_VERSION}/${FALLBACK_URL}"
+  URL="https://github.com/${REPO}/releases/download/v${NODEGET_VERSION}/${FALLBACK_URL}"
   for i in 1 2 3; do
     if curl -fsSL --connect-timeout 10 --max-time 120 \
       -o /tmp/nodeget "$URL"; then

@@ -1,10 +1,12 @@
 FROM alpine:latest AS downloader
 ARG NODEGET_VERSION=0.2.11
+ARG NODEGET_REPO=viogus/NodeGet
 ARG TARGETARCH
 ARG NODEGET_COMPONENT=nodeget-server
 
 RUN apk add --no-cache curl binutils gcc musl-dev
 
+ENV NODEGET_REPO=$NODEGET_REPO
 COPY build-nodeget.sh /tmp/
 RUN sh /tmp/build-nodeget.sh
 

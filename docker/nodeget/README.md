@@ -1,6 +1,6 @@
 # NodeGet Docker
 
-[NodeGet](https://github.com/NodeSeekDev/NodeGet) 多架构 Docker 镜像，二进制取自 [GenshinMinecraft/NodeGet](https://github.com/GenshinMinecraft/NodeGet) 构建的 release。
+[NodeGet](https://github.com/NodeSeekDev/NodeGet) 多架构 Docker 镜像，二进制默认取自 [viogus/NodeGet](https://github.com/viogus/NodeGet)（fork，含 TimescaleDB 时序优化）构建的 release；可用 `NODEGET_REPO` 环境变量 / workflow 的 `nodeget_repo` 输入切换回上游 [GenshinMinecraft/NodeGet](https://github.com/GenshinMinecraft/NodeGet)。
 
 ## 镜像
 
@@ -83,4 +83,4 @@ services:
 
 ## 更新
 
-每天自动从 [GenshinMinecraft/NodeGet](https://github.com/GenshinMinecraft/NodeGet/releases) 抓取最新版本并重建。
+每天自动从 viogus/NodeGet（默认，含 TimescaleDB）抓取最新 release 并重建；手动触发可指定 nodeget_repo 与版本。
