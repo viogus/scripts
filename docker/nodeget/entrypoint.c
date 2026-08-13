@@ -153,6 +153,18 @@ static void write_config(const char *path, const char *data_dir) {
   fprintf(f, "max_lifetime_ms = %s\n", db_max_lt);
   fprintf(f, "max_connections = %s\n", db_max_conn);
 
+  /* TimescaleDB 时序优化（可选）：任一 NODEGET_TIMESCALE_* 存在即生成
+   * [database.timescale] 段；缺省值 1 / 7 / 0（retention 默认 0 = 不删除）。 */
+  const char *ts_chunk = getenv("NODEGET_TIMESCALE_CHUNK_INTERVAL_DAYS");
+  const char *ts_compress = getenv("NODEGET_TIMESCALE_COMPRESS_AFTER_DAYS");
+  const char *ts_retention = getenv("NODEGET_TIMESCALE_RETENTION_DAYS");
+  if (ts_chunk || ts_compress || ts_retention) {
+    fprintf(f, "\n[database.timescale]\n");
+    fprintf(f, "chunk_interval_days = %s\n", ts_chunk ? ts_chunk : "1");
+    fprintf(f, "compress_after_days = %s\n", ts_compress ? ts_compress : "7");
+    fprintf(f, "retention_days = %s\n", ts_retention ? ts_retention : "0");
+  }
+
   fclose(f);
 }
 

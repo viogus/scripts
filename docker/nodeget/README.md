@@ -38,6 +38,12 @@ Server 首次启动时若 `/etc/nodeget/config.toml` 不存在或为空，entryp
 | `NODEGET_DB_IDLE_TIMEOUT_MS` | — | `3000` |
 | `NODEGET_DB_MAX_LIFETIME_MS` | — | `30000` |
 | `NODEGET_DB_MAX_CONNECTIONS` | — | `10` |
+| `NODEGET_TIMESCALE_CHUNK_INTERVAL_DAYS` | — | `1` |
+| `NODEGET_TIMESCALE_COMPRESS_AFTER_DAYS` | — | `7` |
+| `NODEGET_TIMESCALE_RETENTION_DAYS` | — | `0` |
+
+> `NODEGET_TIMESCALE_*`：任一存在即生成 `[database.timescale]` 配置段（TimescaleDB 时序优化）。
+> `retention_days` 默认 0 = 不启用自动删除（避免误删历史数据），需要磁盘封顶时显式设置（如 `30`）。
 
 ### Server
 
