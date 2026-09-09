@@ -23,7 +23,7 @@ FROM alpine:3.24 AS builder
 
 RUN apk add --no-cache cmake ninja gcc g++ make linux-headers postgresql18-dev openssl-dev ca-certificates
 
-ARG TS_VERSION=2.25.2
+ARG TS_VERSION=2.30.0
 RUN wget -qO /tmp/ts.tar.gz https://github.com/timescale/timescaledb/archive/refs/tags/${TS_VERSION}.tar.gz \
  && mkdir -p /tmp/src \
  && tar xzf /tmp/ts.tar.gz -C /tmp/src --strip-components=1

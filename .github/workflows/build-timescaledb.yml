@@ -48,4 +48,4 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/timescaledb:latest-pg18
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/timescaledb:2.25.2-pg18
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/timescaledb:2.30.0-pg18
