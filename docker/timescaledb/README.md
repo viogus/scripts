@@ -43,9 +43,13 @@ CI（`.github/workflows/build-timescaledb.yml`）按平台矩阵在**原生** ru
 
 | 平台 | runner | 实测耗时 |
 |---|---|---|
-| `linux/amd64` | `ubuntu-latest` | 3m59s |
+| `linux/amd64` | `ubuntu-24.04` | 3m59s |
 | `linux/arm64` | `ubuntu-24.04-arm` | 2m47s |
-| 合并 | `ubuntu-latest`（merge job） | 15s |
+| 合并 | `ubuntu-24.04`（merge job） | 15s |
+
+两个平台都钉在 24.04 LTS 上（不用 `ubuntu-latest`，免得 label 迁到 Ubuntu 26 后环境漂移）；
+所有 action 都用 node24 的大版本（checkout@v7、upload-artifact@v7、download-artifact@v8、
+login-action@v4、setup-buildx-action@v4、build-push-action@v7）。
 
 每个平台 `push-by-digest` 后，**在同一个原生 runner 上把这个 digest 拉回来跑一遍
 `smoke-timescaledb.sh`**（起库 → `CREATE EXTENSION timescaledb` → hypertable → 插查），冒烟通过
