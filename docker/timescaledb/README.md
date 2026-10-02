@@ -43,9 +43,9 @@ CI（`.github/workflows/build-timescaledb.yml`）按平台矩阵在**原生** ru
 
 | 平台 | runner | 实测耗时 |
 |---|---|---|
-| `linux/amd64` | `ubuntu-24.04` | 3m59s |
-| `linux/arm64` | `ubuntu-24.04-arm` | 2m47s |
-| 合并 | `ubuntu-24.04`（merge job） | 15s |
+| `linux/amd64` | `ubuntu-24.04` | 4m02s |
+| `linux/arm64` | `ubuntu-24.04-arm` | 3m03s |
+| 合并 | `ubuntu-24.04`（merge job） | 22s |
 
 两个平台都钉在 24.04 LTS 上（不用 `ubuntu-latest`，免得 label 迁到 Ubuntu 26 后环境漂移）；
 所有 action 都用 node24 的大版本（checkout@v7、upload-artifact@v7、download-artifact@v8、
@@ -54,11 +54,13 @@ login-action@v4、setup-buildx-action@v4、build-push-action@v7）。
 每个平台 `push-by-digest` 后，**在同一个原生 runner 上把这个 digest 拉回来跑一遍
 `smoke-timescaledb.sh`**（起库 → `CREATE EXTENSION timescaledb` → hypertable → 插查），冒烟通过
 才上传 digest；merge job 用 `docker buildx imagetools create` 合成 `:latest-pg18` /
-`:2.30.0-pg18`。冒烟失败则该平台没有 digest，merge job 拿不到它 ⇒ 不会发布坏镜像。已跑通：index
-`sha256:b427e7e1…`，含 amd64 manifest `sha256:c0747ba9…`（21.469 MiB / 12 层）与 arm64 manifest
-`sha256:4bb851d5…`（21.280 MiB / 12 层，与本地构建逐层一致）。arm64 镜像在本机原生跑
-`smoke-timescaledb.sh` 通过；amd64 镜像在 qemu-x86_64 下 `CREATE EXTENSION timescaledb`、
-hypertable + 25 行 + 1 chunk 均正常。
+`:2.30.0-pg18`。冒烟失败则该平台没有 digest，merge job 拿不到它 ⇒ 不会发布坏镜像。
+
+发布产物实测：amd64 **21.468 MiB**、arm64 **21.280 MiB**（各 12 层），层大小与本地构建、以及
+多次 CI 构建之间**逐层一致**（config 里带时间戳，所以 manifest / index 的 digest 每次构建都会变；
+可复现的是层本身）。两个平台的冒烟都在 CI 的**原生** runner 上通过 —— arm64 在
+`ubuntu-24.04-arm`、amd64 在 `ubuntu-24.04`，输出都是 `服务器版本 18.6 / timescaledb 2.30.0 /
+25 行 / 1 chunk / PASS`。
 
 > 旧方案（单 job 里用 QEMU 同时构建两个平台）已废弃：52m46s 仍未编完，且本机已证明 QEMU
 > 模拟下 postgres 编译会随机段错误。
