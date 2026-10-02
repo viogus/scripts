@@ -1,0 +1,155 @@
+# Alpine 底座 + 精简构建选项版 —— 用来把「换底座」和「改构建选项」的收益分开归因。
+#
+# 与用户现用 ghcr.io/viogus/timescaledb 的差别**只有构建选项**（底座同为 alpine）：
+#   - 去掉 --with-llvm（JIT）与 --with-icu：这两块在用户镜像里合计约 71MB 压缩
+#   - 不再需要 llvm21-libs / icu-libs / icu-data-full 这些运行期 apk
+# 其余流程与上游 Dockerfile 对齐（alpine + 源码编译 postgres + 编译 TimescaleDB）。
+#
+# 注意：不要写 `# syntax=`，构建环境的 docker.io 不可达，拉不到 frontend。
+
+ARG ALPINE_VERSION=3.24
+
+# --------------------------------------------------------- PostgreSQL 18 编译
+FROM alpine:${ALPINE_VERSION} AS pgbuild
+
+ARG PG_VERSION=18.6
+
+RUN <<'SRC'
+set -eu
+
+apk add --no-cache \
+    build-base bison flex pkgconf linux-headers perl \
+    readline-dev zlib-dev openssl-dev lz4-dev zstd-dev \
+    curl xz tar
+
+echo "[postgres] 下载 v${PG_VERSION}"
+curl -fsSL --retry 3 --max-time 900 \
+  -o /tmp/pg.tar.bz2 \
+  "https://ftp.postgresql.org/pub/source/v${PG_VERSION}/postgresql-${PG_VERSION}.tar.bz2"
+
+mkdir -p /usr/src/pg
+tar xjf /tmp/pg.tar.bz2 -C /usr/src/pg --strip-components=1
+rm -f /tmp/pg.tar.bz2
+cd /usr/src/pg
+
+# musl 的默认搜索路径包含 /usr/local/lib，所以这里照旧用 --disable-rpath。
+# PL/Perl、PL/Python、PL/Tcl 显式关掉：用户镜像虽然在构建时开了这三个
+# （pg_config --configure 里有 --with-perl/--with-python/--with-tcl），但运行期
+# 镜像里既没有 libperl.so / libpython3.so / libtcl.so 也没有对应解释器，
+# plperl.so/plpython3.so/pltcl.so 实际加载会失败 ⇒ 精简变体直接不编译。
+./configure \
+  --prefix=/usr/local \
+  --disable-rpath \
+  --with-openssl --with-zlib --with-lz4 --with-zstd --with-readline \
+  --without-llvm --without-icu \
+  --without-perl --without-python --without-tcl \
+  --enable-thread-safety
+
+make -j"$(nproc)" world-bin
+# 一次装进镜像（TimescaleDB 编译要用其中的 pg_config 与 server 头文件）
+make install-world-bin
+# 再装一份到 /out 供最终镜像使用
+make install-world-bin DESTDIR=/out
+SRC
+
+# ------------------------------------------------------------ TimescaleDB 编译
+FROM pgbuild AS tsbuild
+
+ARG TS_VERSION=2.30.0
+
+RUN <<'SRC'
+set -eu
+
+apk add --no-cache cmake ninja
+
+echo "[timescaledb] 下载 ${TS_VERSION}"
+curl -fsSL --retry 3 --max-time 600 \
+  -o /tmp/ts.tar.gz \
+  "https://codeload.github.com/timescale/timescaledb/tar.gz/refs/tags/${TS_VERSION}"
+
+mkdir -p /usr/src/ts
+tar xzf /tmp/ts.tar.gz -C /usr/src/ts --strip-components=1
+rm -f /tmp/ts.tar.gz
+cd /usr/src/ts
+
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPG_CONFIG=/usr/local/bin/pg_config \
+  -DREGRESS_CHECKS=OFF -DTAP_CHECKS=OFF -DWARNINGS_AS_ERRORS=OFF \
+  -DSEND_TELEMETRY_DEFAULT=OFF \
+  -DAPACHE_ONLY=OFF
+
+cmake --build build
+DESTDIR=/out cmake --install build
+
+echo "[timescaledb] 产物:"
+find /out/usr/local/lib/postgresql -name 'timescaledb*'
+SRC
+
+# -------------------------------------------------------------------- 运行镜像
+FROM alpine:${ALPINE_VERSION}
+
+ARG TARGETARCH
+ARG GOSU_VERSION=1.19
+
+RUN <<'SRC'
+set -eu
+
+# postgres 运行期依赖（对比用户镜像少了 llvm21-libs / icu-libs / icu-data-full /
+# libxml2 / krb5-libs / libcurl / libldap / libxslt / liburing）
+apk add --no-cache \
+    libssl3 zlib lz4-libs zstd-libs readline bash ca-certificates \
+    curl
+
+case "${TARGETARCH:-amd64}" in
+  amd64) G=amd64 ;;
+  arm64) G=arm64 ;;
+  *) echo "[gosu] unsupported arch: ${TARGETARCH}" >&2; exit 1 ;;
+esac
+curl -fsSL --retry 3 --max-time 300 \
+  -o /usr/local/bin/gosu \
+  "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-${G}"
+chmod 0755 /usr/local/bin/gosu
+
+apk del curl
+rm -rf /var/cache/apk/*
+SRC
+
+COPY --from=pgbuild /out/usr/local/ /usr/local/
+COPY --from=tsbuild /out/usr/local/ /usr/local/
+
+# postgres 自带 tzdata（没有用 --with-system-tzdata），容器用不到的头文件/静态库删掉
+RUN <<'SRC'
+set -eu
+rm -rf /usr/local/include
+rm -rf /usr/local/lib/postgresql/pgxs
+find /usr/local/lib -name '*.a' -delete
+find /usr/local/lib -name '*.la' -delete
+find /usr/local/share -maxdepth 1 -type d -name doc -exec rm -rf {} +
+rm -rf /usr/local/share/man
+SRC
+
+COPY docker-entrypoint.sh docker-ensure-initdb.sh /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-ensure-initdb.sh
+
+# 与官方 postgres 镜像一致的用户/目录
+RUN <<'SRC'
+set -eu
+printf 'postgres:x:70:70:PostgreSQL server:/var/lib/postgresql:/bin/sh\n' >> /etc/passwd
+printf 'postgres:x:70:\n' >> /etc/group
+mkdir -p /var/lib/postgresql /var/run/postgresql /docker-entrypoint-initdb.d
+chown -R 70:70 /var/lib/postgresql
+chmod 3775 /var/run/postgresql
+chmod 1777 /tmp
+SRC
+
+ENV LANG=en_US.utf8 \
+    PGDATA=/var/lib/postgresql/18/docker
+
+VOLUME /var/lib/postgresql
+
+EXPOSE 5432
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["postgres"]
+STOPSIGNAL SIGINT
