@@ -13,11 +13,17 @@
 #   License 备注：包含 Timescale Community License 部分（自托管免费），Apache-2.0
 #   源码在 apache/、TSL 在 tsl/。
 #
-# 架构：
-#   linux/amd64  CorePure64 16.x（x86_64 通用 rootfs，cpio.gz）
+# 架构支持（TARGETARCH）：
+#   linux/amd64  CorePure64 16.x（x86_64 通用 rootfs，cpio.gz）      ← 必需，CI 构建
 #   linux/arm64  piCore64   16.x（aarch64 只以树莓派整盘镜像分发，rootfs 在
-#                启动分区 FAT32 里的 rootfs-piCore64-<ver>.gz）
-#   其它架构 Tiny Core 没有通用 rootfs，构建时直接报错退出。
+#                启动分区 FAT32 里的 rootfs-piCore64-<ver>.gz）      ← 必需，CI 构建
+#   其它架构构建时报错退出。Tiny Core 16.x 只有 x86_64 / aarch64 / armhf / x86 四种
+#   rootfs，后两种是 32 位，装不下这条技术栈：PostgreSQL 18 与 TimescaleDB 2.30 都是
+#   64 位目标（Timescale 只发 x86_64 与 aarch64 的包；Debian 已把 x86-32 移出发布架构，
+#   PostgreSQL 社区也在讨论放弃 32 位）。
+#   需要 32 位或 riscv64/ppc64le/s390x 等架构时走 musl 路线：
+#     ./build.sh alpine-lean <arch>   （Dockerfile.alpine-lean；能否成功取决于上游
+#                                      PostgreSQL / TimescaleDB 是否支持该架构）
 #
 # 与官方 postgres:18-alpine / 旧版 alpine 镜像的关键差异（体积来源）：
 #   * 底座：Tiny Core 自带 glibc 2.40 与 libstdc++，不需要额外的 glibc 层
@@ -88,8 +94,10 @@ case "${TARGETARCH:-amd64}" in
     mv /tmp/rootfs-*.gz /tmp/rootfs.gz
     ;;
   *)
-    echo "[tinycore] ERROR: 本变体只支持 linux/amd64（CorePure64）与 linux/arm64（piCore64）" >&2
-    echo "[tinycore]        Tiny Core 没有 linux/${TARGETARCH} 的通用 rootfs" >&2
+    echo "[tinycore] ERROR: Tiny Core 底座只支持 linux/amd64 与 linux/arm64，当前 TARGETARCH=${TARGETARCH}" >&2
+    echo "[tinycore]        Tiny Core 16.x 的 rootfs 只有 x86_64 / aarch64 / armhf / x86，" >&2
+    echo "[tinycore]        后两种是 32 位，PostgreSQL 18 + TimescaleDB 2.30 不支持 32 位。" >&2
+    echo "[tinycore]        其它架构请走 musl 路线: ./build.sh alpine-lean ${TARGETARCH}" >&2
     exit 1
     ;;
 esac

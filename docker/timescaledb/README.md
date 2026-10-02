@@ -21,6 +21,26 @@ command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
 > 口径：`docker save` 出的 OCI 归档，压缩 = 各层 blob 实际大小，解压 = 各层 tar 大小，由 `measure-image-size.py` 统计。
 > 实测平台 linux/arm64（amd64 见文末）。两套方案都已跑通冒烟：18.6 + timescaledb 2.30.0 + hypertable + 压缩/连续聚合。
 
+## 架构支持
+
+| 平台 | 状态 | 底座 |
+|---|---|---|
+| `linux/amd64` | ✅ CI 构建并推送 | CorePure64 16.x 通用 rootfs |
+| `linux/arm64` | ✅ CI 构建并推送 | piCore64 16.x（aarch64 只以树莓派整盘镜像分发，rootfs 在启动分区里） |
+| 其它 | ❌ 构建即报错 | Tiny Core 16.x 只有 x86_64 / aarch64 / armhf / x86 四种 rootfs |
+
+Tiny Core 另外两种 rootfs（`armhf`、`x86`）都是 32 位，装不下这条栈：PostgreSQL 18 与
+TimescaleDB 2.30 都以 64 位为目标（Timescale 只发 x86_64 / aarch64 的包；Debian 已把
+x86-32 移出发布架构，PostgreSQL 社区也在讨论放弃 32 位）。需要 32 位、或者
+riscv64/ppc64le/s390x 这类 Tiny Core 没有的架构时，走 musl 路线：
+
+```sh
+./build.sh alpine-lean <arch>    # Dockerfile.alpine-lean；能否成功取决于上游是否支持该架构
+```
+
+CI（`.github/workflows/build-timescaledb.yml`）只构建并推送 amd64 + arm64 的 manifest；
+x86 runner 上的 arm64 走 QEMU 模拟。
+
 ## 关键结论
 
 1. **省下的 96 MiB 里，换底座只占 1.4 MiB**。真正的大头是构建选项：
