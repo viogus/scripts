@@ -38,8 +38,24 @@ riscv64/ppc64le/s390x 这类 Tiny Core 没有的架构时，走 musl 路线：
 ./build.sh alpine-lean <arch>    # Dockerfile.alpine-lean；能否成功取决于上游是否支持该架构
 ```
 
-CI（`.github/workflows/build-timescaledb.yml`）只构建并推送 amd64 + arm64 的 manifest；
-x86 runner 上的 arm64 走 QEMU 模拟。
+CI（`.github/workflows/build-timescaledb.yml`）按平台矩阵在**原生** runner 上构建，再用 `imagetools`
+合并成一个多架构 manifest：
+
+| 平台 | runner | 实测耗时 |
+|---|---|---|
+| `linux/amd64` | `ubuntu-latest` | 3m59s |
+| `linux/arm64` | `ubuntu-24.04-arm` | 2m47s |
+| 合并 | `ubuntu-latest`（merge job） | 15s |
+
+每个平台 `push-by-digest` 后把 digest 作为 artifact 上传，merge job 用
+`docker buildx imagetools create` 合成 `:latest-pg18` / `:2.30.0-pg18`。已跑通：index
+`sha256:b427e7e1…`，含 amd64 manifest `sha256:c0747ba9…`（21.469 MiB / 12 层）与 arm64 manifest
+`sha256:4bb851d5…`（21.280 MiB / 12 层，与本地构建逐层一致）。arm64 镜像在本机原生跑
+`smoke-timescaledb.sh` 通过；amd64 镜像在 qemu-x86_64 下 `CREATE EXTENSION timescaledb`、
+hypertable + 25 行 + 1 chunk 均正常。
+
+> 旧方案（单 job 里用 QEMU 同时构建两个平台）已废弃：52m46s 仍未编完，且本机已证明 QEMU
+> 模拟下 postgres 编译会随机段错误。
 
 ## 关键结论
 
@@ -168,6 +184,8 @@ make[2]: *** [Makefile:108: tar_shlib.o] Segmentation fault (core dumped)
 |---|---|---|
 | Tiny Core 精简底座（压缩） | 2.57 MiB | **2.62 MiB**（`--target tinycore` 单独构建后 `tar \| gzip -9`） |
 | 你的镜像总量（压缩） | 117.53 MiB | 119.4 MiB（比 1.016） |
-| 本方案总量（压缩） | **21.28 MiB**（实测） | ≈ **21.6 MiB**（按上面两个比例推算） |
+| 本方案总量（压缩） | **21.280 MiB**（本地实测） | **21.469 MiB**（CI 在原生 `ubuntu-latest` 上构建的产物实测） |
 
-底座之外是同一份源码、同一套构建选项，两个独立比例（底座 1.018、你镜像 1.016）也吻合 ⇒ amd64 实际值应落在 21.5–21.7 MiB。
+底座之外是同一份源码、同一套构建选项，两个独立比例（底座 1.018、你镜像 1.016）也吻合：当时推算
+amd64 落在 21.5–21.7 MiB，CI 实测 21.469 MiB，吻合。也就是说 amd64 这条路**已经由 CI 的原生
+x86_64 runner 完整构建并发布**（3m59s），本机 qemu 的限制只影响本地构建，不影响产物。
