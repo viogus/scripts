@@ -47,8 +47,10 @@ CI（`.github/workflows/build-timescaledb.yml`）按平台矩阵在**原生** ru
 | `linux/arm64` | `ubuntu-24.04-arm` | 2m47s |
 | 合并 | `ubuntu-latest`（merge job） | 15s |
 
-每个平台 `push-by-digest` 后把 digest 作为 artifact 上传，merge job 用
-`docker buildx imagetools create` 合成 `:latest-pg18` / `:2.30.0-pg18`。已跑通：index
+每个平台 `push-by-digest` 后，**在同一个原生 runner 上把这个 digest 拉回来跑一遍
+`smoke-timescaledb.sh`**（起库 → `CREATE EXTENSION timescaledb` → hypertable → 插查），冒烟通过
+才上传 digest；merge job 用 `docker buildx imagetools create` 合成 `:latest-pg18` /
+`:2.30.0-pg18`。冒烟失败则该平台没有 digest，merge job 拿不到它 ⇒ 不会发布坏镜像。已跑通：index
 `sha256:b427e7e1…`，含 amd64 manifest `sha256:c0747ba9…`（21.469 MiB / 12 层）与 arm64 manifest
 `sha256:4bb851d5…`（21.280 MiB / 12 层，与本地构建逐层一致）。arm64 镜像在本机原生跑
 `smoke-timescaledb.sh` 通过；amd64 镜像在 qemu-x86_64 下 `CREATE EXTENSION timescaledb`、
