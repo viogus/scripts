@@ -58,7 +58,7 @@ login-action@v4、setup-buildx-action@v4、build-push-action@v7）。
 `docker buildx imagetools create` 合成 `:latest-pg18` / `:2.30.0-pg18`。冒烟失败则该平台
 没有 digest，merge job 拿不到它 ⇒ 不会发布坏镜像。
 
-发布产物实测：amd64 **22.229 MiB**、arm64 **22.041 MiB**（各 12 层），层大小与本地构建、以及
+发布产物实测：amd64 **22.229 MiB**、arm64 **22.040 MiB**（各 12 层），层大小与本地构建、以及
 多次 CI 构建之间**逐层一致**（config 里带时间戳，所以 manifest / index 的 digest 每次构建都会变；
 可复现的是层本身）。两个平台的冒烟都在 CI 的**原生** runner 上通过 —— arm64 在
 `ubuntu-24.04-arm`、amd64 在 `ubuntu-24.04`，输出都是 `服务器版本 18.6 / timescaledb 2.30.0 /
@@ -262,7 +262,7 @@ make[2]: *** [Makefile:108: tar_shlib.o] Segmentation fault (core dumped)
 |---|---|---|
 | Tiny Core 精简底座（压缩） | 2.57 MiB | **2.62 MiB**（`--target tinycore` 单独构建后 `tar \| gzip -9`） |
 | 你的镜像总量（压缩） | 117.53 MiB | 119.4 MiB（比 1.016） |
-| 本方案总量（压缩） | **22.041 MiB**（本地实测；CI 产物同值） | **22.229 MiB**（CI 在原生 `ubuntu-24.04` 上构建的产物实测） |
+| 本方案总量（压缩） | **22.04 MiB**（本地 22.041，CI 产物 22.040） | **22.229 MiB**（CI 在原生 `ubuntu-24.04` 上构建的产物实测） |
 
 底座之外是同一份源码、同一套构建选项，两个独立比例（底座 1.018、你镜像 1.016）也吻合：当时推算
 amd64 落在 21.5–21.7 MiB（locale 层补上后为 22.2 MiB 左右），CI 实测 22.229 MiB，吻合。也就是说
