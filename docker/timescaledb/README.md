@@ -44,24 +44,26 @@ CI（`.github/workflows/build-timescaledb.yml`）按平台矩阵在**原生** ru
 
 | 平台 | runner | 实测耗时 |
 |---|---|---|
-| `linux/amd64` | `ubuntu-24.04` | 4m02s |
-| `linux/arm64` | `ubuntu-24.04-arm` | 3m03s |
-| 合并 | `ubuntu-24.04`（merge job） | 22s |
+| `linux/amd64` | `ubuntu-24.04` | 4m19s |
+| `linux/arm64` | `ubuntu-24.04-arm` | 3m13s |
+| 合并 | `ubuntu-24.04`（merge job） | 19s |
 
 两个平台都钉在 24.04 LTS 上（不用 `ubuntu-latest`，免得 label 迁到 Ubuntu 26 后环境漂移）；
 所有 action 都用 node24 的大版本（checkout@v7、upload-artifact@v7、download-artifact@v8、
 login-action@v4、setup-buildx-action@v4、build-push-action@v7）。
 
 每个平台 `push-by-digest` 后，**在同一个原生 runner 上把这个 digest 拉回来跑一遍
-`smoke-timescaledb.sh`**（起库 → `CREATE EXTENSION timescaledb` → hypertable → 插查），冒烟通过
-才上传 digest；merge job 用 `docker buildx imagetools create` 合成 `:latest-pg18` /
-`:2.30.0-pg18`。冒烟失败则该平台没有 digest，merge job 拿不到它 ⇒ 不会发布坏镜像。
+`smoke-timescaledb.sh`**（起库 → `CREATE EXTENSION timescaledb` → hypertable → 插查 →
+`en_US.utf8` 旧数据目录升级回归），冒烟通过才上传 digest；merge job 用
+`docker buildx imagetools create` 合成 `:latest-pg18` / `:2.30.0-pg18`。冒烟失败则该平台
+没有 digest，merge job 拿不到它 ⇒ 不会发布坏镜像。
 
-发布产物实测：amd64 **21.468 MiB**、arm64 **21.280 MiB**（各 12 层），层大小与本地构建、以及
+发布产物实测：amd64 **22.229 MiB**、arm64 **22.041 MiB**（各 12 层），层大小与本地构建、以及
 多次 CI 构建之间**逐层一致**（config 里带时间戳，所以 manifest / index 的 digest 每次构建都会变；
 可复现的是层本身）。两个平台的冒烟都在 CI 的**原生** runner 上通过 —— arm64 在
 `ubuntu-24.04-arm`、amd64 在 `ubuntu-24.04`，输出都是 `服务器版本 18.6 / timescaledb 2.30.0 /
-25 行 / 1 chunk / PASS`。
+25 行 / 1 chunk / locale -a: C POSIX C.utf8 en_US.utf8 / 升级回归后 lc_messages=en_US.utf8 +
+datcollate=en_US.utf8（排序 a,b,c）/ --locale=en_US.UTF-8 的新库 UTF8 / PASS`。
 
 > 旧方案（单 job 里用 QEMU 同时构建两个平台）已废弃：52m46s 仍未编完，且本机已证明 QEMU
 > 模拟下 postgres 编译会随机段错误。
@@ -260,8 +262,9 @@ make[2]: *** [Makefile:108: tar_shlib.o] Segmentation fault (core dumped)
 |---|---|---|
 | Tiny Core 精简底座（压缩） | 2.57 MiB | **2.62 MiB**（`--target tinycore` 单独构建后 `tar \| gzip -9`） |
 | 你的镜像总量（压缩） | 117.53 MiB | 119.4 MiB（比 1.016） |
-| 本方案总量（压缩） | **21.280 MiB**（本地实测） | **21.469 MiB**（CI 在原生 `ubuntu-latest` 上构建的产物实测） |
+| 本方案总量（压缩） | **22.041 MiB**（本地实测；CI 产物同值） | **22.229 MiB**（CI 在原生 `ubuntu-24.04` 上构建的产物实测） |
 
 底座之外是同一份源码、同一套构建选项，两个独立比例（底座 1.018、你镜像 1.016）也吻合：当时推算
-amd64 落在 21.5–21.7 MiB，CI 实测 21.469 MiB，吻合。也就是说 amd64 这条路**已经由 CI 的原生
-x86_64 runner 完整构建并发布**（3m59s），本机 qemu 的限制只影响本地构建，不影响产物。
+amd64 落在 21.5–21.7 MiB（locale 层补上后为 22.2 MiB 左右），CI 实测 22.229 MiB，吻合。也就是说
+amd64 这条路**已经由 CI 的原生 x86_64 runner 完整构建并发布**（4m19s），本机 qemu 的限制只影响
+本地构建，不影响产物。
