@@ -16,10 +16,20 @@ on:
         description: 'Alpine release revision override (e.g. r0). Leave empty to use the latest revision.'
         type: string
         default: ''
+      debug:
+        description: 'Verbose libguestfs tracing (LIBGUESTFS_DEBUG/TRACE)'
+        type: boolean
+        default: false
+
+# Image builds share one monthly tag; never run two of them at once.
+concurrency:
+  group: alpine-cloud-image
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     permissions:
       contents: write
 
@@ -29,7 +39,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y libguestfs-tools qemu-utils
+          sudo apt-get install -y libguestfs-tools qemu-utils qemu-system-x86
 
       - name: Download latest Alpine cloud image
         env:
@@ -40,7 +50,7 @@ jobs:
 
           BASE_URL="https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/cloud"
 
-          # version/revision are derived from latest-stable unless explicitly overridden
+          # version/revision come from latest-stable unless explicitly overridden
           if [ -n "${ALPINE_VERSION_OVERRIDE}" ]; then
             VERSION_RE="${ALPINE_VERSION_OVERRIDE}"
           else
@@ -53,29 +63,74 @@ jobs:
             REV_RE='r[0-9]+'
           fi
 
-          FILE_NAME="$(curl -fsSL "${BASE_URL}/" \
-            | grep -Eo "generic_alpine-${VERSION_RE}-x86_64-uefi-cloudinit-${REV_RE}\.qcow2" \
-            | sort -Vu \
-            | tail -n1)"
+          # Upstream renamed the cloud images with 3.24.2:
+          #   <= 3.24.1: generic_alpine-<ver>-x86_64-uefi-cloudinit-rN.qcow2  (bios/uefi split)
+          #   >= 3.24.2: alpine-<ver>-x86_64-cloudinit-rN.qcow2              (limine, hybrid BIOS+UEFI)
+          # Match both schemes, skip the -metal-/-tiny- variants, and pick the highest
+          # version. The sort key is the extracted version because a plain `sort -V`
+          # ranks "generic_alpine-3.24.1..." above "alpine-3.24.2...".
+          # NB: VERSION_RE/REV_RE are inserted into the name pattern, and REV_RE
+          # already carries its own leading "r" (e.g. r0). The trailing `|| true`
+          # matters: grep exits 1 when nothing matches and pipefail would abort the
+          # step before the "no match" diagnostic below could run.
+          curl -fsSL -o listing.html "${BASE_URL}/"
+          NAME_RE="(generic_)?alpine-${VERSION_RE}-x86_64-([a-z0-9]+-)?cloudinit-${REV_RE}\.qcow2"
 
-          test -n "${FILE_NAME}" || (echo "ERROR: no qcow2 file found" && exit 1)
+          FILE_NAME="$(grep -Eo "${NAME_RE}\"" listing.html \
+            | tr -d '"' \
+            | grep -vE -- '-metal-|-tiny-' \
+            | sort -u \
+            | sed -E 's/.*-([0-9]+\.[0-9]+\.[0-9]+)-x86_64-.*-r([0-9]+)\.qcow2/\1 \2 &/' \
+            | sort -k1,1V -k2,2V \
+            | tail -n1 \
+            | cut -d' ' -f3- || true)"
+
+          case "${FILE_NAME}" in
+            *.qcow2) ;;
+            *)
+              echo "ERROR: no cloud image matched ${NAME_RE}" >&2
+              echo "candidates currently published in ${BASE_URL}:" >&2
+              grep -Eo 'href="[^"]*x86_64[^"]*\.qcow2"' listing.html | sort -u >&2
+              exit 1
+              ;;
+          esac
 
           DOWNLOAD_URL="${BASE_URL}/${FILE_NAME}"
           echo "Image: ${FILE_NAME}"
           echo "URL: ${DOWNLOAD_URL}"
 
+          wget -q --show-progress -O alpine-base.qcow2 "${DOWNLOAD_URL}"
+          wget -q --show-progress -O alpine-base.qcow2.sha512 "${DOWNLOAD_URL}.sha512"
+
+          # upstream publishes a bare hash next to each image (no filename column)
+          EXPECTED_SHA512="$(tr -d '[:space:]' < alpine-base.qcow2.sha512)"
+          ACTUAL_SHA512="$(sha512sum alpine-base.qcow2 | awk '{print $1}')"
+          echo "expected sha512: ${EXPECTED_SHA512}"
+          echo "actual   sha512: ${ACTUAL_SHA512}"
+          if [ "${EXPECTED_SHA512}" != "${ACTUAL_SHA512}" ]; then
+            echo "ERROR: sha512 mismatch for ${FILE_NAME}" >&2
+            exit 1
+          fi
+
           # extract actual Alpine version (e.g. 3.24.1 from generic_alpine-3.24.1-...)
-          ALPINE_REAL_VER="$(echo "${FILE_NAME}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          ALPINE_REAL_VER="$(echo "${FILE_NAME}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+          test -n "${ALPINE_REAL_VER}" || { echo "ERROR: cannot parse a version out of ${FILE_NAME}" >&2; exit 1; }
           ALPINE_REAL_MAJOR="v$(echo "${ALPINE_REAL_VER}" | cut -d. -f1,2)"
           echo "Resolved Alpine: ${ALPINE_REAL_MAJOR} (${ALPINE_REAL_VER})"
 
-          # export resolved versions so later steps and release notes always match the image
+          if [ -n "${ALPINE_VERSION_OVERRIDE}${ALPINE_REV_OVERRIDE}" ]; then
+            ALPINE_SOURCE="pinned"
+          else
+            ALPINE_SOURCE="latest stable"
+          fi
+
+          # export resolved values so later steps and release notes always match the image
           {
+            echo "ALPINE_FILE=${FILE_NAME}"
             echo "ALPINE_VERSION_FULL=${ALPINE_REAL_VER}"
             echo "ALPINE_VERSION_MAJOR=${ALPINE_REAL_MAJOR}"
+            echo "ALPINE_SOURCE=${ALPINE_SOURCE}"
           } >> "$GITHUB_ENV"
-
-          wget -O alpine-base.qcow2 "${DOWNLOAD_URL}"
 
       - name: Validate downloaded image
         run: |
@@ -98,79 +153,392 @@ jobs:
       - name: Resize image to 1G
         run: |
           set -euxo pipefail
+
+          # The published images ship a ~215 MiB virtual disk, so this grows the
+          # disk; the root partition is expanded on first boot (cloud-init
+          # growpart, with the growroot service as fallback).
           sudo qemu-img resize alpine-base.qcow2 1G
           qemu-img info alpine-base.qcow2
 
-      - name: Customize for Alibaba Cloud ECS
+      - name: Prepare guest customization files
         run: |
           set -euxo pipefail
-          export LIBGUESTFS_DEBUG=1
-          export LIBGUESTFS_TRACE=1
+          mkdir -p guest
+
+          cat > guest/chrony.conf <<'EOF'
+          pool ntp.aliyun.com iburst
+          driftfile /var/lib/chrony/drift
+          rtcsync
+          makestep 1.0 3
+          logdir /var/log/chrony
+          EOF
+
+          cat > guest/99-growpart.cfg <<'EOF'
+          # grow the root partition/filesystem to fill the disk on first boot
+          growpart:
+            mode: auto
+            devices: ["/"]
+            ignore_growroot_disabled: false
+          resize_rootfs: true
+          EOF
+
+          cat > guest/99-alicloud.cfg <<'EOF'
+          # never ship SSH host keys baked into the image; regenerate per instance
+          ssh_deletekeys: true
+          ssh_genkeytypes: [ed25519, rsa]
+          EOF
+
+          cat > guest/99-bbr.conf <<'EOF'
+          net.core.default_qdisc = fq
+          net.ipv4.tcp_congestion_control = bbr
+          EOF
+
+          # NB: no net.ipv4.udp_mem override. Pinning it to 32/64/128 MiB caps UDP
+          # memory below the kernel-scaled default on any instance with more than
+          # ~1 GiB RAM, which contradicts the raised udp_rmem_min/udp_wmem_min below.
+          cat > guest/99-universal-net.conf <<'EOF'
+          # universal-optimize: safe network tuning
+          net.core.rmem_default = 4194304
+          net.core.wmem_default = 4194304
+          net.core.optmem_max = 8388608
+          net.core.netdev_max_backlog = 50000
+          net.core.somaxconn = 16384
+          net.ipv4.ip_local_port_range = 10240 65535
+          net.ipv4.udp_rmem_min = 131072
+          net.ipv4.udp_wmem_min = 131072
+          EOF
+
+          # Alpine's default openssh-server is built --without-pam, so
+          # /etc/security/limits.d is ignored for SSH sessions. The PAM flavour
+          # (openssh-server-pam + UsePAM yes) is what makes these limits apply.
+          cat > guest/99-universal.conf <<'EOF'
+          * soft nofile 1048576
+          * hard nofile 1048576
+          * soft nproc unlimited
+          * hard nproc unlimited
+          EOF
+
+          echo tcp_bbr > guest/bbr.modules
+
+          # The modules and sysctl OpenRC services declare no ordering between
+          # them, so re-assert BBR once the boot runlevel is done.
+          cat > guest/bbr.start <<'EOF'
+          #!/bin/sh
+          # Re-assert BBR after boot: modules-load and sysctl have no declared
+          # ordering, so a sysctl write can race the tcp_bbr module load.
+          modprobe tcp_bbr 2>/dev/null || true
+          sysctl -q -w net.core.default_qdisc=fq 2>/dev/null || true
+          sysctl -q -w net.ipv4.tcp_congestion_control=bbr 2>/dev/null || true
+          EOF
+
+          cat > guest/growroot <<'EOF'
+          #!/sbin/openrc-run
+          # Fallback for growing the root partition/filesystem. cloud-init's
+          # growpart module is the primary mechanism; this runs after cloud-final
+          # so the two can never touch the partition table concurrently.
+
+          description="Grow root partition and filesystem to fill the disk"
+
+          depend() {
+          	after cloud-final localmount
+          	before net
+          }
+
+          start() {
+          	local rootdev disk part fstype
+
+          	rootdev="$(awk '$2 == "/" { print $1; exit }' /proc/mounts)"
+          	if [ ! -b "$rootdev" ]; then
+          		ewarn "growroot: cannot determine root device (${rootdev:-none}), skipping"
+          		return 0
+          	fi
+
+          	case "$rootdev" in
+          		/dev/nvme*n*p[0-9]*) disk="${rootdev%p*}"; part="${rootdev##*p}" ;;
+          		/dev/mmcblk*p[0-9]*) disk="${rootdev%p*}"; part="${rootdev##*p}" ;;
+          		/dev/*[0-9])         disk="${rootdev%[0-9]}"; part="${rootdev##*[!0-9]}" ;;
+          		*) ewarn "growroot: unsupported root device $rootdev, skipping"; return 0 ;;
+          	esac
+
+          	if command -v growpart >/dev/null 2>&1; then
+          		ebegin "Growing root partition ${disk} ${part}"
+          		growpart "$disk" "$part" || true
+          		eend 0
+          	else
+          		ewarn "growroot: growpart not found, skipping partition resize"
+          	fi
+
+          	fstype="$(awk '$2 == "/" { print $3; exit }' /proc/mounts)"
+          	case "$fstype" in
+          		ext2|ext3|ext4)
+          			if command -v resize2fs >/dev/null 2>&1; then
+          				ebegin "Growing root filesystem"
+          				resize2fs "$rootdev" >/dev/null 2>&1 || true
+          				eend 0
+          			else
+          				ewarn "growroot: resize2fs not found (install e2fsprogs-extra)"
+          			fi
+          			;;
+          		*) ewarn "growroot: filesystem ${fstype:-unknown} is not grown online, skipping" ;;
+          	esac
+
+          	# best effort only - never block boot on this
+          	return 0
+          }
+          EOF
+
+          cat > guest/patch-cmdline.sh <<'EOF'
+          #!/bin/sh
+          # Append the Alibaba Cloud kernel cmdline options to whichever
+          # bootloader configuration this image uses. Alpine switched firmware
+          # between 3.24.1 and 3.24.2 (syslinux/grub split -> limine), and
+          # virt-customize discards guest stdout, so the outcome is written to a
+          # report that the workflow reads back with virt-cat.
+
+          CMDLINE="net.ifnames=0 console=tty0 console=ttyS0,115200n8"
+          # overridable for offline testing of this script
+          BOOT_DIR="${BOOT_DIR:-/boot}"
+          REPORT="${REPORT:-/var/log/image-build/boot-cmdline.txt}"
+          mkdir -p "$(dirname "$REPORT")"
+
+          {
+          	echo "== bootloader discovery =="
+          	ls -l "$BOOT_DIR" 2>/dev/null
+          	ls -l "$BOOT_DIR/limine" "$BOOT_DIR/limine.cfg" "$BOOT_DIR/limine.conf" "$BOOT_DIR/grub" 2>/dev/null
+          } > "$REPORT"
+
+          found=0
+          patched=0
+
+          for f in "$BOOT_DIR/extlinux.conf" "$BOOT_DIR/limine.cfg" "$BOOT_DIR/limine.conf" \
+          	"$BOOT_DIR/limine/limine.cfg" "$BOOT_DIR/limine/limine.conf" "$BOOT_DIR/grub/grub.cfg"; do
+          	[ -f "$f" ] || continue
+          	found=$((found + 1))
+          	echo "== candidate: $f ==" >> "$REPORT"
+          	cp -f "$f" "$(dirname "$REPORT")/$(basename "$f").orig" 2>/dev/null || true
+
+          	if grep -qE '^[[:space:]]*APPEND[[:space:]]' "$f"; then
+          		sed -i "s/^\([[:space:]]*APPEND[[:space:]].*\)$/\1 ${CMDLINE}/" "$f"
+          		action="APPEND"
+          	elif grep -qE '^[[:space:]]*(KERNEL_)?CMDLINE[[:space:]]*=' "$f"; then
+          		# BRE interval, not the GNU-only \? extension
+          		sed -i "s/^\([[:space:]]*\(KERNEL_\)\{0,1\}CMDLINE[[:space:]]*=.*\)$/\1 ${CMDLINE}/" "$f"
+          		action="CMDLINE"
+          	elif grep -qE '^[[:space:]]*linux[[:space:]]' "$f"; then
+          		sed -i "s/^\([[:space:]]*linux[[:space:]].*\)$/\1 ${CMDLINE}/" "$f"
+          		action="grub linux"
+          	else
+          		action=""
+          	fi
+
+          	# sed exits 0 even when nothing matched, so verify the edit landed
+          	if [ -n "$action" ] && grep -qF -- "$CMDLINE" "$f"; then
+          		patched=$((patched + 1))
+          		echo "action: appended to $action" >> "$REPORT"
+          	else
+          		echo "action: FAILED - no recognised cmdline key, or the edit did not stick" >> "$REPORT"
+          	fi
+
+          	echo "--- $f (post-patch) ---" >> "$REPORT"
+          	cat "$f" >> "$REPORT"
+          done
+
+          echo "candidates=${found} patched=${patched}" >> "$REPORT"
+          exit 0
+          EOF
+
+          cat > guest/verify.sh <<'EOF'
+          #!/bin/sh
+          # Post-build verification. virt-customize discards guest stdout, so every
+          # result goes to /var/log/image-build/verify.txt; the workflow reads it
+          # back and fails the build on any FAIL line.
+
+          REPORT=/var/log/image-build/verify.txt
+          mkdir -p /var/log/image-build
+          : > "$REPORT"
+
+          pass=0
+          fail=0
+
+          ok()  { pass=$((pass + 1)); echo "ok   $1" >> "$REPORT"; }
+          bad() { fail=$((fail + 1)); echo "FAIL $1" >> "$REPORT"; }
+
+          file_exists() { [ -f "$1" ] && ok "file $1" || bad "file $1 missing"; }
+          exec_exists() { [ -x "$1" ] && ok "exec $1" || bad "exec $1 missing or not executable"; }
+          syntax_ok()   { sh -n "$1" 2>/dev/null && ok "syntax $1" || bad "syntax $1"; }
+          runlevel_on() { [ -e "/etc/runlevels/$1/$2" ] && ok "runlevel $1/$2" || bad "runlevel $1/$2 not enabled"; }
+          file_match()  { grep -qE "$2" "$1" 2>/dev/null && ok "$1 ~ $2" || bad "$1 does not match $2"; }
+          file_absent() { ls $1 >/dev/null 2>&1 && bad "unexpected files: $1" || ok "no files matching $1"; }
+
+          echo "== apk repositories ==" >> "$REPORT"
+          file_match /etc/apk/repositories 'mirrors\.aliyun\.com/alpine'
+          file_match /etc/apk/repositories '/alpine/latest-stable'
+          grep -q 'dl-cdn\.alpinelinux\.org' /etc/apk/repositories \
+          	&& bad "/etc/apk/repositories still points at dl-cdn" \
+          	|| ok "/etc/apk/repositories has no dl-cdn entry"
+
+          echo "== base configuration ==" >> "$REPORT"
+          file_match /etc/chrony/chrony.conf 'pool ntp\.aliyun\.com iburst'
+          file_match /etc/cloud/cloud.cfg.d/99-growpart.cfg 'resize_rootfs: true'
+          file_match /etc/cloud/cloud.cfg.d/99-alicloud.cfg 'ssh_deletekeys: true'
+          file_match /etc/sysctl.d/99-bbr.conf 'net\.ipv4\.tcp_congestion_control = bbr'
+          file_match /etc/modules-load.d/bbr.conf '^tcp_bbr$'
+          file_match /etc/sysctl.d/99-universal-net.conf 'net\.core\.somaxconn = 16384'
+          file_match /etc/security/limits.d/99-universal.conf 'nofile 1048576'
+
+          echo "== sshd ==" >> "$REPORT"
+          file_match /etc/ssh/sshd_config '^PermitRootLogin yes'
+          file_match /etc/ssh/sshd_config '^PasswordAuthentication no'
+          file_match /etc/ssh/sshd_config '^KbdInteractiveAuthentication no'
+          file_match /etc/ssh/sshd_config '^UsePAM yes'
+          file_match /etc/ssh/sshd_config '^UseDNS no'
+          file_exists /usr/sbin/sshd.pam
+          file_exists /etc/pam.d/sshd
+          file_match /etc/pam.d/sshd 'pam_limits'
+          ls /usr/lib/security/pam_limits.so /lib/security/pam_limits.so >/dev/null 2>&1 \
+          	&& ok "pam_limits.so present" \
+          	|| bad "pam_limits.so not found"
+
+          echo "== services ==" >> "$REPORT"
+          for s in sshd chronyd cloud-init cloud-init-local cloud-config cloud-final local; do
+          	runlevel_on default "$s"
+          done
+          runlevel_on boot growroot
+          exec_exists /etc/init.d/growroot
+          exec_exists /etc/local.d/bbr.start
+          syntax_ok /etc/init.d/growroot
+          syntax_ok /etc/local.d/bbr.start
+
+          echo "== image hygiene ==" >> "$REPORT"
+          if [ -s /etc/machine-id ]; then bad "machine-id is not empty"; else ok "machine-id is empty"; fi
+          file_absent '/etc/ssh/ssh_host_*'
+          file_absent '/tmp/img-*'
+
+          echo "== boot cmdline ==" >> "$REPORT"
+          if grep -q 'patched=[1-9]' /var/log/image-build/boot-cmdline.txt 2>/dev/null; then
+          	ok "kernel cmdline patched"
+          else
+          	bad "kernel cmdline not patched (see boot-cmdline.txt)"
+          fi
+
+          echo "---- ${pass} ok, ${fail} FAIL ----" >> "$REPORT"
+          exit 0
+          EOF
+
+          chmod 0755 guest/growroot guest/bbr.start guest/patch-cmdline.sh guest/verify.sh
+
+          # fail fast on shell syntax errors before burning an image build
+          for s in guest/growroot guest/bbr.start guest/patch-cmdline.sh guest/verify.sh; do
+            sh -n "$s"
+          done
+
+      - name: Customize for Alibaba Cloud ECS
+        env:
+          LIBGUESTFS_DEBUG: ${{ inputs.debug && '1' || '' }}
+          LIBGUESTFS_TRACE: ${{ inputs.debug && '1' || '' }}
+        run: |
+          set -euxo pipefail
           export LIBGUESTFS_BACKEND=direct
 
+          # Uploads land in /tmp (which always exists) and are moved into place by
+          # the next step. virt-customize documents no ordering between different
+          # option types, so nothing here relies on --upload happening before or
+          # after anything else, nor on target directories already existing.
           sudo virt-customize -a alpine-base.qcow2 \
             --smp 2 \
             --timezone Asia/Hong_Kong \
-            --install sudo,chrony,cloud-init,cloud-utils-growpart \
-            --run-command "mkdir -p /etc/cloud/cloud.cfg.d && printf '%s\n' \
-              'growpart:' \
-              '  mode: auto' \
-              '  devices: [\"/\"]' \
-              '  ignore_growroot_disabled: false' \
-              'resize_rootfs: true' \
-              > /etc/cloud/cloud.cfg.d/99-growpart.cfg" \
-            --run-command "printf '%s\n' \
-              'pool ntp.aliyun.com iburst' \
-              'driftfile /var/lib/chrony/drift' \
-              'rtcsync' \
-              'makestep 1.0 3' \
-              'logdir /var/log/chrony' \
-              > /etc/chrony/chrony.conf" \
+            --install sudo,chrony,cloud-init,cloud-utils-growpart,openssh-server-pam,e2fsprogs-extra \
+            --upload guest/chrony.conf:/tmp/img-chrony.conf \
+            --upload guest/99-growpart.cfg:/tmp/img-99-growpart.cfg \
+            --upload guest/99-alicloud.cfg:/tmp/img-99-alicloud.cfg \
+            --upload guest/99-bbr.conf:/tmp/img-99-bbr.conf \
+            --upload guest/99-universal-net.conf:/tmp/img-99-universal-net.conf \
+            --upload guest/99-universal.conf:/tmp/img-99-universal.conf \
+            --upload guest/bbr.modules:/tmp/img-bbr.modules \
+            --upload guest/bbr.start:/tmp/img-bbr.start \
+            --upload guest/growroot:/tmp/img-growroot \
+            --upload guest/patch-cmdline.sh:/tmp/img-patch-cmdline.sh \
+            --upload guest/verify.sh:/tmp/img-verify.sh \
             --run-command "sed -i 's/#*PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config" \
             --run-command "sed -i 's/#*PasswordAuthentication.*/PasswordAuthentication no/g' /etc/ssh/sshd_config" \
+            --run-command "sed -i 's/#*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/g' /etc/ssh/sshd_config; grep -qE '^KbdInteractiveAuthentication[[:space:]]+no' /etc/ssh/sshd_config || echo 'KbdInteractiveAuthentication no' >> /etc/ssh/sshd_config" \
+            --run-command "sed -i 's/#*UsePAM.*/UsePAM yes/g' /etc/ssh/sshd_config; grep -qE '^UsePAM[[:space:]]+yes' /etc/ssh/sshd_config || echo 'UsePAM yes' >> /etc/ssh/sshd_config" \
+            --run-command "grep -q 'pam_limits' /etc/pam.d/sshd 2>/dev/null || printf '%s\n' 'session required pam_limits.so' >> /etc/pam.d/sshd" \
             --append-line '/etc/ssh/sshd_config:UseDNS no' \
-            --run-command "if [ -f /boot/extlinux.conf ]; then sed -i 's/\(APPEND .*\)/\1 net.ifnames=0 console=tty0 console=ttyS0,115200n8/' /boot/extlinux.conf; else echo 'skip: /boot/extlinux.conf not found'; fi" \
-            --run-command 'mkdir -p /etc/modules-load.d && echo tcp_bbr > /etc/modules-load.d/bbr.conf' \
-            --run-command "printf '%s\n' \
-              'net.core.default_qdisc = fq' \
-              'net.ipv4.tcp_congestion_control = bbr' \
-              > /etc/sysctl.d/99-bbr.conf" \
-            --run-command "printf '%s\n' \
-              '# universal-optimize: safe network tuning' \
-              'net.core.rmem_default = 4194304' \
-              'net.core.wmem_default = 4194304' \
-              'net.core.optmem_max = 8388608' \
-              'net.core.netdev_max_backlog = 50000' \
-              'net.core.somaxconn = 16384' \
-              'net.ipv4.ip_local_port_range = 10240 65535' \
-              'net.ipv4.udp_mem = 8192 16384 32768' \
-              'net.ipv4.udp_rmem_min = 131072' \
-              'net.ipv4.udp_wmem_min = 131072' \
-              > /etc/sysctl.d/99-universal-net.conf" \
-            --run-command "printf '%s\n' \
-              '* soft nofile 1048576' \
-              '* hard nofile 1048576' \
-              '* soft nproc unlimited' \
-              '* hard nproc unlimited' \
-              > /etc/security/limits.d/99-universal.conf" \
+            --run-command 'rm -f /etc/ssh/ssh_host_*' \
+            --run-command 'apk cache clean || true' \
+            --run-command "cp -f /etc/apk/repositories /etc/apk/repositories.bak" \
+            --run-command "sed -Ei 's#https?://dl-cdn\.alpinelinux\.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories && sed -Ei 's#/alpine/v[0-9]+\.[0-9]+#/alpine/latest-stable#g' /etc/apk/repositories" \
+            --run-command 'rm -rf /var/lib/cloud/* /var/cache/apk/* /var/log/*.log || true' \
+            --run-command 'mkdir -p /etc && : > /etc/machine-id'
+
+      - name: Install guest files, enable services and verify
+        env:
+          LIBGUESTFS_DEBUG: ${{ inputs.debug && '1' || '' }}
+          LIBGUESTFS_TRACE: ${{ inputs.debug && '1' || '' }}
+        run: |
+          set -euxo pipefail
+          export LIBGUESTFS_BACKEND=direct
+
+          # A second run, so the uploaded files are guaranteed to be in place.
+          # File placement failures abort loudly; service enabling is best-effort
+          # and its outcome is asserted by verify.sh, which is the gate.
+          sudo virt-customize -a alpine-base.qcow2 \
+            --smp 2 \
+            --run-command 'mkdir -p /etc/chrony /etc/cloud/cloud.cfg.d /etc/modules-load.d /etc/local.d /etc/security/limits.d /etc/sysctl.d /var/log/image-build' \
+            --run-command 'cp -f /tmp/img-chrony.conf /etc/chrony/chrony.conf' \
+            --run-command 'cp -f /tmp/img-99-growpart.cfg /etc/cloud/cloud.cfg.d/99-growpart.cfg' \
+            --run-command 'cp -f /tmp/img-99-alicloud.cfg /etc/cloud/cloud.cfg.d/99-alicloud.cfg' \
+            --run-command 'cp -f /tmp/img-99-bbr.conf /etc/sysctl.d/99-bbr.conf' \
+            --run-command 'cp -f /tmp/img-99-universal-net.conf /etc/sysctl.d/99-universal-net.conf' \
+            --run-command 'cp -f /tmp/img-99-universal.conf /etc/security/limits.d/99-universal.conf' \
+            --run-command 'cp -f /tmp/img-bbr.modules /etc/modules-load.d/bbr.conf' \
+            --run-command 'cp -f /tmp/img-bbr.start /etc/local.d/bbr.start' \
+            --run-command 'cp -f /tmp/img-growroot /etc/init.d/growroot' \
+            --run-command 'cp -f /tmp/img-patch-cmdline.sh /var/log/image-build/patch-cmdline.sh' \
+            --run-command 'cp -f /tmp/img-verify.sh /var/log/image-build/verify.sh' \
+            --run-command 'chmod 0755 /etc/init.d/growroot /etc/local.d/bbr.start /var/log/image-build/patch-cmdline.sh /var/log/image-build/verify.sh' \
+            --run-command 'sh /var/log/image-build/patch-cmdline.sh' \
+            --run-command 'rc-update add local default || true' \
+            --run-command 'rc-update add growroot boot || true' \
             --run-command 'rc-update add chronyd default || true' \
+            --run-command 'rc-update add sshd default || true' \
             --run-command 'rc-update add cloud-init default || true' \
             --run-command 'rc-update add cloud-config default || true' \
             --run-command 'rc-update add cloud-final default || true' \
             --run-command 'rc-update add cloud-init-local default || true' \
-            --run-command 'apk cache clean' \
-            --run-command "cp -f /etc/apk/repositories /etc/apk/repositories.bak" \
-            --run-command "sed -Ei 's#https?://dl-cdn\.alpinelinux\.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories && sed -Ei 's#/alpine/v[0-9]+\.[0-9]+#/alpine/latest-stable#g' /etc/apk/repositories && echo '--- /etc/apk/repositories ---' && cat /etc/apk/repositories" \
-            --delete '/var/log/*.log' \
-            --delete '/var/cache/apk/*' \
-            --run-command 'mkdir -p /etc && : > /etc/machine-id'
+            --run-command 'rm -f /tmp/img-*' \
+            --run-command 'sh /var/log/image-build/verify.sh'
+
+      - name: Collect build reports
+        run: |
+          set -uo pipefail
+
+          for f in boot-cmdline.txt verify.txt; do
+            sudo virt-cat -a alpine-base.qcow2 "/var/log/image-build/${f}" > "${f}" 2>/dev/null || true
+          done
+
+          echo "=== bootloader / kernel cmdline report ==="
+          cat boot-cmdline.txt
+          echo "=== image verification report ==="
+          cat verify.txt
+          echo "=== filesystems ==="
+          sudo virt-filesystems -a alpine-base.qcow2 --all --long -h || true
+
+          if [ ! -s verify.txt ]; then
+            echo "::error::verification report is empty - the in-guest checks did not run"
+            exit 1
+          fi
+          if grep -q '^FAIL' verify.txt; then
+            echo "::error::image verification failed:"
+            grep '^FAIL' verify.txt
+            exit 1
+          fi
 
       - name: Compress image
         run: |
           set -euxo pipefail
           export LIBGUESTFS_BACKEND=direct
-          export LIBGUESTFS_DEBUG=1
-          export LIBGUESTFS_TRACE=1
 
           if sudo virt-sparsify --compress alpine-base.qcow2 alpine-custom.qcow2; then
             echo "virt-sparsify success"
@@ -182,6 +550,65 @@ jobs:
 
           qemu-img info alpine-custom.qcow2
           ls -lh alpine-custom.qcow2
+          sha256sum alpine-custom.qcow2 > alpine-custom.qcow2.sha256
+          cat alpine-custom.qcow2.sha256
+
+      # Advisory only: proves the shipped image boots and that sshd, PAM limits,
+      # BBR and the root-filesystem resize behave on a real boot. Never gates the
+      # release, so a slow/flaky runner cannot block the monthly image.
+      - name: Boot smoke test
+        continue-on-error: true
+        run: |
+          set -uxo pipefail
+
+          if [ ! -e /dev/kvm ]; then
+            echo "::warning::no /dev/kvm on this runner, skipping boot smoke test"
+            exit 0
+          fi
+
+          ssh-keygen -q -t ed25519 -N '' -f smoke_key
+          cp alpine-custom.qcow2 smoke.qcow2
+          # the tested copy gets a throwaway key; the released image stays clean
+          if ! sudo virt-customize -a smoke.qcow2 --ssh-inject "root:file:smoke_key.pub"; then
+            echo "::warning::boot smoke test: could not inject a test key, skipping"
+            exit 0
+          fi
+
+          qemu-system-x86_64 \
+            -machine q35,accel=kvm -cpu host -m 1024 -smp 2 \
+            -drive file=smoke.qcow2,if=virtio,format=qcow2 \
+            -netdev user,id=n0,hostfwd=tcp::2222-:22 \
+            -device virtio-net-pci,netdev=n0 \
+            -display none -monitor none -serial file:boot.log &
+          QEMU_PID=$!
+          trap 'kill "${QEMU_PID}" 2>/dev/null || true' EXIT
+
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes -i smoke_key -p 2222"
+
+          up=0
+          for i in $(seq 1 60); do
+            if ssh ${SSH_OPTS} root@127.0.0.1 true 2>/dev/null; then up=1; break; fi
+            sleep 5
+          done
+          kill "${QEMU_PID}" 2>/dev/null || true
+
+          if [ "${up}" != 1 ]; then
+            echo "::warning::boot smoke test: could not log in within 300s"
+            echo "=== serial console (tail) ==="
+            tail -n 40 boot.log || true
+            exit 0
+          fi
+
+          echo "=== runtime state on the booted image ==="
+          ssh ${SSH_OPTS} root@127.0.0.1 'set -x;
+            uname -r;
+            df -h /;
+            ulimit -n;
+            sysctl net.core.default_qdisc net.ipv4.tcp_congestion_control;
+            ip -brief link;
+            cloud-init status --long 2>&1 | head -5;
+            rc-status default 2>&1 | head -20' 2>&1 | tee runtime-state.txt || true
+          echo "BOOT SMOKE: PASS (login succeeded, runtime state above)"
 
       - name: Upload to GitHub Release
         env:
@@ -189,24 +616,50 @@ jobs:
         run: |
           set -euxo pipefail
 
-          if [ "${{ github.event_name }}" = "push" ]; then
-            TAG_NAME="${{ github.ref_name }}"
-          elif [ "${{ github.event_name }}" = "schedule" ]; then
-            TAG_NAME="monthly-$(date +%Y%m)"
+          # Image releases live in their own tag namespace so they can never
+          # clobber (or be clobbered by) the code releases from release.yml.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG_NAME="alpine-cloud-${GITHUB_REF_NAME}"
+          elif [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            TAG_NAME="alpine-cloud-monthly-$(date -u +%Y%m)"
           else
-            TAG_NAME="manual-$(date +%s)"
+            TAG_NAME="alpine-cloud-manual-$(date -u +%Y%m%dT%H%M%SZ)"
           fi
 
+          IMAGE_SHA256="$(awk '{print $1}' alpine-custom.qcow2.sha256)"
+          IMAGE_SIZE="$(du -h alpine-custom.qcow2 | awk '{print $1}')"
           echo "Release tag: ${TAG_NAME}"
           ls -lh alpine-custom.qcow2
 
-          NOTES="Custom Alpine Linux image optimized for Alibaba Cloud ECS. Based on Alpine ${ALPINE_VERSION_FULL} (latest stable)."
+          NOTES="$(printf '%s\n' \
+            'Custom Alpine Linux image optimized for Alibaba Cloud ECS.' \
+            '' \
+            "- Base image: \`${ALPINE_FILE}\`" \
+            "- Alpine: ${ALPINE_VERSION_FULL} (${ALPINE_SOURCE})" \
+            "- Image: \`alpine-custom.qcow2\` (${IMAGE_SIZE})" \
+            "- SHA256: \`${IMAGE_SHA256}\`" \
+            '' \
+            'Includes cloud-init + growpart, BBR (fq), Aliyun NTP and apk mirror, key-only root SSH, raised nofile/nproc limits.')"
 
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release create "$TAG_NAME" \
+              --target "${GITHUB_SHA}" \
               --title "Custom Alpine Linux Cloud Image ${TAG_NAME}" \
               --notes "$NOTES"
           fi
 
-          gh release upload "$TAG_NAME" alpine-custom.qcow2 --clobber
+          upload_ok=0
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG_NAME" alpine-custom.qcow2 alpine-custom.qcow2.sha256 --clobber; then
+              upload_ok=1
+              break
+            fi
+            echo "upload attempt ${attempt} failed, retrying in 15s" >&2
+            sleep 15
+          done
+          if [ "${upload_ok}" != 1 ]; then
+            echo "ERROR: release upload failed after 3 attempts" >&2
+            exit 1
+          fi
+
           gh release edit "$TAG_NAME" --latest --notes "$NOTES"
