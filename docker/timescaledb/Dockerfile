@@ -34,6 +34,9 @@
 #
 # 已知取舍：无 LLVM JIT、无 ICU 排序规则、无 uuid-ossp（未链 libuuid）、无
 # ldap/gssapi/libcurl 等企业特性；TimescaleDB 2.30.0（含 TSL 闭源扩展）完整。
+# 升级兼容：镜像带 glibc 的 C.utf8 与 en_US.UTF-8 locale 数据（ARG LOCALES 可加更多），
+#   因此旧 Alpine/musl 镜像 initdb 出来的数据目录（conf 里 lc_*= 'en_US.utf8'、
+#   pg_database.datcollate='en_US.utf8'）能直接启动，不需要动数据（详见 README）。
 # 运行时参数：shared_preload_libraries=timescaledb，例如
 #   command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
 #
@@ -244,16 +247,22 @@ FROM debian:${DEBIAN_RELEASE}-slim AS assemble
 ARG TARGETARCH
 ARG GOSU_VERSION=1.19
 ARG PG_SLIM=1
+# 额外编译进镜像的 glibc locale（空格分隔，名字用 <语言>.<编码> 形式）。
+# en_US.UTF-8 是必须的：旧 Alpine/musl 镜像 initdb 出来的数据目录里
+# lc_messages/lc_monetary/lc_numeric/lc_time 都是 'en_US.utf8'，glibc 底座少了这份
+# 数据就起不来。要别的 locale：--build-arg LOCALES="en_US.UTF-8 de_DE.UTF-8"。
+ARG LOCALES="en_US.UTF-8"
 
 # postgres 运行时需要的系统库（glibc 本体由 Tiny Core 提供，绝不能混 Debian 的：
 # loader 与 libc.so.6 必须同源）；bash 是 docker-entrypoint.sh 的解释器；
-# binutils 只为下面 readelf 求依赖闭包用。
+# binutils 只为下面 readelf 求依赖闭包用；locales 提供 localedef 的源数据
+# （只管编译期，不进最终镜像——最终只拷编译好的 /usr/lib/locale/<name>/）。
 RUN <<'SRC'
 set -eu
 apt-get update
 apt-get install -y --no-install-recommends \
     libssl3 zlib1g libzstd1 liblz4-1 libreadline8 libtinfo6 bash \
-    libnss-wrapper \
+    libnss-wrapper locales \
     binutils curl ca-certificates
 rm -rf /var/lib/apt/lists/*
 SRC
@@ -306,12 +315,27 @@ chmod 0755 /rootfs/usr/local/bin/mountpoint
 
 chmod 1777 /rootfs/tmp
 
-# Tiny Core 完全没有 /usr/lib/locale，glibc 就解析不了 C.UTF-8，initdb 直接
-# 报 "invalid locale settings"。Debian 的 libc-bin 自带一份编译好的 C.utf8
-# （392K，实测能被 Tiny Core 的 glibc 2.40 正常加载）⇒ 换来 UTF8 编码 +
-# C.UTF-8 排序规则。Alpine 那边是 musl，不校验 locale，所以不需要这一步。
+# Tiny Core 完全没有 /usr/lib/locale，glibc 就解析不了 locale 名：initdb 直接报
+# "invalid locale settings"；**已经存在的库更严重**——旧镜像（Alpine/musl）不校验
+# locale，initdb 会把 lc_messages/lc_monetary/lc_numeric/lc_time = 'en_US.utf8'
+# 写进 postgresql.conf，换成 glibc 底座后如果没有这份数据，容器会以
+#   LOG: invalid value for parameter "lc_messages": "en_US.utf8"
+#   FATAL: configuration file ".../postgresql.conf" contains errors
+# 反复重启（升级路径断掉）。Debian 的 libc-bin 自带编译好的 C.utf8（392K，实测能
+# 被 Tiny Core 的 glibc 2.40 正常加载），en_US.UTF-8 用 localedef 现编（源数据来自
+# 编译期的 locales 包）。目录名用 Debian 风格的小写编码（en_US.utf8）——glibc 会把
+# en_US.UTF-8 归一化成同一个名字，两种写法都能命中。
 mkdir -p /rootfs/usr/lib/locale
 cp -a /usr/lib/locale/C.utf8 /rootfs/usr/lib/locale/
+for loc in ${LOCALES}; do
+  input="${loc%%.*}"
+  charset="${loc#*.}"
+  norm="$(printf '%s' "$charset" | tr 'A-Z' 'a-z' | tr -d '-')"
+  out="/rootfs/usr/lib/locale/${input}.${norm}"
+  echo "[locale] localedef ${loc} -> ${out}"
+  localedef -c -i "$input" -f "$charset" "$out"
+  [ -f "${out}/LC_CTYPE" ] || { echo "[locale] 生成失败: ${loc}" >&2; exit 1; }
+done
 
 # Tiny Core 的 busybox 没编 getent，而官方 docker-entrypoint.sh 在以「非 root
 # 且 uid 不在 /etc/passwd」运行时要用 `getent passwd <uid>` 判断该 uid 是否存在
@@ -323,13 +347,13 @@ chmod 0755 /rootfs/usr/bin/getent
 
 # Tiny Core 也没有 `locale` 命令，PG 18 的 initdb 在导入系统 collation 时会
 # popen("locale -a") 失败，于是打一行 "no usable system locales were found"。
-# 补一个只支持 -a 的垫片，把真正带进来的 locale 报出来，警告消失、
-# pg_collation 里的条目也与实际可用的 locale 一致。
+# 补一个只支持 -a 的垫片，直接列出 /usr/lib/locale 下实际装了哪些（所以
+# --build-arg LOCALES 加了新 locale 后这里自动跟着变）。
 cat > /rootfs/usr/local/bin/locale <<'EOF'
 #!/bin/sh
-# 兼容 PG 18 initdb 的 `locale -a`（等价于列出 /usr/lib/locale 下可用的 locale）
+# 兼容 PG 18 initdb 的 `locale -a`
 case "${1:-}" in
-  -a|--all-locales) printf 'C\nPOSIX\nC.utf8\n' ;;
+  -a|--all-locales) printf 'C\nPOSIX\n'; ls /usr/lib/locale 2>/dev/null ;;
   *) echo "locale: only -a is supported in this image" >&2; exit 1 ;;
 esac
 EOF
@@ -415,7 +439,9 @@ COPY --from=assemble /rootfs/etc/group /etc/group
 COPY --from=assemble /rootfs/etc/nsswitch.conf /etc/nsswitch.conf
 COPY --from=assemble /rootfs/var/ /var/
 COPY --from=assemble /rootfs/docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/
-# glibc 的 locale 数据（C.utf8），让 LANG=C.UTF-8 真的生效
+# glibc 的 locale 数据（C.utf8 + LOCALES 里编译的那些，默认含 en_US.UTF-8）：
+# 前两者让 LANG=C.UTF-8 生效，en_US.utf8 让旧 Alpine/musl 镜像 initdb 的数据目录
+# （conf 与 pg_database 里写着 en_US.utf8）能直接被 glibc 解析、正常启动
 COPY --from=assemble /rootfs/usr/lib/locale/ /usr/lib/locale/
 # 官方入口脚本在「非 root 用户」路径下要用的 getent
 COPY --from=assemble /rootfs/usr/bin/getent /usr/bin/getent

@@ -16,10 +16,11 @@ command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
 |---|---|---|---|---|---|
 | `ghcr.io/viogus/timescaledb:2.30.0-pg18`（你现在的） | alpine + 全套构建选项 | 11 | **117.53 MiB** | 310.46 MiB | — |
 | `Dockerfile.alpine-lean`（对照） | alpine:3.24 | 8 | **23.52 MiB** | 79.43 MiB | **−80.0%** |
-| `Dockerfile`（Tiny Core） | Tiny Core Linux | 12 | **21.28 MiB** | 70.35 MiB | **−81.9%（约 1/5.5）** |
+| `Dockerfile`（Tiny Core） | Tiny Core Linux | 12 | **22.04 MiB** | 72.83 MiB | **−81.2%（约 1/5.3）** |
 
 > 口径：`docker save` 出的 OCI 归档，压缩 = 各层 blob 实际大小，解压 = 各层 tar 大小，由 `measure-image-size.py` 统计。
-> 实测平台 linux/arm64（amd64 见文末）。两套方案都已跑通冒烟：18.6 + timescaledb 2.30.0 + hypertable + 压缩/连续聚合。
+> 实测平台 linux/arm64（amd64 见文末）。两套方案都已跑通冒烟：18.6 + timescaledb 2.30.0 + hypertable + 压缩/连续聚合，
+> 以及「旧 Alpine/musl 数据目录（`en_US.utf8`）直接启动」的升级回归（见「从旧镜像升级」一节）。
 
 ## 架构支持
 
@@ -112,7 +113,7 @@ login-action@v4、setup-buildx-action@v4、build-push-action@v7）。
 
 两个精简变体逐路径基本一致（`/usr/local/lib/postgresql` 12.97 vs 12.91、`/usr/local/share/postgresql` 22.10 vs 22.12、`/usr/local/bin` 20.25 vs 19.72），**压缩体积差 2.24 MiB 全部来自底座与运行期库的打包方式**：
 alpine-lean = alpine:3.24 底座 3.99 + apk 运行期依赖层 2.23；
-tinycore = Tiny Core 底座 2.57（已含 glibc/libstdc++）+ 补的依赖 so 0.60 + `C.utf8` locale 0.07。
+tinycore = Tiny Core 底座 2.57（已含 glibc/libstdc++）+ 补的依赖 so 0.60 + locale 0.83（`C.utf8` + `en_US.UTF-8`）。
 
 ## 目录内容
 
@@ -121,7 +122,7 @@ docker/timescaledb/
 ├── Dockerfile               # 生产镜像：Tiny Core 底座（amd64=CorePure64 / arm64=piCore64）
 ├── Dockerfile.alpine-lean   # 对照：alpine:3.24 底座 + 同样的精简构建选项
 ├── build.sh                 # ./build.sh tinycore|alpine-lean [amd64 arm64]
-├── smoke-timescaledb.sh     # 起容器 → CREATE EXTENSION → hypertable → 写入查询 → PASS
+├── smoke-timescaledb.sh     # CREATE EXTENSION/hypertable 冒烟 + en_US.utf8 升级回归 + initdb 回归
 ├── measure-image-size.py    # docker save 归档逐层压缩/解压
 ├── measure-composition.sh   # 逐路径表观大小 + 单独打层 gzip 成本
 ├── inspect-image.sh         # 交互式进镜像看内容
@@ -150,7 +151,7 @@ python3 measure-image-size.py /tmp/i.tar
 |---|---|---|---|
 | LLVM JIT | 有 | 无 | 复杂表达式编译加速没了；日常 OLTP/时序写入基本无感 |
 | ICU collation | 有 | 无 | 只能 libc collation；`C.UTF-8`（UTF8 编码，非语言排序） |
-| `en_US.utf8` locale | 有（musl 下实际无排序数据） | 无，用 `C.utf8` | 依赖 `COLLATE "en_US.utf8"` 的库需要重建 |
+| locale 数据 | `en_US.utf8` 等各种名字（musl 下其实没有排序数据） | `C.utf8` + `en_US.UTF-8`（构建期 `localedef` 编好，代价 +0.76 MiB） | 旧 musl 数据目录能直接启动；但排序语义从 musl 的 C 字节序变成真 en_US，换完建议 `REINDEX DATABASE` 一次 |
 | XML / XSLT / LDAP / GSSAPI / libcurl / liburing | 有 | 无 | 用不到就无所谓；`pg_stat_statements` 等 contrib 全在 |
 | PL/Perl、PL/Python、PL/Tcl | .so 在但加载不了 | 无 | 无实际损失 |
 | `uuid-ossp` | 有 | 无（未链 libuuid） | 用 `gen_random_uuid()`（PG 13+ 内置）代替 |
@@ -160,11 +161,78 @@ python3 measure-image-size.py /tmp/i.tar
 | timezone | 系统 tzdata | PG 自带 tzdata（`pg_timezone_names` 598 条） | 正常 |
 | 压缩 | 原样 | 无损 | 同内容 |
 
+## 从旧 Alpine/musl 镜像升级：locale 兼容性
+
+**症状**（旧数据目录 + glibc 底座的小镜像），容器每 2~3 秒重启一次：
+
+```
+LOG:  invalid value for parameter "lc_messages": "en_US.utf8"
+LOG:  invalid value for parameter "lc_monetary": "en_US.utf8"
+LOG:  invalid value for parameter "lc_numeric": "en_US.utf8"
+LOG:  invalid value for parameter "lc_time": "en_US.utf8"
+FATAL:  configuration file "/var/lib/postgresql/18/docker/postgresql.conf" contains errors
+PostgreSQL Database directory appears to contain a database; Skipping initialization
+```
+
+**根因**：旧镜像是 Alpine/musl，而 **musl 不校验 locale 名**（任何 UTF-8 名字都照收），
+initdb 就把 `lc_messages/lc_monetary/lc_numeric/lc_time = 'en_US.utf8'` 以及
+`pg_database.datcollate/datctype = 'en_US.utf8'` 写了进去。glibc 底座只有在
+`/usr/lib/locale/en_US.utf8/` 真的存在时才认这个名字，否则：
+
+- `postgresql.conf` 里那四个 GUC 校验失败 ⇒ **启动**就 FATAL（上面那段日志）；
+- 就算用命令行 GUC 盖掉这四个值，连库时还会在 `setlocale()` 上失败：
+
+  ```
+  FATAL:  database locale is incompatible with operating system
+  DETAIL:  The database was initialized with LC_COLLATE "en_US.utf8",  which is not recognized by setlocale().
+  HINT:  Recreate the database with another locale or install the missing locale.
+  ```
+
+**修复（已落在 Dockerfile 里）**：镜像现在带 `C.utf8` 与 **`en_US.UTF-8`** —— `C.utf8` 直接从
+Debian `libc-bin` 拷，`en_US.UTF-8` 构建期用 `localedef -i en_US -f UTF-8` 现编进
+`/usr/lib/locale/en_US.utf8/`（所以 `en_US.utf8` / `en_US.UTF-8` 两种写法都能命中）。
+因此**由旧镜像 initdb 出来的数据目录不用改任何东西就能起**。要多带别的 locale：
+
+```sh
+docker build -f docker/timescaledb/Dockerfile docker/timescaledb \
+  --build-arg LOCALES="en_US.UTF-8 de_DE.UTF-8" -t timescaledb:tinycore
+```
+
+`/usr/local/bin/locale -a` 垫片直接列 `/usr/lib/locale`，所以加了什么就报什么。代价：locale 层
+从 0.07 MiB 涨到 **0.83 MiB**。
+
+**排序语义变化（要知道）**：musl 时代 `datcollate='en_US.utf8'` 实际按 C 的字节序比较，glibc 下
+是**真的 en_US 排序**。换底座后已有 text 索引建议重建一次：
+
+```sql
+REINDEX DATABASE <db>;
+ALTER DATABASE <db> REFRESH COLLATION VERSION;   -- 若日志提示 collation version mismatch
+```
+
+（musl 写的库不一定记录 collation 版本，所以没警告也建议 `REINDEX` 一次；`datcollate` 是建库时
+定的，想彻底回到 C 语义只能重建库。）
+
+**临时绕过（不换镜像时）**：命令行 `-c` 的优先级高于 `postgresql.conf`，可以盖掉 conf 里的无效值：
+
+```yaml
+command: ["postgres", "-c", "shared_preload_libraries=timescaledb",
+          "-c", "lc_messages=C.UTF-8", "-c", "lc_monetary=C.UTF-8",
+          "-c", "lc_numeric=C.UTF-8", "-c", "lc_time=C.UTF-8"]
+```
+
+实测这样能起来（`SHOW lc_messages` = `C.UTF-8`），但**盖不掉 `pg_database.datcollate`**，
+连接时仍会撞上 `database locale is incompatible with operating system` ⇒ 只够临时救急。
+
+**回归测试**：`smoke-timescaledb.sh` 除基本冒烟外还会
+① 把 conf 的四个 `lc_*` 与 `pg_database.datcollate/datctype` 改成 `en_US.utf8`、重启、再跑一次排序；
+② 用 `POSTGRES_INITDB_ARGS=--locale=en_US.UTF-8` 做一次全新 initdb（必须 UTF8 编码 + en_US.UTF-8）。
+CI 两个平台的冒烟步骤跑的就是它 ⇒ 这个坑不会再回来。
+
 ## 构建期踩坑（都已落在 Dockerfile 里）
 
 - **PG 18 源码构建必须有 perl**（tarball 也不例外），Alpine 要显式 `apk add perl`；Debian 侧由 dpkg-dev 隐式带入。
 - Alpine 包名是 `lz4-libs` / `zstd-libs`（不是 `liblz4` / `libzstd`）。
-- Tiny Core **没有 `/usr/lib/locale`**：glibc 下 `initdb` 报 `invalid locale settings`，`LANG=C` 又会退化成 `SQL_ASCII`。解法是从 Debian `libc-bin` 拷现成的 `/usr/lib/locale/C.utf8`（0.07 MiB）⇒ `LANG=C.UTF-8` + UTF8 编码正常（glibc 2.40 读 2.36 编的 locale 数据没有版本问题）。
+- Tiny Core **没有 `/usr/lib/locale`**：glibc 下 `initdb` 报 `invalid locale settings`，`LANG=C` 又会退化成 `SQL_ASCII`。解法是从 Debian `libc-bin` 拷现成的 `/usr/lib/locale/C.utf8` ⇒ `LANG=C.UTF-8` + UTF8 编码正常（glibc 2.40 读 2.36 编的 locale 数据没有版本问题）；`en_US.UTF-8` 用编译期 `locales` 包 + `localedef` 现编，供旧 musl 数据目录使用（见上）。
 - Tiny Core 没有 `mountpoint` applet，而官方 `docker-entrypoint.sh` 会调它；补 4 行垫片消除告警。
 - 官方入口脚本 shebang 是 `#!/usr/bin/env bash`，Tiny Core 只有 ash ⇒ 必须部署 Debian 的 `/bin/bash`。
 - 依赖闭包用 `readelf -d` 求 `DT_NEEDED`：Tiny Core 自带的 soname 一律跳过（保证 loader 与 libc 同源），缺的按 soname 拷进 `/lib`；同时**不能加 `--disable-rpath`**，否则 `/usr/local/bin` 里的工具找不到 `/usr/local/lib` 的 libpq/libecpg。
