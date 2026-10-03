@@ -8,23 +8,14 @@ on:
     - cron: '53 3 1 * *'
   workflow_dispatch:
     inputs:
-      alpine_version_major:
-        description: 'Alpine major version (e.g. v3.24)'
-        type: string
-        default: 'v3.24'
       alpine_version_full:
-        description: 'Alpine full version (e.g. 3.24.1)'
+        description: 'Alpine full version override (e.g. 3.24.1). Leave empty to use the latest stable release.'
         type: string
-        default: '3.24.1'
+        default: ''
       alpine_release_rev:
-        description: 'Alpine release revision (e.g. r0)'
+        description: 'Alpine release revision override (e.g. r0). Leave empty to use the latest revision.'
         type: string
-        default: 'r0'
-
-env:
-  ALPINE_VERSION_MAJOR: 'v3.24'
-  ALPINE_VERSION_FULL: '3.24.1'
-  ALPINE_RELEASE_REV: 'r0'
+        default: ''
 
 jobs:
   build-and-release:
@@ -35,26 +26,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set version from workflow_dispatch
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          echo "ALPINE_VERSION_MAJOR=${{ inputs.alpine_version_major }}" >> "$GITHUB_ENV"
-          echo "ALPINE_VERSION_FULL=${{ inputs.alpine_version_full }}" >> "$GITHUB_ENV"
-          echo "ALPINE_RELEASE_REV=${{ inputs.alpine_release_rev }}" >> "$GITHUB_ENV"
-
       - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y libguestfs-tools qemu-utils
 
       - name: Download latest Alpine cloud image
+        env:
+          ALPINE_VERSION_OVERRIDE: ${{ inputs.alpine_version_full }}
+          ALPINE_REV_OVERRIDE: ${{ inputs.alpine_release_rev }}
         run: |
           set -euxo pipefail
 
           BASE_URL="https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/cloud"
 
+          # version/revision are derived from latest-stable unless explicitly overridden
+          if [ -n "${ALPINE_VERSION_OVERRIDE}" ]; then
+            VERSION_RE="${ALPINE_VERSION_OVERRIDE}"
+          else
+            VERSION_RE='[0-9]+\.[0-9]+\.[0-9]+'
+          fi
+
+          if [ -n "${ALPINE_REV_OVERRIDE}" ]; then
+            REV_RE="${ALPINE_REV_OVERRIDE}"
+          else
+            REV_RE='r[0-9]+'
+          fi
+
           FILE_NAME="$(curl -fsSL "${BASE_URL}/" \
-            | grep -Eo "generic_alpine-[0-9]+\.[0-9]+\.[0-9]+-x86_64-uefi-cloudinit-r[0-9]+\.qcow2" \
+            | grep -Eo "generic_alpine-${VERSION_RE}-x86_64-uefi-cloudinit-${REV_RE}\.qcow2" \
             | sort -Vu \
             | tail -n1)"
 
@@ -64,9 +64,16 @@ jobs:
           echo "Image: ${FILE_NAME}"
           echo "URL: ${DOWNLOAD_URL}"
 
-          # extract actual Alpine version for release notes (e.g. 3.24.1 from generic_alpine-3.24.1-...)
+          # extract actual Alpine version (e.g. 3.24.1 from generic_alpine-3.24.1-...)
           ALPINE_REAL_VER="$(echo "${FILE_NAME}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-          echo "ALPINE_REAL_VER=${ALPINE_REAL_VER}" >> "$GITHUB_ENV"
+          ALPINE_REAL_MAJOR="v$(echo "${ALPINE_REAL_VER}" | cut -d. -f1,2)"
+          echo "Resolved Alpine: ${ALPINE_REAL_MAJOR} (${ALPINE_REAL_VER})"
+
+          # export resolved versions so later steps and release notes always match the image
+          {
+            echo "ALPINE_VERSION_FULL=${ALPINE_REAL_VER}"
+            echo "ALPINE_VERSION_MAJOR=${ALPINE_REAL_MAJOR}"
+          } >> "$GITHUB_ENV"
 
           wget -O alpine-base.qcow2 "${DOWNLOAD_URL}"
 
@@ -193,7 +200,7 @@ jobs:
           echo "Release tag: ${TAG_NAME}"
           ls -lh alpine-custom.qcow2
 
-          NOTES="Custom Alpine Linux image optimized for Alibaba Cloud ECS. Based on Alpine ${ALPINE_REAL_VER:-${ALPINE_VERSION_FULL}}."
+          NOTES="Custom Alpine Linux image optimized for Alibaba Cloud ECS. Based on Alpine ${ALPINE_VERSION_FULL} (latest stable)."
 
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release create "$TAG_NAME" \
