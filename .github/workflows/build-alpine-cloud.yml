@@ -154,10 +154,19 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # The published images ship a ~215 MiB virtual disk, so this grows the
-          # disk; the root partition is expanded on first boot (cloud-init
-          # growpart, with the growroot service as fallback).
-          sudo qemu-img resize alpine-base.qcow2 1G
+          # The published images ship a small virtual disk (3.24.2: ~265 MiB), so
+          # this normally grows the disk; the root partition is expanded on first
+          # boot by cloud-init's growpart, with the growroot service as fallback.
+          # The guard exists so a future, larger base image can never be shrunk.
+          TARGET_BYTES=1073741824
+          CURRENT_BYTES="$(qemu-img info alpine-base.qcow2 | sed -n 's/.*(\([0-9][0-9]*\) bytes).*/\1/p' | head -n1)"
+          test -n "${CURRENT_BYTES}" || { echo "ERROR: cannot read the virtual size of alpine-base.qcow2" >&2; exit 1; }
+          echo "current virtual size: ${CURRENT_BYTES} bytes, target: ${TARGET_BYTES} bytes"
+          if [ "${CURRENT_BYTES}" -lt "${TARGET_BYTES}" ]; then
+            sudo qemu-img resize alpine-base.qcow2 1G
+          else
+            echo "image is already at least 1G, leaving it alone"
+          fi
           qemu-img info alpine-base.qcow2
 
       - name: Prepare guest customization files
@@ -233,14 +242,17 @@ jobs:
 
           cat > guest/growroot <<'EOF'
           #!/sbin/openrc-run
-          # Fallback for growing the root partition/filesystem. cloud-init's
-          # growpart module is the primary mechanism; this runs after cloud-final
-          # so the two can never touch the partition table concurrently.
+          # Fallback for growing the root partition/filesystem, for the case where
+          # cloud-init's growpart module never runs (broken metadata service,
+          # cloud-init disabled, ...). It lives in the boot runlevel, which OpenRC
+          # completes before starting the default runlevel, so it cannot touch the
+          # partition table at the same time as cloud-init's own growpart; that one
+          # then simply finds nothing left to grow.
 
           description="Grow root partition and filesystem to fill the disk"
 
           depend() {
-          	after cloud-final localmount
+          	after localmount
           	before net
           }
 
@@ -304,14 +316,30 @@ jobs:
           {
           	echo "== bootloader discovery =="
           	ls -l "$BOOT_DIR" 2>/dev/null
-          	ls -l "$BOOT_DIR/limine" "$BOOT_DIR/limine.cfg" "$BOOT_DIR/limine.conf" "$BOOT_DIR/grub" 2>/dev/null
+          	ls -l "$BOOT_DIR"/limine* "$BOOT_DIR"/*.cfg "$BOOT_DIR"/*.conf 2>/dev/null
           } > "$REPORT"
 
           found=0
           patched=0
+          CANDIDATES=/tmp/img-candidates.txt
 
-          for f in "$BOOT_DIR/extlinux.conf" "$BOOT_DIR/limine.cfg" "$BOOT_DIR/limine.conf" \
-          	"$BOOT_DIR/limine/limine.cfg" "$BOOT_DIR/limine/limine.conf" "$BOOT_DIR/grub/grub.cfg"; do
+          # Fixed locations plus everything under the boot directory that looks
+          # like a bootloader config, so a renamed/moved configuration (limine
+          # replaced the syslinux/grub split in Alpine 3.24.2) is still found.
+          {
+          	printf '%s\n' \
+          		"$BOOT_DIR/extlinux.conf" \
+          		"$BOOT_DIR/grub/grub.cfg" \
+          		"$BOOT_DIR/limine.cfg" \
+          		"$BOOT_DIR/limine.conf" \
+          		"$BOOT_DIR/limine/limine.cfg" \
+          		"$BOOT_DIR/limine/limine.conf" \
+          		"$BOOT_DIR/efi/limine.cfg" \
+          		"$BOOT_DIR/efi/limine.conf"
+          	find "$BOOT_DIR" -maxdepth 4 -type f \( -name '*.cfg' -o -name '*.conf' \) 2>/dev/null
+          } | sort -u > "$CANDIDATES"
+
+          while IFS= read -r f; do
           	[ -f "$f" ] || continue
           	found=$((found + 1))
           	echo "== candidate: $f ==" >> "$REPORT"
@@ -341,7 +369,8 @@ jobs:
 
           	echo "--- $f (post-patch) ---" >> "$REPORT"
           	cat "$f" >> "$REPORT"
-          done
+          done < "$CANDIDATES"
+          rm -f "$CANDIDATES"
 
           echo "candidates=${found} patched=${patched}" >> "$REPORT"
           exit 0
@@ -395,9 +424,24 @@ jobs:
           file_exists /usr/sbin/sshd.pam
           file_exists /etc/pam.d/sshd
           file_match /etc/pam.d/sshd 'pam_limits'
-          ls /usr/lib/security/pam_limits.so /lib/security/pam_limits.so >/dev/null 2>&1 \
+          ls /usr/lib/security/pam_limits.so /lib/security/pam_limits.so \
+          	/usr/lib/*/security/pam_limits.so >/dev/null 2>&1 \
           	&& ok "pam_limits.so present" \
           	|| bad "pam_limits.so not found"
+
+          # The PAM sshd must accept the config we wrote; sshd -t needs host keys,
+          # so generate throwaway ones and remove them again (the image must ship
+          # without host keys - asserted in the hygiene section below).
+          if ssh-keygen -A >/dev/null 2>&1 && /usr/sbin/sshd.pam -t >/dev/null 2>&1; then
+          	ok "sshd.pam accepts /etc/ssh/sshd_config"
+          else
+          	bad "sshd.pam rejects /etc/ssh/sshd_config"
+          	{
+          		echo "--- ssh-keygen -A output ---"; ssh-keygen -A 2>&1
+          		echo "--- sshd.pam -t output ---"; /usr/sbin/sshd.pam -t 2>&1
+          	} >> "$REPORT"
+          fi
+          rm -f /etc/ssh/ssh_host_*
 
           echo "== services ==" >> "$REPORT"
           for s in sshd chronyd cloud-init cloud-init-local cloud-config cloud-final local; do
@@ -434,17 +478,18 @@ jobs:
 
       - name: Customize for Alibaba Cloud ECS
         env:
-          LIBGUESTFS_DEBUG: ${{ inputs.debug && '1' || '' }}
-          LIBGUESTFS_TRACE: ${{ inputs.debug && '1' || '' }}
+          VIRT_DEBUG: ${{ inputs.debug && '-v -x' || '' }}
         run: |
           set -euxo pipefail
-          export LIBGUESTFS_BACKEND=direct
 
-          # Uploads land in /tmp (which always exists) and are moved into place by
-          # the next step. virt-customize documents no ordering between different
-          # option types, so nothing here relies on --upload happening before or
-          # after anything else, nor on target directories already existing.
-          sudo virt-customize -a alpine-base.qcow2 \
+          # Only package installation and staging happen here. Uploads land in /tmp
+          # (which always exists) and are moved into place by the next step, because
+          # virt-customize documents no ordering between different option types:
+          # --install may run before or after --upload/--run-command, and --upload
+          # requires its target directory to exist already.
+          # LIBGUESTFS_BACKEND is passed on the sudo command line: sudo resets the
+          # environment, so an exported variable would never reach virt-customize.
+          sudo LIBGUESTFS_BACKEND=direct virt-customize ${VIRT_DEBUG} -a alpine-base.qcow2 \
             --smp 2 \
             --timezone Asia/Hong_Kong \
             --install sudo,chrony,cloud-init,cloud-utils-growpart,openssh-server-pam,e2fsprogs-extra \
@@ -458,32 +503,19 @@ jobs:
             --upload guest/bbr.start:/tmp/img-bbr.start \
             --upload guest/growroot:/tmp/img-growroot \
             --upload guest/patch-cmdline.sh:/tmp/img-patch-cmdline.sh \
-            --upload guest/verify.sh:/tmp/img-verify.sh \
-            --run-command "sed -i 's/#*PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config" \
-            --run-command "sed -i 's/#*PasswordAuthentication.*/PasswordAuthentication no/g' /etc/ssh/sshd_config" \
-            --run-command "sed -i 's/#*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/g' /etc/ssh/sshd_config; grep -qE '^KbdInteractiveAuthentication[[:space:]]+no' /etc/ssh/sshd_config || echo 'KbdInteractiveAuthentication no' >> /etc/ssh/sshd_config" \
-            --run-command "sed -i 's/#*UsePAM.*/UsePAM yes/g' /etc/ssh/sshd_config; grep -qE '^UsePAM[[:space:]]+yes' /etc/ssh/sshd_config || echo 'UsePAM yes' >> /etc/ssh/sshd_config" \
-            --run-command "grep -q 'pam_limits' /etc/pam.d/sshd 2>/dev/null || printf '%s\n' 'session required pam_limits.so' >> /etc/pam.d/sshd" \
-            --append-line '/etc/ssh/sshd_config:UseDNS no' \
-            --run-command 'rm -f /etc/ssh/ssh_host_*' \
-            --run-command 'apk cache clean || true' \
-            --run-command "cp -f /etc/apk/repositories /etc/apk/repositories.bak" \
-            --run-command "sed -Ei 's#https?://dl-cdn\.alpinelinux\.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories && sed -Ei 's#/alpine/v[0-9]+\.[0-9]+#/alpine/latest-stable#g' /etc/apk/repositories" \
-            --run-command 'rm -rf /var/lib/cloud/* /var/cache/apk/* /var/log/*.log || true' \
-            --run-command 'mkdir -p /etc && : > /etc/machine-id'
+            --upload guest/verify.sh:/tmp/img-verify.sh
 
-      - name: Install guest files, enable services and verify
+      - name: Install guest files and configuration
         env:
-          LIBGUESTFS_DEBUG: ${{ inputs.debug && '1' || '' }}
-          LIBGUESTFS_TRACE: ${{ inputs.debug && '1' || '' }}
+          VIRT_DEBUG: ${{ inputs.debug && '-v -x' || '' }}
         run: |
           set -euxo pipefail
-          export LIBGUESTFS_BACKEND=direct
 
-          # A second run, so the uploaded files are guaranteed to be in place.
-          # File placement failures abort loudly; service enabling is best-effort
-          # and its outcome is asserted by verify.sh, which is the gate.
-          sudo virt-customize -a alpine-base.qcow2 \
+          # A separate run, so the packages (and with them /etc/pam.d/sshd and
+          # /etc/chrony) are guaranteed to be installed before anything touches
+          # them: apk refuses to overwrite unmanaged files, so creating
+          # /etc/pam.d/sshd before the package lands would abort the build.
+          sudo LIBGUESTFS_BACKEND=direct virt-customize ${VIRT_DEBUG} -a alpine-base.qcow2 \
             --smp 2 \
             --run-command 'mkdir -p /etc/chrony /etc/cloud/cloud.cfg.d /etc/modules-load.d /etc/local.d /etc/security/limits.d /etc/sysctl.d /var/log/image-build' \
             --run-command 'cp -f /tmp/img-chrony.conf /etc/chrony/chrony.conf' \
@@ -498,6 +530,29 @@ jobs:
             --run-command 'cp -f /tmp/img-patch-cmdline.sh /var/log/image-build/patch-cmdline.sh' \
             --run-command 'cp -f /tmp/img-verify.sh /var/log/image-build/verify.sh' \
             --run-command 'chmod 0755 /etc/init.d/growroot /etc/local.d/bbr.start /var/log/image-build/patch-cmdline.sh /var/log/image-build/verify.sh' \
+            --run-command "sed -i 's/#*PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config" \
+            --run-command "sed -i 's/#*PasswordAuthentication.*/PasswordAuthentication no/g' /etc/ssh/sshd_config" \
+            --run-command "sed -i 's/#*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/g' /etc/ssh/sshd_config; grep -qE '^KbdInteractiveAuthentication[[:space:]]+no' /etc/ssh/sshd_config || echo 'KbdInteractiveAuthentication no' >> /etc/ssh/sshd_config" \
+            --run-command "sed -i 's/#*UsePAM.*/UsePAM yes/g' /etc/ssh/sshd_config; grep -qE '^UsePAM[[:space:]]+yes' /etc/ssh/sshd_config || echo 'UsePAM yes' >> /etc/ssh/sshd_config" \
+            --run-command "grep -q 'pam_limits' /etc/pam.d/sshd 2>/dev/null || printf '%s\n' 'session required pam_limits.so' >> /etc/pam.d/sshd" \
+            --append-line '/etc/ssh/sshd_config:UseDNS no' \
+            --run-command 'rm -f /etc/ssh/ssh_host_*' \
+            --run-command 'apk cache clean || true' \
+            --run-command "cp -f /etc/apk/repositories /etc/apk/repositories.bak" \
+            --run-command "sed -Ei 's#https?://dl-cdn\.alpinelinux\.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories && sed -Ei 's#/alpine/v[0-9]+\.[0-9]+#/alpine/latest-stable#g' /etc/apk/repositories" \
+            --run-command 'rm -rf /var/lib/cloud/* /var/cache/apk/* /var/log/*.log || true' \
+            --run-command 'mkdir -p /etc && : > /etc/machine-id'
+
+      - name: Enable services and verify image
+        env:
+          VIRT_DEBUG: ${{ inputs.debug && '-v -x' || '' }}
+        run: |
+          set -euxo pipefail
+
+          # Service enabling is best-effort; its outcome is asserted by verify.sh,
+          # which is the gate for the whole build.
+          sudo LIBGUESTFS_BACKEND=direct virt-customize ${VIRT_DEBUG} -a alpine-base.qcow2 \
+            --smp 2 \
             --run-command 'sh /var/log/image-build/patch-cmdline.sh' \
             --run-command 'rc-update add local default || true' \
             --run-command 'rc-update add growroot boot || true' \
@@ -538,9 +593,8 @@ jobs:
       - name: Compress image
         run: |
           set -euxo pipefail
-          export LIBGUESTFS_BACKEND=direct
 
-          if sudo virt-sparsify --compress alpine-base.qcow2 alpine-custom.qcow2; then
+          if sudo LIBGUESTFS_BACKEND=direct virt-sparsify --compress alpine-base.qcow2 alpine-custom.qcow2; then
             echo "virt-sparsify success"
           else
             echo "virt-sparsify failed, fallback to qemu-img convert"
@@ -569,7 +623,7 @@ jobs:
           ssh-keygen -q -t ed25519 -N '' -f smoke_key
           cp alpine-custom.qcow2 smoke.qcow2
           # the tested copy gets a throwaway key; the released image stays clean
-          if ! sudo virt-customize -a smoke.qcow2 --ssh-inject "root:file:smoke_key.pub"; then
+          if ! sudo LIBGUESTFS_BACKEND=direct virt-customize -a smoke.qcow2 --ssh-inject "root:file:smoke_key.pub"; then
             echo "::warning::boot smoke test: could not inject a test key, skipping"
             exit 0
           fi
@@ -581,6 +635,8 @@ jobs:
             -device virtio-net-pci,netdev=n0 \
             -display none -monitor none -serial file:boot.log &
           QEMU_PID=$!
+          # one cleanup path for every exit below; the guest stays up until the
+          # probes have actually run
           trap 'kill "${QEMU_PID}" 2>/dev/null || true' EXIT
 
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes -i smoke_key -p 2222"
@@ -590,7 +646,6 @@ jobs:
             if ssh ${SSH_OPTS} root@127.0.0.1 true 2>/dev/null; then up=1; break; fi
             sleep 5
           done
-          kill "${QEMU_PID}" 2>/dev/null || true
 
           if [ "${up}" != 1 ]; then
             echo "::warning::boot smoke test: could not log in within 300s"
@@ -600,15 +655,40 @@ jobs:
           fi
 
           echo "=== runtime state on the booted image ==="
-          ssh ${SSH_OPTS} root@127.0.0.1 'set -x;
-            uname -r;
-            df -h /;
-            ulimit -n;
-            sysctl net.core.default_qdisc net.ipv4.tcp_congestion_control;
-            ip -brief link;
-            cloud-init status --long 2>&1 | head -5;
-            rc-status default 2>&1 | head -20' 2>&1 | tee runtime-state.txt || true
-          echo "BOOT SMOKE: PASS (login succeeded, runtime state above)"
+          if ! ssh ${SSH_OPTS} root@127.0.0.1 '
+            echo "kernel=$(uname -r)"
+            echo "rootfs=$(df -k / | tail -n1)"
+            echo "nofile=$(ulimit -n)"
+            echo "qdisc=$(sysctl -n net.core.default_qdisc 2>&1)"
+            echo "congestion=$(sysctl -n net.ipv4.tcp_congestion_control 2>&1)"
+            echo "links=$(ip -brief link 2>&1 | tr "\n" " ")"
+            echo "cloud_init=$(cloud-init status 2>&1 | head -n1)"
+            echo "rc_default=$(rc-status default 2>&1 | tr "\n" " ")"
+          ' 2>&1 | tee runtime-state.txt; then
+            echo "::warning::boot smoke test: login worked but the runtime probe failed"
+            exit 0
+          fi
+
+          echo "=== smoke verdicts (advisory) ==="
+          grep -q '^congestion=bbr$' runtime-state.txt \
+            && echo "ok   tcp_congestion_control=bbr" \
+            || echo "::warning::smoke: BBR is not active"
+          grep -qE '^nofile=[0-9]{6,}$' runtime-state.txt \
+            && echo "ok   SSH nofile limit applied" \
+            || echo "::warning::smoke: SSH nofile limit not applied"
+          grep -qE '^links=[^;]*eth0' runtime-state.txt \
+            && echo "ok   NIC is named eth0" \
+            || echo "::warning::smoke: NIC is not named eth0"
+          grep -q '^cloud_init=status: done' runtime-state.txt \
+            && echo "ok   cloud-init reported done" \
+            || echo "note cloud-init did not report done (expected without a metadata service)"
+          ROOTFS_KB="$(sed -n 's/^rootfs=[^ ]*[[:space:]]*\([0-9][0-9]*\).*/\1/p' runtime-state.txt | head -n1)"
+          if [ -n "${ROOTFS_KB}" ] && [ "${ROOTFS_KB}" -gt 900000 ]; then
+            echo "ok   root filesystem grew to ${ROOTFS_KB} KiB"
+          else
+            echo "::warning::smoke: root filesystem did not grow (${ROOTFS_KB:-unknown} KiB)"
+          fi
+          echo "BOOT SMOKE: login and probes completed"
 
       - name: Upload to GitHub Release
         env:
