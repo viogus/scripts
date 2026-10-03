@@ -121,3 +121,9 @@ dlopen loader）与 v6（普通 glibc 动态链接）都直接原生运行，Alp
 ## 更新
 
 每周自动抓取最新 v4/v5/v6 版本并重建（`build-snell.yml`，数据源为官方 KB release notes）。v6 标签随 RC 更新滚动；`latest`/`stable` 保持指向 v5，待 v6 正式发布后再迁移。
+
+**已发布的版本标签会被跳过**（`Check if version already built`）：换了底座想让某个已存在的版本重新发布，
+要在 Actions 里手动 `workflow_dispatch` 并填写版本号（如 `5.0.1`，会强制重建，v5 同时更新 `:stable`）。
+
+推完之后有个 `smoke` job：按平台把镜像拉回来跑 `docker/snell/smoke-snell.sh`（amd64/arm64/arm/v7 × v4/v5/v6，
+v6 无 armv7；非本机平台走 QEMU）。
