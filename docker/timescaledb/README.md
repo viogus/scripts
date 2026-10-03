@@ -201,7 +201,8 @@ docker build -f docker/timescaledb/Dockerfile docker/timescaledb \
 ```
 
 `/usr/local/bin/locale -a` 垫片直接列 `/usr/lib/locale`，所以加了什么就报什么。代价：locale 层
-从 0.07 MiB 涨到 **0.83 MiB**。
+从 0.07 MiB 涨到 **0.83 MiB**（整镜像 21.28 → 22.04 MiB）。只做全新部署、不需要兼容旧 musl
+数据目录的话，`--build-arg LOCALES=`（留空）就不编 `en_US.UTF-8`，体积回到 21.28 MiB。
 
 **排序语义变化（要知道）**：musl 时代 `datcollate='en_US.utf8'` 实际按 C 的字节序比较，glibc 下
 是**真的 en_US 排序**。换底座后已有 text 索引建议重建一次：
