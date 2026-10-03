@@ -1,0 +1,137 @@
+#
+# snell-server 以 Alpine 为底座（自带一份 Debian glibc）—— 支持 v4/v5/v6
+#
+#   docker build -f docker/snell/variants/Dockerfile.alpine-glibc docker/snell \
+#     -t snell-server:alpine-glibc
+#
+# 这是"Alpine 底座 snell 镜像"的可行形态：因为官方 snell 是 glibc 二进制
+# （v5 是 static-pie + 运行时 dlopen glibc loader；v6 直接 NEEDED glibc），
+# 所以 Alpine 的 musl 用户态完全用不上，还得再叠一份 glibc。
+# 镜像 = alpine 用户态(冗余) + glibc 整套 + snell。
+
+ARG ALPINE_VERSION=3.20
+ARG DEBIAN_VERSION=stable-slim
+
+# ---------------------------------------------------------------- entrypoint
+FROM alpine:${ALPINE_VERSION} AS entrypoint
+
+ARG SNELL_VERSION=6.0.0rc2
+
+RUN apk add --no-cache gcc musl-dev
+COPY entrypoint.c /tmp/entrypoint.c
+RUN gcc -static -s -O2 -D"SNELL_VERSION=\"${SNELL_VERSION}\"" -o /entrypoint /tmp/entrypoint.c
+
+# ---------------------------------------------------------- glibc (from Debian)
+FROM debian:${DEBIAN_VERSION} AS glibc
+
+ARG TARGETARCH TARGETVARIANT
+
+RUN <<'SRC'
+set -eu
+
+case "${TARGETARCH}" in
+  amd64)
+    GNU_TRIPLET=x86_64-linux-gnu
+    LD_DST=/lib64/ld-linux-x86-64.so.2
+    ;;
+  arm64)
+    GNU_TRIPLET=aarch64-linux-gnu
+    LD_DST=/lib/ld-linux-aarch64.so.1
+    ;;
+  arm)
+    if [ "${TARGETVARIANT}" != "v7" ]; then
+      echo "Unsupported arm variant: ${TARGETVARIANT}" >&2; exit 1
+    fi
+    GNU_TRIPLET=arm-linux-gnueabihf
+    LD_DST=/lib/ld-linux-armhf.so.3
+    ;;
+  *) echo "Unsupported arch: ${TARGETARCH}" >&2; exit 1 ;;
+esac
+
+mkdir -p "/out$(dirname ${LD_DST})" /out/lib
+
+LD_SRC="/lib/${GNU_TRIPLET}/$(basename ${LD_DST})"
+if [ -e "$LD_SRC" ]; then
+  cp -a "$LD_SRC" "/out${LD_DST}"
+else
+  cp -a "$LD_DST" "/out${LD_DST}"
+fi
+echo "[glibc] ld: ${LD_DST}"
+
+LIB_DIR="/lib/${GNU_TRIPLET}"
+USR_LIB_DIR="/usr/lib/${GNU_TRIPLET}"
+
+for lib in \
+  "${LIB_DIR}/libc.so.6" \
+  "${LIB_DIR}/libm.so.6" \
+  "${USR_LIB_DIR}/libstdc++.so.6" \
+  "${LIB_DIR}/libgcc_s.so.1"; do
+  if [ -e "$lib" ]; then
+    cp -L "$lib" /out/lib/
+    echo "[glibc] lib: $lib"
+  fi
+done
+
+# glibc 2.34 起 libdl/libpthread 已并入 libc
+for stub in libdl.so.2 libpthread.so.0; do
+  ln -sf libc.so.6 "/out/lib/${stub}"
+done
+SRC
+
+# --------------------------------------------------------------------- snell
+FROM debian:${DEBIAN_VERSION} AS snell
+
+ARG TARGETARCH
+ARG SNELL_VERSION=6.0.0rc2
+ARG SNELL_BASE_URL=https://dl.nssurge.com/snell
+
+RUN <<'SRC'
+set -eu
+
+case "${TARGETARCH:-amd64}" in
+  amd64) SNELL_ARCH=amd64 ;;
+  arm64) SNELL_ARCH=aarch64 ;;
+  arm)   SNELL_ARCH=armv7l ;;
+  *)     echo "[snell] unsupported arch: ${TARGETARCH}" >&2; exit 1 ;;
+esac
+
+case "${SNELL_VERSION}" in
+  6.*)
+    if [ "${SNELL_ARCH}" = "armv7l" ]; then
+      echo "[snell] ERROR: Snell v6 has no official armv7l build" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+apt-get update
+apt-get install -y --no-install-recommends curl ca-certificates unzip
+
+URL="${SNELL_BASE_URL}/snell-server-v${SNELL_VERSION}-linux-${SNELL_ARCH}.zip"
+echo "[snell] ${URL}"
+curl -fsSL --retry 3 --max-time 300 -o /tmp/snell.zip "$URL"
+
+unzip -q /tmp/snell.zip -d /tmp/snell
+mkdir -p /out/usr/local/bin
+cp /tmp/snell/snell-server /out/usr/local/bin/snell-server
+chmod +x /out/usr/local/bin/snell-server
+rm -rf /tmp/snell /tmp/snell.zip
+SRC
+
+# ------------------------------------------------------------------- runtime
+FROM alpine:${ALPINE_VERSION}
+
+COPY --from=glibc /out/ /
+COPY --from=snell /out/ /
+COPY --from=entrypoint /entrypoint /entrypoint
+
+ENV PORT="" \
+    PSK="" \
+    MODE="default" \
+    DNS_IP_PREFERENCE="default" \
+    IPV6="off" \
+    OBFS="off" \
+    OBFS_HOST="" \
+    CONF="/app/snell-server.conf"
+
+ENTRYPOINT ["/entrypoint"]

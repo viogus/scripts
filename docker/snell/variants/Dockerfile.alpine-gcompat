@@ -1,0 +1,84 @@
+#
+# snell-server 以 Alpine 为底座（gcompat 垫片方案）—— 仅适用于 snell v6
+#
+#   docker build -f docker/snell/variants/Dockerfile.alpine-gcompat docker/snell \
+#     --build-arg SNELL_VERSION=6.0.0rc2 -t snell-server:alpine-gcompat
+#
+# 为什么只能 v6：
+#   gcompat 的 /lib64/ld-linux-x86-64.so.2 只是个垫片，只能处理带 PT_INTERP
+#   的普通动态可执行文件。snell v5 是 static-pie（file 显示 statically
+#   linked、无 PT_INTERP），但运行时又去 dlopen /lib64/ld-linux-x86-64.so.2，
+#   垫片会拒绝：`ld-linux-x86-64.so.2: snell-server: Not a valid dynamic
+#   program`。v5 必须用真 glibc（见 Dockerfile.alpine-glibc）。
+#
+# 这就是 Alpine 底座的尴尬：musl 无法直接跑官方 snell，要么加垫片（只
+# 覆盖 v6），要么再背一份完整 glibc（musl 用户态就成了纯冗余）。
+
+ARG ALPINE_VERSION=3.20
+
+# ---------------------------------------------------------------- entrypoint
+FROM alpine:${ALPINE_VERSION} AS entrypoint
+
+ARG SNELL_VERSION=6.0.0rc2
+
+RUN apk add --no-cache gcc musl-dev
+COPY entrypoint.c /tmp/entrypoint.c
+RUN gcc -static -s -O2 -D"SNELL_VERSION=\"${SNELL_VERSION}\"" -o /entrypoint /tmp/entrypoint.c
+
+# --------------------------------------------------------------------- snell
+FROM alpine:${ALPINE_VERSION} AS snell
+
+ARG TARGETARCH
+ARG SNELL_VERSION=6.0.0rc2
+ARG SNELL_BASE_URL=https://dl.nssurge.com/snell
+
+RUN <<'SRC'
+set -eu
+
+case "${SNELL_VERSION}" in
+  [45].*|[45])
+    echo "[snell] ERROR: 本变体（gcompat）只能跑 snell v6，v4/v5 需要真 glibc" >&2
+    echo "[snell]        请改用 Dockerfile.alpine-glibc 或 Dockerfile.tinycore" >&2
+    exit 1
+    ;;
+esac
+
+case "${TARGETARCH:-amd64}" in
+  amd64) SNELL_ARCH=amd64 ;;
+  arm64) SNELL_ARCH=aarch64 ;;
+  *)     echo "[snell] unsupported arch: ${TARGETARCH}" >&2; exit 1 ;;
+esac
+
+apk add --no-cache curl unzip
+
+URL="${SNELL_BASE_URL}/snell-server-v${SNELL_VERSION}-linux-${SNELL_ARCH}.zip"
+echo "[snell] ${URL}"
+curl -fsSL --retry 3 --max-time 300 -o /tmp/snell.zip "$URL"
+
+unzip -q /tmp/snell.zip -d /tmp/snell
+mkdir -p /out/usr/local/bin
+cp /tmp/snell/snell-server /out/usr/local/bin/snell-server
+chmod +x /out/usr/local/bin/snell-server
+rm -rf /tmp/snell /tmp/snell.zip
+SRC
+
+# ------------------------------------------------------------------- runtime
+FROM alpine:${ALPINE_VERSION}
+
+# gcompat: glibc 符号垫片 + ld-linux 垫片；libstdc++/libgcc 是 snell 的 NEEDED
+# （musl 版即可，由 gcompat 负责符号调和）
+RUN apk add --no-cache gcompat libstdc++ libgcc
+
+COPY --from=snell /out/ /
+COPY --from=entrypoint /entrypoint /entrypoint
+
+ENV PORT="" \
+    PSK="" \
+    MODE="default" \
+    DNS_IP_PREFERENCE="default" \
+    IPV6="off" \
+    OBFS="off" \
+    OBFS_HOST="" \
+    CONF="/app/snell-server.conf"
+
+ENTRYPOINT ["/entrypoint"]

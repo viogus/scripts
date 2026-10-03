@@ -6,6 +6,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* SNELL_VERSION 由 Dockerfile 构建时注入。v4/v5 与 v6 的配置格式不同：
+ * v6 使用 mode / dns-ip-preference，不再支持 obfs。 */
+#ifndef SNELL_VERSION
+#define SNELL_VERSION "0"
+#endif
+
+static int snell_is_v6(void) { return SNELL_VERSION[0] == '6'; }
+
 static const char *env_or(const char *name, const char *fallback) {
   const char *v = getenv(name);
   return v ? v : fallback;
@@ -102,6 +110,10 @@ int main(int argc, char **argv) {
 
     const char *port_str = env_or("PORT", "");
     const char *psk = env_or("PSK", "");
+    const int v6 = snell_is_v6();
+    const char *mode = env_or("MODE", "default");
+    const char *dns_ip_pref = env_or("DNS_IP_PREFERENCE", "default");
+    const char *ipv6_env = env_or("IPV6", "off");
     const char *obfs = env_or("OBFS", "off");
     const char *obfs_host = getenv("OBFS_HOST");
 
@@ -124,6 +136,32 @@ int main(int argc, char **argv) {
       random_psk(psk_buf, 32);
       if (!psk_buf[0]) { perror("/dev/urandom"); return 1; }
       psk = psk_buf;
+    } else if (v6 && strlen(psk) < 16) {
+      fprintf(stderr,
+              "[snell] ERROR: Snell v6 requires PSK of at least 16 "
+              "characters (got %zu)\n",
+              strlen(psk));
+      return 1;
+    }
+
+    if (v6) {
+      /* v6 mode / dns-ip-preference 白名单校验 */
+      if (strcmp(mode, "default") && strcmp(mode, "unshaped") &&
+          strcmp(mode, "unsafe-raw")) {
+        fprintf(stderr,
+                "[snell] WARNING: invalid MODE=%s, falling back to default\n",
+                mode);
+        mode = "default";
+      }
+      if (strcmp(dns_ip_pref, "default") && strcmp(dns_ip_pref, "prefer-ipv4") &&
+          strcmp(dns_ip_pref, "prefer-ipv6") &&
+          strcmp(dns_ip_pref, "ipv4-only") && strcmp(dns_ip_pref, "ipv6-only")) {
+        fprintf(stderr,
+                "[snell] WARNING: invalid DNS_IP_PREFERENCE=%s, falling back "
+                "to default\n",
+                dns_ip_pref);
+        dns_ip_pref = "default";
+      }
     }
 
     /* Ensure parent directory exists */
@@ -147,22 +185,38 @@ int main(int argc, char **argv) {
     FILE *f = fopen(conf_path, "w");
     if (!f) { perror("fopen"); return 1; }
     fprintf(f, "[snell-server]\n");
-    fprintf(f, "listen = 0.0.0.0:%u\n", port);
-    fprintf(f, "psk = %s\n", psk);
-
-    if (strcmp(obfs, "off") != 0) {
-      if (obfs_host) {
-        fprintf(f, "obfs = %s\n", obfs);
-        fprintf(f, "obfs-host = %s\n", obfs_host);
-      } else {
-        fprintf(stderr,
-                "[snell] WARNING: OBFS=%s but OBFS_HOST not set, obfs "
-                "disabled\n",
-                obfs);
+    if (v6) {
+      int ipv6 = !strcmp(ipv6_env, "1") || !strcmp(ipv6_env, "true") ||
+                 !strcmp(ipv6_env, "on") || !strcmp(ipv6_env, "yes");
+      if (ipv6)
+        fprintf(f, "listen = 0.0.0.0:%u,[::]:%u\n", port, port);
+      else
+        fprintf(f, "listen = 0.0.0.0:%u\n", port);
+      fprintf(f, "psk = %s\n", psk);
+      fprintf(f, "mode = %s\n", mode);
+      fprintf(f, "dns-ip-preference = %s\n", dns_ip_pref);
+      fclose(f);
+      fprintf(stderr,
+              "[snell] v6 config: port=%u psk=*** mode=%s "
+              "dns-ip-preference=%s ipv6=%s\n",
+              port, mode, dns_ip_pref, ipv6 ? "true" : "false");
+    } else {
+      fprintf(f, "listen = 0.0.0.0:%u\n", port);
+      fprintf(f, "psk = %s\n", psk);
+      if (strcmp(obfs, "off") != 0) {
+        if (obfs_host) {
+          fprintf(f, "obfs = %s\n", obfs);
+          fprintf(f, "obfs-host = %s\n", obfs_host);
+        } else {
+          fprintf(stderr,
+                  "[snell] WARNING: OBFS=%s but OBFS_HOST not set, obfs "
+                  "disabled\n",
+                  obfs);
+        }
       }
+      fclose(f);
+      fprintf(stderr, "[snell] port=%u psk=*** obfs=%s\n", port, obfs);
     }
-    fclose(f);
-    fprintf(stderr, "[snell] port=%u psk=*** obfs=%s\n", port, obfs);
   }
 
   int inject_c = !has_config_arg(argc - 1, argv + 1);

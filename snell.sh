@@ -3,13 +3,13 @@
 set -euo pipefail
 [[ "${BASH_VERSINFO[0]:-0}" -lt 4 ]] && { echo "需要 Bash 4.0 或更高版本"; exit 1; }
 # 作者: jinqians + viogus
-# 日期: 2025年2月 / 2026年5月
+# 日期: 2025年2月 / 2026年9月
 # 网站：jinqians.com / github.com/viogus
 # 描述: 这个脚本用于安装、卸载、查看和更新 Snell 代理
 # =========================================
 
 #当前版本号
-current_version="4.6"
+current_version="4.7"
 
 # 全局变量：选择的 Snell 版本
 SNELL_VERSION_CHOICE=""
@@ -21,9 +21,10 @@ select_snell_version() {
     echo -e "${CYAN}请选择要安装的 Snell 版本：${RESET}"
     echo -e "${GREEN}1.${RESET} Snell v4"
     echo -e "${GREEN}2.${RESET} Snell v5"
+    echo -e "${GREEN}3.${RESET} Snell v6 ${YELLOW}(当前为 RC/beta，需 Surge 客户端同步支持)${RESET}"
     
     while true; do
-        read -rp "请输入选项 [1-2]: " version_choice
+        read -rp "请输入选项 [1-3]: " version_choice
         case "$version_choice" in
             1)
                 SNELL_VERSION_CHOICE="v4"
@@ -35,11 +36,52 @@ select_snell_version() {
                 echo -e "${GREEN}已选择 Snell v5${RESET}"
                 break
                 ;;
+            3)
+                SNELL_VERSION_CHOICE="v6"
+                echo -e "${GREEN}已选择 Snell v6${RESET}"
+                echo -e "${YELLOW}提示：v6 协议与 v4/v5 不兼容，客户端需声明 version = 6，且 mode 必须与服务器一致${RESET}"
+                break
+                ;;
             *)
-                echo -e "${RED}请输入正确的选项 [1-2]${RESET}"
+                echo -e "${RED}请输入正确的选项 [1-3]${RESET}"
                 ;;
         esac
     done
+}
+
+# Snell v6 传输模式选择（仅 v6 有效，服务端与客户端必须一致）
+select_snell_mode() {
+    echo -e "${CYAN}请选择 Snell v6 传输模式 (mode)：${RESET}"
+    echo -e "${GREEN}1.${RESET} default ${YELLOW}(默认)${RESET} - 流量混淆 + AES 加密"
+    echo -e "${GREEN}2.${RESET} unshaped - 关闭混淆，仅 AES 加密（吞吐约提升 10%，流量呈完全随机）"
+    echo -e "${GREEN}3.${RESET} unsafe-raw - 不加密不混淆，明文传输 ${RED}(仅限可信内网等安全环境!)${RESET}"
+    
+    while true; do
+        read -rp "请输入选项 [1-3] (默认 1): " mode_choice
+        mode_choice=${mode_choice:-1}
+        case "$mode_choice" in
+            1)
+                SNELL_MODE="default"
+                break
+                ;;
+            2)
+                SNELL_MODE="unshaped"
+                break
+                ;;
+            3)
+                SNELL_MODE="unsafe-raw"
+                echo -e "${RED}警告：unsafe-raw 为明文传输，请勿用于公网环境！${RESET}"
+                read -rp "确认使用 unsafe-raw 模式？[y/N]: " raw_confirm
+                if [[ "$raw_confirm" == "y" || "$raw_confirm" == "Y" ]]; then
+                    break
+                fi
+                ;;
+            *)
+                echo -e "${RED}请输入正确的选项 [1-3]${RESET}"
+                ;;
+        esac
+    done
+    echo -e "${GREEN}已选择 mode = ${SNELL_MODE}${RESET}"
 }
 
 # 获取 Snell v4 最新版本
@@ -80,61 +122,73 @@ get_latest_snell_v5_version() {
     fi
 }
 
+# 获取 Snell v6 最新版本
+get_latest_snell_v6_version() {
+    # KB 页面会同时列出多个 v6 构建（如 v6.0.0rc / v6.0.0rc2），需要取版本号最大者
+    local v6_versions latest_version=""
+    v6_versions=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell | grep -oP 'snell-server-v\K6\.[0-9]+\.[0-9]+[a-z0-9]*') || true
+    if [ -z "$v6_versions" ]; then
+        v6_versions=$(curl -s https://kb.nssurge.com/surge-knowledge-base/release-notes/snell | grep -oP 'snell-server-v\K6\.[0-9]+\.[0-9]+[a-z0-9]*') || true
+    fi
+    local v
+    for v in $v6_versions; do
+        if [ -z "$latest_version" ] || ! version_greater_equal "$latest_version" "$v"; then
+            latest_version="$v"
+        fi
+    done
+    if [ -n "$latest_version" ]; then
+        echo "v${latest_version}"
+    else
+        echo -e "${YELLOW}无法获取 Snell v6 最新版本号，使用默认版本: v6.0.0rc2${RESET}" >&2
+        echo "v6.0.0rc2"
+    fi
+}
+
 # 获取 Snell 最新版本（根据选择的版本）
 get_latest_snell_version() {
-    if [ "$SNELL_VERSION_CHOICE" = "v5" ]; then
-        SNELL_VERSION=$(get_latest_snell_v5_version)
-    else
-        SNELL_VERSION=$(get_latest_snell_v4_version)
-    fi
+    case "$SNELL_VERSION_CHOICE" in
+        v5)
+            SNELL_VERSION=$(get_latest_snell_v5_version)
+            ;;
+        v6)
+            SNELL_VERSION=$(get_latest_snell_v6_version)
+            ;;
+        *)
+            SNELL_VERSION=$(get_latest_snell_v4_version)
+            ;;
+    esac
 }
 
 # 获取 Snell 下载 URL
 get_snell_download_url() {
     local version=$1
     local arch=$(uname -m)
-    
-    if [ "$version" = "v5" ]; then
-        # v5 版本自动拼接下载链接
-        case ${arch} in
-            "x86_64"|"amd64")
-                echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-amd64.zip"
-                ;;
-            "i386"|"i686")
-                echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-i386.zip"
-                ;;
-            "aarch64"|"arm64")
-                echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-aarch64.zip"
-                ;;
-            "armv7l"|"armv7")
-                echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-armv7l.zip"
-                ;;
-            *)
-                echo -e "${RED}不支持的架构: ${arch}${RESET}"
+    local dl_arch=""
+
+    case ${arch} in
+        "x86_64"|"amd64")
+            dl_arch="amd64"
+            ;;
+        "i386"|"i686")
+            dl_arch="i386"
+            ;;
+        "aarch64"|"arm64")
+            dl_arch="aarch64"
+            ;;
+        "armv7l"|"armv7")
+            if [ "$version" = "v6" ]; then
+                echo -e "${RED}Snell v6 官方暂未提供 armv7l 二进制，请选择 Snell v4/v5${RESET}"
                 exit 1
-                ;;
-        esac
-    else
-        # v4 版本使用 zip 格式
-        case ${arch} in
-            "x86_64"|"amd64")
-                echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-amd64.zip"
-                ;;
-            "i386"|"i686")
-                echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-i386.zip"
-                ;;
-            "aarch64"|"arm64")
-                echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-aarch64.zip"
-                ;;
-            "armv7l"|"armv7")
-                echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-armv7l.zip"
-                ;;
-            *)
-                echo -e "${RED}不支持的架构: ${arch}${RESET}"
-                exit 1
-                ;;
-        esac
-    fi
+            fi
+            dl_arch="armv7l"
+            ;;
+        *)
+            echo -e "${RED}不支持的架构: ${arch}${RESET}"
+            exit 1
+            ;;
+    esac
+
+    echo "https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-${dl_arch}.zip"
 }
 
 # 生成 Surge 配置格式
@@ -145,8 +199,16 @@ generate_surge_config() {
     local version=$4
     local country=$5
     local installed_version=$6   # 新增参数
+    local mode=$7                # Snell v6 的 mode（可选，需与服务器一致）
 
-    if [ "$installed_version" = "v5" ]; then
+    if [ "$installed_version" = "v6" ]; then
+        # v6 协议与 v4/v5 不兼容，只输出 v6 配置（客户端必须声明 version = 6）
+        if [ -n "$mode" ]; then
+            echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 6, mode = ${mode}, reuse = true, tfo = true${RESET}"
+        else
+            echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 6, reuse = true, tfo = true${RESET}"
+        fi
+    elif [ "$installed_version" = "v5" ]; then
         # v5 服务端向下兼容 v4 客户端，同时输出两种配置
         echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 4, reuse = true, tfo = true${RESET}  ${YELLOW}(v4 向下兼容)${RESET}"
         echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 5, reuse = true, tfo = true${RESET}  ${YELLOW}(v5 当前版本)${RESET}"
@@ -160,8 +222,10 @@ generate_surge_config() {
 detect_installed_snell_version() {
     if command -v snell-server &> /dev/null; then
         local version_output; version_output=$(snell-server --v 2>&1) || true
-        # 匹配 v5 / V5 / version 5 / 5.0.0 等格式，不区分大小写
-        if echo "$version_output" | grep -qiE '(^|[[:space:]/v])5\.'; then
+        # 匹配 v6 / V6 / version 6 / 6.0.0 等格式，不区分大小写
+        if echo "$version_output" | grep -qiE '(^|[[:space:]/v])6\.'; then
+            echo "v6"
+        elif echo "$version_output" | grep -qiE '(^|[[:space:]/v])5\.'; then
             echo "v5"
         else
             echo "v4"
@@ -392,51 +456,60 @@ check_snell_installed() {
     fi
 }
 
-# 比较版本号
+# 比较版本号（v1 >= v2 返回 0，否则返回 1）
+# 支持 v4/v5 的 bN 测试版后缀与 v6 的 rc / rcN 预发布后缀。
+# 语义：无后缀(stable) > rcN > rc > bN；主版本号按数字逐段比较。
 version_greater_equal() {
-    local ver1=$1
-    local ver2=$2
-    
+    local v1=$1
+    local v2=$2
+
     # 移除 'v' 或 'V' 前缀，并转换为小写
-    ver1=$(echo "${ver1#[vV]}" | tr '[:upper:]' '[:lower:]')
-    ver2=$(echo "${ver2#[vV]}" | tr '[:upper:]' '[:lower:]')
-    
-    # 处理 beta 版本号（如 5.0.0b1, 5.0.0b2）
-    # 将 beta 版本转换为可比较的格式
-    ver1=$(echo "$ver1" | sed 's/b\([0-9]*\)/\.999\1/g')
-    ver2=$(echo "$ver2" | sed 's/b\([0-9]*\)/\.999\1/g')
-    
-    # 将版本号分割为数组
-    IFS='.' read -ra VER1 <<< "$ver1"
-    IFS='.' read -ra VER2 <<< "$ver2"
-    
-    # 确保数组长度相等
-    while [ ${#VER1[@]} -lt 4 ]; do
-        VER1+=("0")
-    done
-    while [ ${#VER2[@]} -lt 4 ]; do
-        VER2+=("0")
-    done
-    
-    # 比较版本号
-    for i in {0..3}; do
-        local val1=${VER1[i]:-0}
-        local val2=${VER2[i]:-0}
-        
-        # 如果是数字，直接比较
-        if [[ "$val1" =~ ^[0-9]+$ ]] && [[ "$val2" =~ ^[0-9]+$ ]]; then
-            if [ "$val1" -gt "$val2" ]; then
-                return 0
-            elif [ "$val1" -lt "$val2" ]; then
-                return 1
-            fi
+    v1=$(echo "${v1#[vV]}" | tr '[:upper:]' '[:lower:]')
+    v2=$(echo "${v2#[vV]}" | tr '[:upper:]' '[:lower:]')
+
+    # 编码版本：输出 "主版本数字段(3 段) pre编码(无后缀=999, rcN=50+N, bN=10+N)"
+    encode_version() {
+        local v=$1 base="" suf=""
+        if [[ "$v" =~ ^([0-9]+(\.[0-9]+)*)([a-z][a-z0-9]*)?$ ]]; then
+            base="${BASH_REMATCH[1]}"
+            suf="${BASH_REMATCH[3]}"
         else
-            # 如果是字符串（如 beta 版本），按字典序比较
-            if [[ "$val1" > "$val2" ]]; then
-                return 0
-            elif [[ "$val1" < "$val2" ]]; then
-                return 1
+            base="$v"
+        fi
+        local -a nums=()
+        IFS='.' read -ra nums <<< "$base"
+        local i out=""
+        for i in 0 1 2; do
+            out="${out} ${nums[$i]:-0}"
+        done
+        local pre=999
+        if [ -n "$suf" ]; then
+            if [[ "$suf" =~ ^b([0-9]*)$ ]]; then
+                pre=$(( 10 + ${BASH_REMATCH[1]:-0} ))
+            elif [[ "$suf" =~ ^rc([0-9]*)$ ]]; then
+                local rn=${BASH_REMATCH[1]:-0}
+                [ "$rn" -lt 1 ] && rn=1
+                pre=$(( 50 + rn ))
             fi
+        fi
+        echo "${out} ${pre}"
+    }
+
+    local enc1 enc2
+    enc1=$(encode_version "$v1")
+    enc2=$(encode_version "$v2")
+
+    local -a e1 e2
+    read -ra e1 <<< "$enc1"
+    read -ra e2 <<< "$enc2"
+
+    local i
+    for i in 0 1 2 3; do
+        local n1=${e1[$i]} n2=${e2[$i]}
+        if [ "$n1" -gt "$n2" ]; then
+            return 0
+        elif [ "$n1" -lt "$n2" ]; then
+            return 1
         fi
     done
     return 0
@@ -550,20 +623,45 @@ install_snell() {
     chmod +x ${INSTALL_DIR}/snell-server
 
     get_user_port  # 获取用户输入的端口
-    get_dns # 获取用户输入的 DNS 服务器
-    PSK=$( { tr -dc A-Za-z0-9 </dev/urandom | head -c 80; } || true ); PSK=${PSK:0:20}
+
+    # v6 使用 mode 选项并询问；v4/v5 使用 DNS 服务器配置
+    if [ "$SNELL_VERSION_CHOICE" = "v6" ]; then
+        select_snell_mode
+    else
+        get_dns # 获取用户输入的 DNS 服务器
+    fi
+
+    # 生成随机 PSK：v6 官方建议 32 位；v4/v5 沿用原有 20 位
+    PSK=$( { tr -dc A-Za-z0-9 </dev/urandom | head -c 80; } || true )
+    if [ "$SNELL_VERSION_CHOICE" = "v6" ]; then
+        PSK=${PSK:0:32}
+    else
+        PSK=${PSK:0:20}
+    fi
 
     # 创建用户配置目录
     mkdir -p ${SNELL_CONF_DIR}/users
 
     # 将主用户配置存储在 users 目录下
-    cat > ${SNELL_CONF_FILE} << EOF
+    if [ "$SNELL_VERSION_CHOICE" = "v6" ]; then
+        # v6 配置：新增 mode / dns-ip-preference，不再写入 v4/v5 的 dns 键
+        cat > ${SNELL_CONF_FILE} << EOF
+[snell-server]
+listen = ::0:${PORT}
+psk = ${PSK}
+ipv6 = true
+mode = ${SNELL_MODE}
+dns-ip-preference = default
+EOF
+    else
+        cat > ${SNELL_CONF_FILE} << EOF
 [snell-server]
 listen = ::0:${PORT}
 psk = ${PSK}
 ipv6 = true
 dns = ${DNS}
 EOF
+    fi
 
     if [[ "$(detect_init)" == "openrc" ]]; then
         write_openrc_snell "snell" "${PORT}" "${SNELL_CONF_FILE}"
@@ -613,7 +711,12 @@ ${GREEN}安装完成！以下是您的配置信息：${RESET}"
     echo -e "${YELLOW}监听端口: ${PORT}${RESET}"
     echo -e "${YELLOW}PSK 密钥: ${PSK}${RESET}"
     echo -e "${YELLOW}IPv6: true${RESET}"
-    echo -e "${YELLOW}DNS 服务器: ${DNS}${RESET}"
+    if [ "$SNELL_VERSION_CHOICE" = "v6" ]; then
+        echo -e "${YELLOW}Mode: ${SNELL_MODE}${RESET}"
+        echo -e "${YELLOW}注意: Snell v6 需使用 Surge 客户端，声明 version = 6${RESET}"
+    else
+        echo -e "${YELLOW}DNS 服务器: ${DNS}${RESET}"
+    fi
     echo -e "${CYAN}--------------------------------${RESET}"
 
     # 获取并显示服务器IP地址
@@ -639,11 +742,11 @@ ${GREEN}服务器地址信息：${RESET}"
 ${GREEN}Surge 配置格式：${RESET}"
     local installed_version=$(detect_installed_snell_version)
     if [ ! -z "$IPV4_ADDR" ]; then
-        generate_surge_config "$IPV4_ADDR" "$PORT" "$PSK" "$SNELL_VERSION_CHOICE" "$IP_COUNTRY_IPV4" "$installed_version"
+        generate_surge_config "$IPV4_ADDR" "$PORT" "$PSK" "$SNELL_VERSION_CHOICE" "$IP_COUNTRY_IPV4" "$installed_version" "$SNELL_MODE"
     fi
     
     if [ ! -z "$IPV6_ADDR" ]; then
-        generate_surge_config "$IPV6_ADDR" "$PORT" "$PSK" "$SNELL_VERSION_CHOICE" "$IP_COUNTRY_IPV6" "$installed_version"
+        generate_surge_config "$IPV6_ADDR" "$PORT" "$PSK" "$SNELL_VERSION_CHOICE" "$IP_COUNTRY_IPV6" "$installed_version" "$SNELL_MODE"
     fi
 
 
@@ -1025,19 +1128,21 @@ ${GREEN}主用户配置：${RESET}"
         local main_psk=$(grep -E '^psk' "$main_conf" | awk -F'=' '{print $2}' | tr -d ' ')
         local main_ipv6=$(grep -E '^ipv6' "$main_conf" | awk -F'=' '{print $2}' | tr -d ' ')
         local main_dns=$(grep -E '^dns' "$main_conf" | awk -F'=' '{print $2}' | tr -d ' ')
+        local main_mode=$(grep -E '^mode' "$main_conf" | awk -F'=' '{print $2}' | tr -d ' ')
         
         echo -e "${YELLOW}端口: ${main_port}${RESET}"
         echo -e "${YELLOW}PSK: ${main_psk}${RESET}"
         echo -e "${YELLOW}IPv6: ${main_ipv6}${RESET}"
-        echo -e "${YELLOW}DNS: ${main_dns}${RESET}"
+        [ -n "$main_dns" ] && echo -e "${YELLOW}DNS: ${main_dns}${RESET}"
+        [ -n "$main_mode" ] && echo -e "${YELLOW}Mode: ${main_mode}${RESET}"
         
         echo -e "
 ${GREEN}Surge 配置格式：${RESET}"
         if [ ! -z "$IPV4_ADDR" ]; then
-            generate_surge_config "$IPV4_ADDR" "$main_port" "$main_psk" "$installed_version" "$IP_COUNTRY_IPV4" "$installed_version"
+            generate_surge_config "$IPV4_ADDR" "$main_port" "$main_psk" "$installed_version" "$IP_COUNTRY_IPV4" "$installed_version" "$main_mode"
         fi
         if [ ! -z "$IPV6_ADDR" ]; then
-            generate_surge_config "$IPV6_ADDR" "$main_port" "$main_psk" "$installed_version" "$IP_COUNTRY_IPV6" "$installed_version"
+            generate_surge_config "$IPV6_ADDR" "$main_port" "$main_psk" "$installed_version" "$IP_COUNTRY_IPV6" "$installed_version" "$main_mode"
         fi
     fi
     
@@ -1049,20 +1154,22 @@ ${GREEN}Surge 配置格式：${RESET}"
                 local user_psk=$(grep -E '^psk' "$user_conf" | awk -F'=' '{print $2}' | tr -d ' ')
                 local user_ipv6=$(grep -E '^ipv6' "$user_conf" | awk -F'=' '{print $2}' | tr -d ' ')
                 local user_dns=$(grep -E '^dns' "$user_conf" | awk -F'=' '{print $2}' | tr -d ' ')
+                local user_mode=$(grep -E '^mode' "$user_conf" | awk -F'=' '{print $2}' | tr -d ' ')
                 
                 echo -e "
 ${GREEN}用户配置 (端口: ${user_port}):${RESET}"
                 echo -e "${YELLOW}PSK: ${user_psk}${RESET}"
                 echo -e "${YELLOW}IPv6: ${user_ipv6}${RESET}"
-                echo -e "${YELLOW}DNS: ${user_dns}${RESET}"
+                [ -n "$user_dns" ] && echo -e "${YELLOW}DNS: ${user_dns}${RESET}"
+                [ -n "$user_mode" ] && echo -e "${YELLOW}Mode: ${user_mode}${RESET}"
                 
                 echo -e "
 ${GREEN}Surge 配置格式：${RESET}"
                 if [ ! -z "$IPV4_ADDR" ]; then
-                    generate_surge_config "$IPV4_ADDR" "$user_port" "$user_psk" "$installed_version" "$IP_COUNTRY_IPV4" "$installed_version"
+                    generate_surge_config "$IPV4_ADDR" "$user_port" "$user_psk" "$installed_version" "$IP_COUNTRY_IPV4" "$installed_version" "$user_mode"
                 fi
                 if [ ! -z "$IPV6_ADDR" ]; then
-                    generate_surge_config "$IPV6_ADDR" "$user_port" "$user_psk" "$installed_version" "$IP_COUNTRY_IPV6" "$installed_version"
+                    generate_surge_config "$IPV6_ADDR" "$user_port" "$user_psk" "$installed_version" "$IP_COUNTRY_IPV6" "$installed_version" "$user_mode"
                 fi
             fi
         done
@@ -1081,12 +1188,15 @@ ${YELLOW}=== ShadowTLS 组合配置 ===${RESET}"
             local stls_password=$(echo "$exec_line" | sed -n 's/.*--password \([^ ]*\).*/\1/p')
             local stls_domain=$(echo "$exec_line" | sed -n 's/.*--tls \([^ ]*\).*/\1/p')
             local snell_port=$(echo "$exec_line" | sed -n 's/.*--server 127.0.0.1:\([0-9]*\).*/\1/p')
-            # 查找 psk
+            # 查找 psk 与 mode（v6 配置含 mode 键）
             local psk=""
+            local stls_mode=""
             if [ -f "${SNELL_CONF_DIR}/users/snell-${snell_port}.conf" ]; then
                 psk=$(grep -E '^psk' "${SNELL_CONF_DIR}/users/snell-${snell_port}.conf" | awk -F'=' '{print $2}' | tr -d ' ')
+                stls_mode=$(grep -E '^mode' "${SNELL_CONF_DIR}/users/snell-${snell_port}.conf" | awk -F'=' '{print $2}' | tr -d ' ')
             elif [ -f "${SNELL_CONF_DIR}/users/snell-main.conf" ] && [ "$snell_port" = "$(get_snell_port)" ]; then
                 psk=$(grep -E '^psk' "${SNELL_CONF_DIR}/users/snell-main.conf" | awk -F'=' '{print $2}' | tr -d ' ')
+                stls_mode=$(grep -E '^mode' "${SNELL_CONF_DIR}/users/snell-main.conf" | awk -F'=' '{print $2}' | tr -d ' ')
             fi
             # 避免重复
             if [ -z "$snell_port" ] || [ -z "$psk" ] || [ -n "${processed_ports[$snell_port]}" ]; then
@@ -1109,7 +1219,13 @@ ${GREEN}用户 ShadowTLS 配置 (端口: ${snell_port})：${RESET}"
             echo -e "
 ${GREEN}Surge 配置格式：${RESET}"
             if [ ! -z "$IPV4_ADDR" ]; then
-                if [ "$snell_version" = "v5" ]; then
+                if [ "$snell_version" = "v6" ]; then
+                    if [ -n "$stls_mode" ]; then
+                        echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 6, mode = ${stls_mode}, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
+                    else
+                        echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 6, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
+                    fi
+                elif [ "$snell_version" = "v5" ]; then
                     echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}  ${YELLOW}(v4 向下兼容)${RESET}"
                     echo -e "${GREEN}${IP_COUNTRY_IPV4} = snell, ${IPV4_ADDR}, ${stls_port}, psk = ${psk}, version = 5, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}  ${YELLOW}(v5 当前版本)${RESET}"
                 else
@@ -1117,7 +1233,13 @@ ${GREEN}Surge 配置格式：${RESET}"
                 fi
             fi
             if [ ! -z "$IPV6_ADDR" ]; then
-                if [ "$snell_version" = "v5" ]; then
+                if [ "$snell_version" = "v6" ]; then
+                    if [ -n "$stls_mode" ]; then
+                        echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 6, mode = ${stls_mode}, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
+                    else
+                        echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 6, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}"
+                    fi
+                elif [ "$snell_version" = "v5" ]; then
                     echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 4, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}  ${YELLOW}(v4 向下兼容)${RESET}"
                     echo -e "${GREEN}${IP_COUNTRY_IPV6} = snell, ${IPV6_ADDR}, ${stls_port}, psk = ${psk}, version = 5, reuse = true, tfo = true, shadow-tls-password = ${stls_password}, shadow-tls-sni = ${stls_domain}, shadow-tls-version = 3${RESET}  ${YELLOW}(v5 当前版本)${RESET}"
                 else
@@ -1139,7 +1261,14 @@ get_current_snell_version() {
     # 检测当前安装的 Snell 版本
     local current_installed_version=$(detect_installed_snell_version)
     
-    if [ "$current_installed_version" = "v5" ]; then
+    if [ "$current_installed_version" = "v6" ]; then
+        # v6 版本获取完整版本号（可能带 rc/beta 后缀，如 v6.0.0rc2）
+        CURRENT_VERSION=$(snell-server --v 2>&1 | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*')
+        if [ -z "$CURRENT_VERSION" ]; then
+            # 如果无法获取，使用默认的 v6 版本
+            CURRENT_VERSION="v6.0.0rc2"
+        fi
+    elif [ "$current_installed_version" = "v5" ]; then
         # v5 版本获取完整版本号
         CURRENT_VERSION=$(snell-server --v 2>&1 | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*')
         if [ -z "$CURRENT_VERSION" ]; then
@@ -1154,6 +1283,69 @@ get_current_snell_version() {
             exit 1
         fi
     fi
+}
+
+# 跨版本升级到 Snell v6（v4/v5 → v6，会重写主配置为 v6 格式）
+upgrade_to_v6() {
+    echo -e "${CYAN}=============== 跨版本升级到 Snell v6 ===============${RESET}"
+    echo -e "${YELLOW}注意事项：${RESET}"
+    echo -e "1. Snell v6 目前仍为 RC/beta，协议与 v4/v5 不兼容"
+    echo -e "2. 客户端(如 Surge)需同步升级并声明 version = 6，mode 与服务器一致"
+    echo -e "3. v6 配置格式有变化（移除 dns 键、新增 mode），将基于原端口与 PSK 重写主配置"
+
+    # 多用户配置检查（v6 配置格式不同，多用户配置不会被自动迁移）
+    local extra_count=0 f
+    if [ -d "${SNELL_CONF_DIR}/users" ]; then
+        for f in "${SNELL_CONF_DIR}/users"/snell-*.conf; do
+            if [ -f "$f" ] && [[ "$f" != *"snell-main.conf" ]]; then
+                extra_count=$((extra_count + 1))
+            fi
+        done
+    fi
+    if [ "$extra_count" -gt 0 ]; then
+        echo -e "${RED}检测到 ${extra_count} 个多用户配置。它们不会被自动迁移到 v6 格式，升级后对应服务可能无法启动。${RESET}"
+        echo -e "${YELLOW}建议先通过「多用户管理」重建，或升级后手动删除/转换旧的多用户配置。${RESET}"
+        read -rp "仍要继续升级主用户到 v6 吗？[y/N]: " extra_confirm
+        if [[ "$extra_confirm" != "y" && "$extra_confirm" != "Y" ]]; then
+            echo -e "${CYAN}已取消升级${RESET}"
+            return 0
+        fi
+    fi
+
+    # 读取主配置中的端口与 PSK
+    local port psk
+    port=$(get_snell_port)
+    psk=$(grep -E '^psk' "${SNELL_CONF_FILE}" | awk -F'=' '{print $2}' | tr -d ' ')
+    if [ -z "$port" ] || [ -z "$psk" ]; then
+        echo -e "${RED}无法从主配置读取端口/PSK，中止升级。${RESET}"
+        return 1
+    fi
+
+    # 备份原配置
+    local backup_dir
+    backup_dir=$(backup_snell_config)
+    echo -e "${GREEN}原配置已备份到: ${backup_dir}${RESET}"
+
+    # 设置 v6 并询问 mode
+    SNELL_VERSION_CHOICE="v6"
+    select_snell_mode
+
+    # 重写主配置为 v6 格式
+    cat > ${SNELL_CONF_FILE} << EOF
+[snell-server]
+listen = ::0:${port}
+psk = ${psk}
+ipv6 = true
+mode = ${SNELL_MODE}
+dns-ip-preference = default
+EOF
+    chown nobody:nogroup "${SNELL_CONF_FILE}" 2>/dev/null || true
+    chmod 644 "${SNELL_CONF_FILE}" 2>/dev/null || true
+    echo -e "${GREEN}主配置已迁移到 Snell v6 格式 (mode = ${SNELL_MODE})${RESET}"
+    echo -e "${YELLOW}端口与 PSK 保持不变。${RESET}"
+
+    # 下载最新 v6 二进制并重启服务（update_snell_binary 内部会再次备份）
+    update_snell_binary
 }
 
 # 检查 Snell 更新
@@ -1172,16 +1364,16 @@ ${CYAN}=============== 检查 Snell 更新 ===============${RESET}"
     
     # 根据当前版本确定更新策略
     if [ "$current_installed_version" = "v4" ]; then
-        # v4 用户：询问是否升级到 v5
+        # v4 用户：询问升级到 v5 / v6，或继续使用 v4
         echo -e "
-${CYAN}检测到您当前使用的是 Snell v4，是否要升级到 v5？${RESET}"
-        echo -e "${YELLOW}注意：v5 为测试版本，可能存在兼容性问题${RESET}"
+${CYAN}检测到您当前使用的是 Snell v4：${RESET}"
         echo -e "${GREEN}1.${RESET} 升级到 Snell v5"
-        echo -e "${GREEN}2.${RESET} 继续使用 Snell v4（检查 v4 更新）"
-        echo -e "${GREEN}3.${RESET} 取消更新"
+        echo -e "${GREEN}2.${RESET} 跨版本升级到 Snell v6 ${YELLOW}(RC/beta，会重写主配置)${RESET}"
+        echo -e "${GREEN}3.${RESET} 继续使用 Snell v4（检查 v4 更新）"
+        echo -e "${GREEN}4.${RESET} 取消更新"
         
         while true; do
-            read -rp "请选择 [1-3]: " upgrade_choice
+            read -rp "请选择 [1-4]: " upgrade_choice
             case "$upgrade_choice" in
                 1)
                     SNELL_VERSION_CHOICE="v5"
@@ -1189,9 +1381,42 @@ ${CYAN}检测到您当前使用的是 Snell v4，是否要升级到 v5？${RESET
                     break
                     ;;
                 2)
+                    upgrade_to_v6
+                    return $?
+                    ;;
+                3)
                     SNELL_VERSION_CHOICE="v4"
                     echo -e "${GREEN}已选择继续使用 Snell v4${RESET}"
                     break
+                    ;;
+                4)
+                    echo -e "${CYAN}已取消更新${RESET}"
+                    return 0
+                    ;;
+                *)
+                    echo -e "${RED}请输入正确的选项 [1-4]${RESET}"
+                    ;;
+            esac
+        done
+    elif [ "$current_installed_version" = "v5" ]; then
+        # v5 用户：询问检查 v5 更新或跨升 v6
+        echo -e "
+${CYAN}检测到您当前使用的是 Snell v5：${RESET}"
+        echo -e "${GREEN}1.${RESET} 检查 Snell v5 更新"
+        echo -e "${GREEN}2.${RESET} 跨版本升级到 Snell v6 ${YELLOW}(RC/beta，会重写主配置)${RESET}"
+        echo -e "${GREEN}3.${RESET} 取消更新"
+        
+        while true; do
+            read -rp "请选择 [1-3]: " upgrade_choice
+            case "$upgrade_choice" in
+                1)
+                    SNELL_VERSION_CHOICE="v5"
+                    echo -e "${GREEN}已选择检查 Snell v5 更新${RESET}"
+                    break
+                    ;;
+                2)
+                    upgrade_to_v6
+                    return $?
                     ;;
                 3)
                     echo -e "${CYAN}已取消更新${RESET}"
@@ -1203,9 +1428,9 @@ ${CYAN}检测到您当前使用的是 Snell v4，是否要升级到 v5？${RESET
             esac
         done
     else
-        # v5 用户：直接检查 v5 更新，无需用户选择
-        SNELL_VERSION_CHOICE="v5"
-        echo -e "${GREEN}当前为 Snell v5，将检查 v5 更新${RESET}"
+        # v6 用户：直接检查 v6 更新（v6 目前为 RC/beta，正式版发布后仍可在此升级）
+        SNELL_VERSION_CHOICE="v6"
+        echo -e "${GREEN}当前为 Snell v6，将检查 v6 更新${RESET}"
     fi
     
     # 获取最新版本信息

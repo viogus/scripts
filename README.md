@@ -31,7 +31,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/viogus/scripts/main/hysteria
 | `hysteria2.sh` | Hysteria 2 | 随机/UDP | QUIC |
 | `anytls.sh` | AnyTLS | 随机 | TCP + TLS |
 | `shadowtls.sh` | ShadowTLS V3 | 随机 | TCP + TLS 伪装 |
-| `snell.sh` | Snell v4/v5 | 随机 | TCP |
+| `snell.sh` | Snell v4/v5/v6 | 随机 | TCP |
 | `ss-2022.sh` | Shadowsocks 2022 | 随机 | TCP+UDP |
 
 ### 功能
@@ -118,18 +118,19 @@ services:
 
 ### snell-server
 
-`ghcr.io/viogus/snell-server` — env 变量和挂载配置均支持。
+`ghcr.io/viogus/snell-server` — env 变量和挂载配置均支持。构建时注入 `SNELL_VERSION`，`latest`/`v5` 为 v5 稳定主线，`:v6` 提供最新 Snell v6（RC/beta，无 armv7l）。
 
 ```yaml
-# env 变量方式
+# env 变量方式（v6 示例）
 services:
   snell-server:
-    image: ghcr.io/viogus/snell-server:latest
+    image: ghcr.io/viogus/snell-server:v6
     restart: unless-stopped
     network_mode: host
     environment:
       - PORT=9102
-      - PSK=your_psk
+      - PSK=your_psk_at_least_16_chars   # v6 要求 ≥16 字符
+      - MODE=default                     # default / unshaped / unsafe-raw
 ```
 
 ```yaml
@@ -143,11 +144,14 @@ services:
       - ./snell-server.conf:/app/snell-server.conf
 ```
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `PORT` | 随机 1025-65535 | 监听端口 |
-| `PSK` | 随机 32 位 | 预共享密钥 |
-| `OBFS` | `off` | 混淆模式 |
+| 变量 | 默认值 | 适用 | 说明 |
+|------|--------|------|------|
+| `PORT` | 随机 1025-65535 | v4/v5/v6 | 监听端口 |
+| `PSK` | 随机 32 位 | v4/v5/v6 | 预共享密钥（v6 要求 ≥16 字符） |
+| `MODE` | `default` | v6 | `default` / `unshaped` / `unsafe-raw` |
+| `DNS_IP_PREFERENCE` | `default` | v6 | `prefer-ipv4` / `prefer-ipv6` / `ipv4-only` / `ipv6-only` 等 |
+| `IPV6` | `off` | v6 | `on` 时双栈监听 |
+| `OBFS` | `off` | v4/v5 | `off` / `http` / `tls` |
 
 ### opensnell-server
 

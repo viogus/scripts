@@ -1,5 +1,10 @@
 name: Build & Push Snell Docker Image
 
+# 镜像底座是 Tiny Core Linux 16.x + musl 静态 entrypoint（见 docker/snell/Dockerfile）：
+# amd64 用 CorePure64，arm64 / armv7 从 piCore 树莓派整盘镜像里取 rootfs，因此
+# amd64/arm64/armv7 三种平台都能构建（v6 官方没有 armv7l，矩阵里去掉）。
+# 构建矩阵用 QEMU 跑非本机平台；推完之后由 smoke job 按平台把镜像拉回来跑冒烟。
+
 on:
   push:
     branches:
@@ -12,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       snell_version:
-        description: 'Snell version (e.g. 5.0.1)'
+        description: 'Snell version (e.g. 6.0.0rc2)'
         required: false
         default: ''
         type: string
@@ -22,7 +27,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -33,18 +38,19 @@ jobs:
         major:
           - 4
           - 5
+          - 6
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -67,19 +73,31 @@ jobs:
             VER="$INPUT_VER"
             FORCE=true
           else
-            P="snell-server-v${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*"
-            VER=$(curl -s https://manual.nssurge.com/others/snell.html \
-              | sed -nE "s/.*($P).*/\1/p" \
-              | sed -nE "s/.*(${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*).*/\1/p" \
-              | grep -v b | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1) || true
+            # 官方 release notes（manual.nssurge.com 旧页已失效）
+            VER=$(curl -s https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell \
+              | grep -oE "snell-server-v${MAJOR}\.[0-9]+\.[0-9]+[a-z0-9]*" \
+              | sed -E "s/^snell-server-v//" \
+              | grep -vE 'b[0-9]' \
+              | sort -V | tail -1) || true
             if [ -z "$VER" ]; then
-              echo "[snell] WARNING: scrape failed, using fallback ${MAJOR}.0.1" >&2
-              VER="${MAJOR}.0.1"
+              case "$MAJOR" in
+                4) VER="4.1.1" ;;
+                5) VER="5.0.1" ;;
+                6) VER="6.0.0rc2" ;;
+              esac
+              echo "[snell] WARNING: scrape failed, using fallback ${VER}" >&2
             fi
+          fi
+          # Snell v6 官方无 armv7l，只有 amd64 / aarch64（另有 i386，未打 multi-arch）
+          if [ "$MAJOR" = "6" ]; then
+            PLATFORMS="linux/amd64,linux/arm64"
+          else
+            PLATFORMS="linux/amd64,linux/arm64,linux/arm/v7"
           fi
           echo "snell_version=$VER" >> $GITHUB_OUTPUT
           echo "major=$MAJOR" >> $GITHUB_OUTPUT
           echo "force=$FORCE" >> $GITHUB_OUTPUT
+          echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
 
       - name: Check if version already built
         if: steps.version.outputs.skip != 'true'
@@ -108,11 +126,12 @@ jobs:
           MAJOR="${{ steps.version.outputs.major }}"
 
           TAGS="${IMG}:v${V},${IMG}:v${MAJOR}"
-          # bump MAJOR when v6+ becomes latest
+          # v5 目前是稳定主线：latest / stable 指向 v5。
+          # v6 仍为 RC/beta（协议与 v5 不兼容、无 armv7l），只推 v6 / vX 精确标签；
+          # v6 正式发布后再把 latest 迁移到 v6。
           if [ "$MAJOR" = "5" ]; then
             TAGS="${TAGS},${IMG}:latest"
           fi
-          # v5 manual dispatch with explicit version → mark as stable
           if [ "$MAJOR" = "5" ] && [ "${{ steps.version.outputs.force }}" = "true" ]; then
             TAGS="${TAGS},${IMG}:stable"
           fi
@@ -120,10 +139,10 @@ jobs:
 
       - name: Build and push
         if: steps.version.outputs.skip != 'true' && steps.check.outputs.skip != 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: docker/snell
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: ${{ steps.version.outputs.platforms }}
           build-args: |
             SNELL_VERSION=${{ steps.version.outputs.snell_version }}
           labels: |
@@ -132,3 +151,46 @@ jobs:
           tags: ${{ steps.tags.outputs.list }}
           push: true
           provenance: false
+
+  # 把刚推上去（或已存在的）多架构镜像按平台拉回来跑冒烟：entrypoint 生成配置、
+  # snell 真的监听、宿主 TCP 可连、底座用户态可用。arm64 / armv7 走 QEMU。
+  smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        major:
+          - 4
+          - 5
+          - 6
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+        exclude:
+          # Snell v6 官方无 armv7l
+          - major: 6
+            platform: linux/arm/v7
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke test v${{ matrix.major }} on ${{ matrix.platform }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          sh docker/snell/smoke-snell.sh \
+            "${REGISTRY}/${{ github.repository_owner }}/snell-server:v${{ matrix.major }}"
