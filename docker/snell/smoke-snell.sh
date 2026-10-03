@@ -50,11 +50,14 @@ done
 echo "[smoke] 版本行: $(docker logs "$NAME" 2>&1 | grep -m1 'snell-server v' || echo '(无)')"
 echo "[smoke] 监听行: $(docker logs "$NAME" 2>&1 | grep -m1 'Start snell server on' || echo '(无)')"
 
-# 配置文件确实由 entrypoint 生成
-CONF=$(docker exec "$NAME" cat /app/snell-server.conf 2>/dev/null) || fail "读不到 /app/snell-server.conf"
-echo "$CONF" | grep -q "listen = 0.0.0.0:${PORT}" || fail "配置里的 listen 不对: ${CONF}"
-echo "$CONF" | grep -q "psk = ${PSK}" || fail "配置里的 psk 不对"
-echo "[smoke] 配置: $(echo "$CONF" | tr '\n' ' ')"
+# 配置文件确实由 entrypoint 生成（scratch 类镜像没有用户态，跳过这项）
+if CONF=$(docker exec "$NAME" cat /app/snell-server.conf 2>/dev/null); then
+  echo "$CONF" | grep -q "listen = 0.0.0.0:${PORT}" || fail "配置里的 listen 不对: ${CONF}"
+  echo "$CONF" | grep -q "psk = ${PSK}" || fail "配置里的 psk 不对"
+  echo "[smoke] 配置: $(echo "$CONF" | tr '\n' ' ')"
+else
+  echo "[smoke] 配置: 镜像内无 shell（scratch 类），跳过 /app/snell-server.conf 检查"
+fi
 
 # 宿主侧 TCP 连接（映射端口）
 MAPPED=$(docker port "$NAME" "${PORT}/tcp" | head -1 | sed 's/.*://')
@@ -63,7 +66,8 @@ nc -z -w 3 127.0.0.1 "$MAPPED" || fail "TCP 连接 127.0.0.1:${MAPPED} 失败"
 echo "[smoke] TCP 127.0.0.1:${MAPPED} 可连接"
 
 # 底座用户态（Tiny Core 版有 busybox；scratch 版没有）
-if docker exec "$NAME" test -x /bin/busybox 2>/dev/null; then
+# 注：docker CLI 把 "OCI runtime exec failed" 打到 stdout，所以两边都要吞掉
+if docker exec "$NAME" test -x /bin/busybox >/dev/null 2>&1; then
   U=$(docker exec "$NAME" sh -c 'busybox 2>&1 | head -1' 2>/dev/null || true)
   echo "[smoke] 底座: busybox 用户态可用（${U}）"
 else
