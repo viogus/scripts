@@ -37,23 +37,56 @@ RUN <<'SRC'
   # subprocess sys threading time typing urllib uuid + local modules; http/urllib
   # pull in email.*, so email must stay).
   # NOTE: /bin/sh is busybox ash and does NOT expand {...} - list paths apart.
+  # NOTE: every removal below must stay in THIS RUN layer - deleting files in a
+  # later layer does not shrink the image, the bytes stay in the earlier layer.
   for py in /usr/lib/python3.*; do
     rm -rf \
       "$py/ensurepip" "$py/pydoc_data" "$py/unittest" "$py/asyncio" \
       "$py/multiprocessing" "$py/turtledemo" "$py/turtle.py" \
-      "$py/_pydecimal.py" "$py/xml" "$py/dbm" "$py/curses" "$py/sqlite3"
+      "$py/_pydecimal.py" "$py/xml" "$py/dbm" "$py/curses" "$py/sqlite3" \
+      "$py/zoneinfo"
     rm -rf "$py"/config-*
     rm -f "$py"/lib-dynload/_test*.so "$py"/lib-dynload/_ctypes_test*.so \
           "$py"/lib-dynload/_curses*.so "$py"/lib-dynload/readline*.so \
           "$py"/lib-dynload/_sqlite3*.so "$py"/lib-dynload/_dbm*.so \
           "$py"/lib-dynload/_gdbm*.so "$py"/lib-dynload/pyexpat*.so
+    # C accelerators of modules the app never imports, nor any stdlib module it
+    # does import (~2.4 MB): decimal/bz2/lzma/elementtree/zoneinfo/asyncio/
+    # multiprocessing/cProfile/statistics/audioop/_crypt + test helpers.
+    rm -f "$py"/lib-dynload/_decimal*.so "$py"/lib-dynload/_bz2*.so \
+          "$py"/lib-dynload/_lzma*.so "$py"/lib-dynload/_elementtree*.so \
+          "$py"/lib-dynload/_zoneinfo*.so "$py"/lib-dynload/_asyncio*.so \
+          "$py"/lib-dynload/_multiprocessing*.so "$py"/lib-dynload/_posixshmem*.so \
+          "$py"/lib-dynload/_lsprof*.so "$py"/lib-dynload/_statistics*.so \
+          "$py"/lib-dynload/_remote_debugging*.so "$py"/lib-dynload/_interp*.so \
+          "$py"/lib-dynload/xxlimited*.so "$py"/lib-dynload/xxsubtype*.so \
+          "$py"/lib-dynload/_xxtestfuzz*.so "$py"/lib-dynload/audioop*.so \
+          "$py"/lib-dynload/_crypt*.so \
+          "$py"/lib-dynload/_codecs_jp*.so "$py"/lib-dynload/_codecs_cn*.so \
+          "$py"/lib-dynload/_codecs_hk*.so "$py"/lib-dynload/_codecs_kr*.so \
+          "$py"/lib-dynload/_codecs_tw*.so "$py"/lib-dynload/_codecs_iso2022*.so \
+          "$py"/lib-dynload/_multibytecodec*.so
+    # legacy/CJK text codecs (~1.1 MB): the app only decodes as UTF-8
+    # (22x encoding="utf-8" and no other encoding in the sources).
+    rm -f "$py"/encodings/big5*.py* "$py"/encodings/cp*.py* \
+          "$py"/encodings/euc*.py* "$py"/encodings/gb*.py* \
+          "$py"/encodings/hz.py* "$py"/encodings/iso2022*.py* \
+          "$py"/encodings/johab.py* "$py"/encodings/koi8*.py* \
+          "$py"/encodings/kz1048.py* "$py"/encodings/shift_jis*.py* \
+          "$py"/encodings/tis_620.py*
     find "$py" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
     find "$py" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete 2>/dev/null || true
   done
-  # shared objects that only the removed modules loaded
-  # (nothing else links them: only libncursesw had users, the procps tools)
+  # shared objects whose only consumers were removed above (~3.7 MB). Verified
+  # with `scanelf -R -F "%F: %n" /usr /bin /sbin /lib`: libbz2/libffi/libexpat/
+  # libgdbm/libmpdec* only serve the deleted C accelerators and libstdc++ only
+  # serves libmpdec++; libncursesw's only users were the procps tools we skip.
+  # libelf is deliberately NOT removed - /sbin/ip (iproute2-minimal) needs it.
   rm -f /usr/lib/libsqlite3.so.* /usr/lib/libreadline.so.* \
-        /usr/lib/libncursesw.so.* /usr/lib/libpanelw.so.*
+        /usr/lib/libncursesw.so.* /usr/lib/libpanelw.so.* \
+        /usr/lib/libbz2.so.* /usr/lib/liblzma.so.* /usr/lib/libffi.so.* \
+        /usr/lib/libexpat.so.* /usr/lib/libgdbm*.so.* \
+        /usr/lib/libmpdec*.so.* /usr/lib/libstdc++.so.*
 
   mkdir -p /opt/aimilivpn/vpngate_data
 SRC

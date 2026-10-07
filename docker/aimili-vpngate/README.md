@@ -2,7 +2,7 @@
 
 [AimiliVPN](https://github.com/OpenMili/aimili-vpngate) — 基于 VPNGate 公开节点的 SOCKS5/HTTP 代理网关。零 Python 依赖，纯标准库。
 
-**镜像**：`ghcr.io/viogus/aimili-vpngate:latest`（~43MB，Alpine 3.24 多阶段构建）
+**镜像**：`ghcr.io/viogus/aimili-vpngate:latest`（~35MB，Alpine 3.24 多阶段构建）
 
 ## 用法
 
@@ -132,8 +132,13 @@ requests.get("https://www.google.com", proxies=proxies)
 
 ## 镜像优化
 
-实测（arm64）：arm 主机 overlay2 未压缩口径 **65.5MB → 43.5MB（-34%）**；
-本地 colima `docker images` 口径 91.2MB → 61.3MB（-33%）。
+实测（arm64，单平台）：
+
+| 口径 | 优化前 | 第一轮 | 第二轮（当前） |
+|------|--------|--------|----------------|
+| arm 主机 overlay2 未压缩 | 65.5MB | 43.5MB | ~35.3MB |
+| OCI 压缩层合计（registry 真正传输量） | — | 14.63MB | **12.62MB（-13.8%）** |
+| 本地 colima `docker images` | 91.2MB | 61.3MB | 51.7MB |
 
 | 策略 | 说明 | 节省 |
 |------|------|------|
@@ -145,16 +150,27 @@ requests.get("https://www.google.com", proxies=proxies)
 | 删除只被上述模块链接的共享库 | `libsqlite3/libreadline/libncursesw/libpanelw` | ~2.4MB |
 | 清 `__pycache__`/`.pyc`，语法校验加 `-B` | 否则校验本身会重新生成缓存（该层 581kB → 4kB） | ~0.6MB |
 | 删除运行期用不到的仓库文件 | `.github`/`docs`/`tests`/`scripts`/`install.sh`/`*.md`/`compose.yaml`；`mirror/` 必须保留（离线节点快照回退） | ~0.2MB |
+| 剥离未被引用的 stdlib C 扩展 | `_decimal/_bz2/_lzma/_elementtree/_zoneinfo/_asyncio/_multiprocessing/_lsprof/_statistics/xxlimited*` 等；应用只 import 22 个模块，`_codecs_*` 一并去掉 | ~2.4MB |
+| 去掉只用于非 UTF-8 的编解码器 | 源码里 22 处 `encoding="utf-8"`，无第二种编码，故删 `encodings/{big5,cp*,euc*,gb*,iso2022*,shift_jis*,koi8*,...}` | ~1.1MB |
+| 删除只被这些模块链接的共享库 | `libbz2/liblzma/libffi/libexpat/libgdbm*/libmpdec*/libstdc++`（用 `scanelf -R -F "%F: %n"` 逐个核对引用方）。**`libelf` 必须保留**：`/sbin/ip` 依赖它 | ~3.7MB |
 
-两个坑，已在 Dockerfile 内注释：
+三个坑，已在 Dockerfile 内注释：
 
 - `/bin/sh` 是 busybox ash，**不展开 `{a,b}` 花括号**。旧版写的
   `rm -rf /usr/lib/python3.*/{turtledemo,idlelib,...}` 一直静默无效（`ensurepip`、
   `turtledemo` 始终留在镜像里），现改为显式循环 + `find`。
 - 语法校验要用 `python3 -B`，否则它按需生成 `.pyc`，把刚删掉的缓存又长回来。
+- **删除必须和 `apk add` 在同一个 RUN 层**。镜像体积是各层之和，在后续层
+  `rm` 只是加一层 whiteout，前面的字节照样存在（实测：同一套剪裁放到后一层，
+  镜像 42.30MB → 42.30MB，一点没变）。
 
 容器内已无 `iptables`、`sqlite3`、`curses`：上游仅在 VPS 自检里可选调用 `iptables`，
 其余模块从不导入，不影响节点选择与代理功能。
+
+底座选型也验证过：换 `scratch` 只省 0.3MB（-2%），还丢掉 `apk`；换 Tiny Core
+（piCore rootfs，底座 2.41MiB vs alpine 3.99MiB 压缩）理论上限约 -11%，但
+Python/OpenVPN/curl 没有 aarch64 包，得为 glibc 从源码重编，收益还不如上面这轮
+载荷剪裁。结论：**保留 Alpine，体积从载荷里省**。
 
 ## 构建
 
