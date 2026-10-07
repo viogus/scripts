@@ -2,7 +2,7 @@
 
 [AimiliVPN](https://github.com/OpenMili/aimili-vpngate) — 基于 VPNGate 公开节点的 SOCKS5/HTTP 代理网关。零 Python 依赖，纯标准库。
 
-**镜像**：`ghcr.io/viogus/aimili-vpngate:latest`（~35MB，Alpine 3.24 多阶段构建）
+**镜像**：`ghcr.io/viogus/aimili-vpngate:latest`（~36MB，Alpine 3.24 多阶段构建）
 
 ## 用法
 
@@ -136,7 +136,7 @@ requests.get("https://www.google.com", proxies=proxies)
 
 | 口径 | 优化前 | 第一轮 | 第二轮（当前） |
 |------|--------|--------|----------------|
-| arm 主机 overlay2 未压缩 | 65.5MB | 43.5MB | ~35.3MB |
+| arm 主机 overlay2 未压缩 | 65.5MB | 43.5MB | 36.2MB |
 | OCI 压缩层合计（registry 真正传输量） | — | 14.63MB | **12.62MB（-13.8%）** |
 | 本地 colima `docker images` | 91.2MB | 61.3MB | 51.7MB |
 
