@@ -1,0 +1,86 @@
+Bounded rotation for DATA_DIR/vpngate.log.
+
+vpngate_manager.py mirrors the whole process stdout/stderr into
+vpngate_data/vpngate.log through the Tee class and never truncates or
+rotates that file, so it grows without bound (a long-running container
+had reached 768 MB, ~150 MB/day).
+
+This patch keeps the file bounded by the size cap VPNGATE_LOG_MAX_BYTES
+(default 16 MiB) and keeps VPNGATE_LOG_BACKUP_COUNT numbered backups
+(default 3, so ~64 MiB worst case). VPNGATE_LOG_MAX_BYTES=0 restores the
+old unbounded behaviour.
+
+No other code reads vpngate.log (the web panel reads
+vpngate_data/logs/<date>.json), so rotation is transparent.
+
+--- a/vpngate_manager.py
++++ b/vpngate_manager.py
+@@ -163,6 +163,10 @@
+ API_CACHE_META_FILE = DATA_DIR / "api_snapshot.meta.json"
+ BUNDLED_SNAPSHOT_FILE = ROOT_DIR / "mirror" / "vpngate.csv"
+ WEB_LOG_MAX_ENTRIES = 500
++# stdout/stderr are mirrored into DATA_DIR/vpngate.log; keep that file bounded.
++# LOG_MAX_BYTES <= 0 disables rotation (the previous unbounded behaviour).
++LOG_MAX_BYTES = env_int("VPNGATE_LOG_MAX_BYTES", 16 * 1024 * 1024, 0, 1 << 40)
++LOG_BACKUP_COUNT = env_int("VPNGATE_LOG_BACKUP_COUNT", 3, 0, 20)
+ 
+ lock = threading.RLock()
+ maintenance_lock = threading.Lock()
+@@ -7237,15 +7241,56 @@
+             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+ 
+ class Tee:
++    """Mirror stdout/stderr into a size-bounded log file (see LOG_MAX_BYTES)."""
++
+     def __init__(self, file_path: str):
+         Path(file_path).parent.mkdir(exist_ok=True, parents=True)
+-        self.file = open(file_path, "a", encoding="utf-8")
++        self.path = Path(file_path)
+         self.stdout = sys.stdout
++        self.file = open(file_path, "a", encoding="utf-8")
++        self._rotate_if_needed()
+ 
++    def _backup_path(self, index: int) -> Path:
++        return self.path.with_name(f"{self.path.name}.{index}")
++
++    def _rotate_if_needed(self) -> None:
++        if LOG_MAX_BYTES <= 0:
++            return
++        try:
++            if self.file.tell() < LOG_MAX_BYTES:
++                return
++        except (OSError, ValueError):
++            return
++        self.file.close()
++        if LOG_BACKUP_COUNT <= 0:
++            try:
++                self.path.unlink(missing_ok=True)
++            except OSError:
++                pass
++        else:
++            for index in range(LOG_BACKUP_COUNT, 0, -1):
++                previous = self._backup_path(index)
++                if not previous.exists():
++                    continue
++                try:
++                    if index >= LOG_BACKUP_COUNT:
++                        previous.unlink()
++                    else:
++                        os.replace(previous, self._backup_path(index + 1))
++                except OSError:
++                    pass
++            try:
++                if self.path.exists():
++                    os.replace(self.path, self._backup_path(1))
++            except OSError:
++                pass
++        self.file = open(self.path, "a", encoding="utf-8")
++
+     def write(self, data: str) -> None:
+         self.stdout.write(data)
+         self.file.write(data)
+         self.file.flush()
++        self._rotate_if_needed()
+ 
+     def flush(self) -> None:
+         self.stdout.flush()

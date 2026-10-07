@@ -5,7 +5,8 @@ DATA_DIR="${VPNGATE_DATA_DIR:-/opt/aimilivpn/vpngate_data}"
 AUTH_FILE="$DATA_DIR/ui_auth.json"
 
 if [ ! -f "$AUTH_FILE" ]; then
-    WEB_PORT="${WEB_PORT:-8787}"
+    # WEB_PORT is this image's name for the panel port; UI_PORT is the app's own variable.
+    WEB_PORT="${WEB_PORT:-${UI_PORT:-8787}}"
     SECRET_PATH="${SECRET_PATH:-$(tr -dc 'a-zA-Z0-9' < /dev/urandom | dd bs=12 count=1 2>/dev/null)}"
     WEB_USERNAME="${WEB_USERNAME:-$(tr -dc 'a-zA-Z' < /dev/urandom | dd bs=12 count=1 2>/dev/null)}"
     WEB_PASSWORD="${WEB_PASSWORD:-$(tr -dc 'a-zA-Z0-9' < /dev/urandom | dd bs=12 count=1 2>/dev/null)}"
