@@ -29,7 +29,7 @@ FROM alpine:3.24
 RUN <<'SRC'
   set -eu
   apk add --no-cache \
-    openvpn python3 curl ca-certificates-bundle iproute2-minimal
+    openvpn python3 ca-certificates-bundle iproute2-minimal
 
   # Trim the Python stdlib: nothing in *.py imports these (module list checked
   # via `grep -hE '^(import|from)' *.py`: base64 collections concurrent csv
@@ -87,6 +87,16 @@ RUN <<'SRC'
         /usr/lib/libbz2.so.* /usr/lib/liblzma.so.* /usr/lib/libffi.so.* \
         /usr/lib/libexpat.so.* /usr/lib/libgdbm*.so.* \
         /usr/lib/libmpdec*.so.* /usr/lib/libstdc++.so.*
+
+  # curl and its private https stack (~4.6 MB): patch 0003 replaces the only
+  # curl call site (the exit-IP probe in check_proxy_health) with a stdlib
+  # SOCKS5 client, so /usr/bin/curl is dead weight. `apk` was verified not to
+  # link libcurl (it uses its own HTTP client); libzstd is kept because
+  # /sbin/ip needs libelf, which needs libzstd.
+  rm -f /usr/bin/curl /usr/lib/libcurl.so.* /usr/lib/libbrotlienc.so.* \
+        /usr/lib/libbrotlidec.so.* /usr/lib/libbrotlicommon.so.* \
+        /usr/lib/libcares.so.* /usr/lib/libidn2.so.* /usr/lib/libpsl.so.* \
+        /usr/lib/libunistring.so.* /usr/lib/libnghttp2.so.*
 
   mkdir -p /opt/aimilivpn/vpngate_data
 SRC

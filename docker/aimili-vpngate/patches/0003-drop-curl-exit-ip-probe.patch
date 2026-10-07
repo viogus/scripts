@@ -1,0 +1,189 @@
+Replace the curl-based exit-IP health check with a stdlib SOCKS5 probe.
+
+check_proxy_health() shelled out to `curl -s -w "\n%{time_total} %{http_code}" -x
+socks5h://...` to learn the exit IP and the latency, which made the image carry
+curl plus libcurl, brotli, c-ares, libidn2, libpsl, libunistring and nghttp2
+(~4.8 MB of libraries) for a single call site.
+
+_probe_exit_ip() now speaks SOCKS5 directly on a socket (RFC 1928 CONNECT with a
+domain name, RFC 1929 username/password when LOCAL_PROXY_USER/PASS are set) and
+sends a plain HTTP/1.1 GET, decoding both Content-Length and chunked bodies.
+Behaviour is unchanged: for each proxy host (including the "::" ->
+[::1]/127.0.0.1 fallback list) it tries http://ip.sb and then
+http://api.ipify.org, returns {"ok": True, "ip": ..., "latency_ms": ...} on HTTP
+200 with a non-empty body, and returns None on any failure so the caller keeps
+running its existing port/diagnostic fallback.
+
+The request keeps curl's default User-Agent on purpose: ip.sb answers 301 to
+https for unknown agents (verified: no-UA, curl/*, wget/* -> 200, a custom agent
+-> 301), so a bespoke header would silently turn the probe into a permanent
+failure. The timer starts before the TCP connect, like curl's %{time_total},
+so the reported latency stays comparable (measured delta vs curl: ~14 ms).
+
+diff --git a/vpngate_manager.py b/vpngate_manager.py
+index 312f0e9..c8ee151 100644
+--- a/vpngate_manager.py
++++ b/vpngate_manager.py
+@@ -6420,8 +6420,110 @@ def check_proxy_health() -> dict[str, Any]:
+             "error": "[错误代码 3004] [ERR_ROUTE_DEV_NOT_FOUND] VPN 虚拟网卡 (tun0) 未启用，请确保当前已成功连接 VPN 节点"
+         }
+ 
+-    # 3. 使用 curl 通过本地 SOCKS5 代理接口测试 IP 与实际延迟
+-    def _curl_check_ip(url: str) -> dict[str, Any] | None:
++    # 3. 通过本地 SOCKS5 代理接口测试 IP 与实际延迟（纯标准库实现，镜像内无需 curl）
++    def _decode_chunked(payload: str) -> str:
++        decoded = []
++        while payload:
++            size_line, sep, rest = payload.partition("\r\n")
++            if not sep:
++                break
++            try:
++                size = int(size_line.split(";", 1)[0].strip() or "0", 16)
++            except ValueError:
++                break
++            if size <= 0 or len(rest) < size:
++                break
++            decoded.append(rest[:size])
++            payload = rest[size + 2:]
++        return "".join(decoded)
++
++    def _socks5_get(connect_host: str, url: str, timeout: float = 6.0) -> tuple[str, int] | None:
++        """经指定的本地 SOCKS5 代理 GET url，成功时返回 (响应体, 毫秒延迟)。"""
++        match = re.match(r"^http://([^/:]+)(?::(\d+))?(/.*)?$", url)
++        if not match:
++            return None
++        target_host = match.group(1)
++        target_port = int(match.group(2) or 80)
++        target_path = match.group(3) or "/"
++        proxy_user, proxy_pass = proxy_server.get_proxy_credentials()
++        # 沿用原先 curl 的默认 UA：ip.sb 会把未知 UA 301 跳转到 https
++        request = (
++            f"GET {target_path} HTTP/1.1\r\n"
++            f"Host: {target_host}\r\n"
++            "User-Agent: curl/8.22.0\r\n"
++            "Accept: */*\r\n"
++            "Connection: close\r\n\r\n"
++        ).encode("ascii", "ignore")
++
++        def recv_exact(conn: socket.socket, size: int) -> bytes:
++            buf = b""
++            while len(buf) < size:
++                chunk = conn.recv(size - len(buf))
++                if not chunk:
++                    raise OSError("代理连接提前关闭")
++                buf += chunk
++            return buf
++
++        started = time.monotonic()
++        conn = socket.create_connection((connect_host, LOCAL_PROXY_PORT), timeout=timeout)
++        try:
++            conn.settimeout(timeout)
++            if proxy_user is None and proxy_pass is None:
++                conn.sendall(b"\x05\x01\x00")
++            else:
++                conn.sendall(b"\x05\x02\x00\x02")
++            greeting = recv_exact(conn, 2)
++            if greeting[0] != 5 or greeting[1] == 0xFF:
++                return None
++            if greeting[1] == 2:
++                user_bytes = (proxy_user or "").encode("utf-8")[:255]
++                pass_bytes = (proxy_pass or "").encode("utf-8")[:255]
++                conn.sendall(
++                    b"\x01" + bytes([len(user_bytes)]) + user_bytes
++                    + bytes([len(pass_bytes)]) + pass_bytes
++                )
++                if recv_exact(conn, 2)[1] != 0:
++                    return None
++            host_bytes = target_host.encode("idna")
++            conn.sendall(
++                b"\x05\x01\x00\x03" + bytes([len(host_bytes)]) + host_bytes
++                + target_port.to_bytes(2, "big")
++            )
++            reply = recv_exact(conn, 4)
++            if reply[1] != 0:
++                return None
++            if reply[3] == 1:
++                recv_exact(conn, 4)
++            elif reply[3] == 3:
++                recv_exact(conn, recv_exact(conn, 1)[0])
++            elif reply[3] == 4:
++                recv_exact(conn, 16)
++            recv_exact(conn, 2)
++
++            conn.sendall(request)
++            raw = b""
++            while len(raw) <= 65536:
++                chunk = conn.recv(65536)
++                if not chunk:
++                    break
++                raw += chunk
++            latency_ms = int((time.monotonic() - started) * 1000)
++        finally:
++            try:
++                conn.close()
++            except Exception:
++                pass
++
++        text = raw.decode("utf-8", "replace")
++        status_line = text.split("\r\n", 1)[0].split()
++        if len(status_line) < 2 or status_line[1] != "200":
++            return None
++        body = text.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in text else ""
++        if "transfer-encoding: chunked" in text[:2048].lower():
++            body = _decode_chunked(body)
++        return body, latency_ms
++
++    def _probe_exit_ip(url: str) -> dict[str, Any] | None:
+         proxy_hosts = []
+         if LOCAL_PROXY_HOST == "::":
+             proxy_hosts = ["[::1]", "127.0.0.1"]
+@@ -6433,38 +6535,24 @@ def check_proxy_health() -> dict[str, Any]:
+             proxy_hosts = [LOCAL_PROXY_HOST]
+ 
+         for p_host in proxy_hosts:
+-            proxy_url = f"socks5h://{p_host}:{LOCAL_PROXY_PORT}"
+-            proxy_user, proxy_pass = proxy_server.get_proxy_credentials()
+-            cmd = [
+-                "curl", "-s",
+-                "-w", "\n%{time_total} %{http_code}",
+-                "-x", proxy_url,
+-                url,
+-                "--max-time", "5"
+-            ]
+-            if proxy_user is not None and proxy_pass is not None:
+-                cmd.extend(["--proxy-user", f"{proxy_user}:{proxy_pass}"])
++            connect_host = p_host[1:-1] if p_host.startswith("[") and p_host.endswith("]") else p_host
+             try:
+-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
+-                if res.returncode == 0:
+-                    lines = res.stdout.strip().splitlines()
+-                    if len(lines) >= 2:
+-                        ip = lines[0].strip()
+-                        time_info = lines[1].strip().split()
+-                        if len(time_info) == 2:
+-                            total_time_str, http_code = time_info
+-                            if http_code == "200" and ip:
+-                                latency_ms = int(float(total_time_str) * 1000)
+-                                return {"ok": True, "ip": ip, "latency_ms": latency_ms}
++                result = _socks5_get(connect_host, url)
+             except Exception:
+-                pass
++                result = None
++            if result is None:
++                continue
++            body, latency_ms = result
++            ip = body.strip().splitlines()[0].strip() if body.strip() else ""
++            if ip:
++                return {"ok": True, "ip": ip, "latency_ms": latency_ms}
+         return None
+ 
+     try:
+-        result = _curl_check_ip("http://ip.sb")
++        result = _probe_exit_ip("http://ip.sb")
+         if result:
+             return result
+-        result = _curl_check_ip("http://api.ipify.org")
++        result = _probe_exit_ip("http://api.ipify.org")
+         if result:
+             return result
+             

@@ -169,11 +169,11 @@ requests.get("https://www.google.com", proxies=proxies)
 
 实测（arm64，单平台）：
 
-| 口径 | 优化前 | 第一轮 | 第二轮（当前） |
-|------|--------|--------|----------------|
-| arm 主机 overlay2 未压缩 | 65.5MB | 43.5MB | 36.2MB |
-| OCI 压缩层合计（registry 真正传输量） | — | 14.63MB | **12.62MB（-13.8%）** |
-| 本地 colima `docker images` | 91.2MB | 61.3MB | 51.7MB |
+| 口径 | 优化前 | 第一轮 | 第二轮 | 第三轮（当前） |
+|------|--------|--------|--------|----------------|
+| arm 主机 overlay2 未压缩 | 65.5MB | 43.5MB | 36.2MB | ~31.4MB |
+| OCI 压缩层合计（registry 真正传输量） | — | 14.63MB | 12.62MB | **10.61MB（-15.9%）** |
+| 本地 colima `docker images` | 91.2MB | 61.3MB | 51.7MB | 44.7MB |
 
 | 策略 | 说明 | 节省 |
 |------|------|------|
@@ -188,6 +188,7 @@ requests.get("https://www.google.com", proxies=proxies)
 | 剥离未被引用的 stdlib C 扩展 | `_decimal/_bz2/_lzma/_elementtree/_zoneinfo/_asyncio/_multiprocessing/_lsprof/_statistics/xxlimited*` 等；应用只 import 22 个模块，`_codecs_*` 一并去掉 | ~2.4MB |
 | 去掉只用于非 UTF-8 的编解码器 | 源码里 22 处 `encoding="utf-8"`，无第二种编码，故删 `encodings/{big5,cp*,euc*,gb*,iso2022*,shift_jis*,koi8*,...}` | ~1.1MB |
 | 删除只被这些模块链接的共享库 | `libbz2/liblzma/libffi/libexpat/libgdbm*/libmpdec*/libstdc++`（用 `scanelf -R -F "%F: %n"` 逐个核对引用方）。**`libelf` 必须保留**：`/sbin/ip` 依赖它 | ~3.7MB |
+| 去掉 `curl` 及其整条 https 依赖链 | 补丁 `0003-drop-curl-exit-ip-probe.patch` 把唯一的 curl 调用点（`check_proxy_health` 里的出口 IP 探测）换成标准库 SOCKS5 客户端，于是 `curl`+`libcurl/libbrotli*/libc-ares/libidn2/libpsl/libunistring/libnghttp2` 全删。`apk` 自带 HTTP 客户端、不依赖 libcurl；`libzstd` 保留（`/sbin/ip` → `libelf` → `libzstd`） | ~4.6MB |
 
 三个坑，已在 Dockerfile 内注释：
 
@@ -199,12 +200,13 @@ requests.get("https://www.google.com", proxies=proxies)
   `rm` 只是加一层 whiteout，前面的字节照样存在（实测：同一套剪裁放到后一层，
   镜像 42.30MB → 42.30MB，一点没变）。
 
-容器内已无 `iptables`、`sqlite3`、`curses`：上游仅在 VPS 自检里可选调用 `iptables`，
-其余模块从不导入，不影响节点选择与代理功能。
+容器内已无 `iptables`、`sqlite3`、`curses`、`curl`：上游仅在 VPS 自检里可选调用
+`iptables`，其余模块从不导入；出口 IP 探测改由补丁 0003 用标准库完成，不影响节点
+选择与代理功能。
 
 底座选型也验证过：换 `scratch` 只省 0.3MB（-2%），还丢掉 `apk`；换 Tiny Core
 （piCore rootfs，底座 2.41MiB vs alpine 3.99MiB 压缩）理论上限约 -11%，但
-Python/OpenVPN/curl 没有 aarch64 包，得为 glibc 从源码重编，收益还不如上面这轮
+Python/OpenVPN 没有 aarch64 包，得为 glibc 从源码重编，收益还不如上面这几轮
 载荷剪裁。结论：**保留 Alpine，体积从载荷里省**。
 
 ## 构建
