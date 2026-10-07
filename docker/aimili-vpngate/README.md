@@ -37,7 +37,7 @@ services:
       # - SECRET_PATH=mysecret      # 可选，默认随机生成
       # - LOCAL_PROXY_USER=proxy    # 可选，SOCKS5/HTTP 代理认证用户名
       # - LOCAL_PROXY_PASS=pwd      # 可选，SOCKS5/HTTP 代理认证密码
-      # - VPNGATE_COUNTRY=JP        # 可选，只在该国家内选最优连接（日本/Japan 亦可）
+      # - VPNGATE_COUNTRY=KR        # 可选，只在该国家内选最优连接（韩国/Korea 亦可）
       # - VPNGATE_COUNTRY_LOCK=0    # 可选，只收窄候选池，失效可回退到其他国家
       # - VPNGATE_LOG_MAX_BYTES=16777216   # 可选，vpngate.log 单文件上限（字节），0 = 不轮转
       # - VPNGATE_LOG_BACKUP_COUNT=3       # 可选，保留的 vpngate.log.N 历史份数
@@ -77,7 +77,7 @@ docker logs aimili-vpngate
 | `LOCAL_PROXY_PASS` | (空) | SOCKS5/HTTP 代理认证密码。设置后代理必须认证。 |
 | `VPNGATE_LOG_MAX_BYTES` | `16777216`（16 MiB） | `vpngate.log` 单文件上限（字节）。`0` = 关闭轮转（旧行为，会无限增长）。 |
 | `VPNGATE_LOG_BACKUP_COUNT` | `3` | 保留 `vpngate.log.1 .. .N` 的历史份数；`0` = 只截断不留档。 |
-| `VPNGATE_COUNTRY` | (空) | 只在该国家/地区内选节点。ISO 两字母代码（`JP`）或面板里的国家名（`日本`/`Japan`），多个用逗号分隔（`JP,KR`）。单国时同时把路由模式锁定为「固定地区」。 |
+| `VPNGATE_COUNTRY` | (空) | 只在该国家/地区内选节点。ISO 两字母代码（`KR`）或面板里的国家名（`韩国`/`Korea`），多个用逗号分隔（`KR,JP`）。单国时同时把路由模式锁定为「固定地区」。 |
 | `VPNGATE_COUNTRY_LOCK` | `1` | `0` = 只收窄候选池、不锁定路由；该国节点全部失效时仍可回退到其他国家。 |
 
 首次启动时自动生成 `ui_auth.json` 并打印凭据。已持久化时跳过生成。
@@ -88,14 +88,15 @@ docker logs aimili-vpngate
 
 ```yaml
     environment:
-      - VPNGATE_COUNTRY=JP        # 或 日本 / Japan；多个用逗号分隔，如 JP,KR
+      - VPNGATE_COUNTRY=KR        # 或 韩国 / Korea；多个用逗号分隔，如 KR,JP
 ```
 
-- **单国**（`JP`）：候选池只保留该国节点（后台并发测速也只测这些），并把路由模式
+- **单国**（`KR`）：候选池只保留该国节点（后台并发测速也只测这些），并把路由模式
   锁定为「固定地区」，只连该国延迟/评分最优的节点。该国节点全部失效时**不会**自动
-  切到其他国家——这是上游 `fixed_region` 的既定行为。库内快照里日本有 58 个节点
-  （全部 99 个候选，10 个国家），通常足够。
-- **多国**（`JP,KR`）：只收窄候选池，路由模式保持 `auto`，在这几国范围内挑最优，
+  切到其他国家——这是上游 `fixed_region` 的既定行为。候选数因国而异：内置快照里
+  韩国 24 个、日本 58 个（全部约 100 个候选、10 个国家），实测韩国在线 22 个左右，
+  通常够用；国家越小越建议配合 `VPNGATE_COUNTRY_LOCK=0`。
+- **多国**（`KR,JP`）：只收窄候选池，路由模式保持 `auto`，在这几国范围内挑最优，
   并允许自动切换。
 - `VPNGATE_COUNTRY_LOCK=0`：只收窄候选池、不锁定路由——「优先在该国选，全军覆没
   时回退到其他国家」。
@@ -104,10 +105,10 @@ docker logs aimili-vpngate
   参与，但 `ui_auth.json` 里仍是上一次被环境变量写入的 `fixed_region` +
   `force_country`——要到面板里改回 `auto`（或删除 `vpngate_data/ui_auth.json`
   让它按默认值重建）才会真正解除锁定。
-- 用国家名（`日本`/`Japan`）时依赖 `vpngate_data/nodes.json` 里的国家字段做名称→
+- 用国家名（`韩国`/`Korea`）时依赖 `vpngate_data/nodes.json` 里的国家字段做名称→
   代码映射：全新容器在第一轮抓取前可能还解析不出来（此时打印一条
   `[配置] VPNGATE_COUNTRY=... 无法解析为国家代码` 提示），抓取一轮后自动生效；
-  直接写 ISO 代码（`JP`）没有这个延迟。
+  直接写 ISO 代码（`KR`）没有这个延迟。
 
 该能力来自 `patches/0002-country-selection.patch`（上游没有这个环境变量），挂在
 `load_ui_config()` 上，与 `patches/0001` 一样在构建期应用。

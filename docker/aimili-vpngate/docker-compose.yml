@@ -29,7 +29,7 @@ services:
       # - LOCAL_PROXY_PASS=proxy_pass      # 设置后代理需用户名密码
       # 只在这个国家内选最优连接：ISO 两字母代码，或用面板里的国家名（日本/Japan），
       # 多个用逗号分隔；单国时同时锁定路由模式为「固定地区」（只连该国节点）。
-      # - VPNGATE_COUNTRY=JP
+      # - VPNGATE_COUNTRY=KR
       # - VPNGATE_COUNTRY_LOCK=0           # 设为 0 只收窄候选池，失效可回退到其他国家
       # - VPNGATE_LOG_MAX_BYTES=16777216   # vpngate.log 单文件上限（字节），0 = 不轮转
       # - VPNGATE_LOG_BACKUP_COUNT=3       # 保留的 vpngate.log.N 历史份数
