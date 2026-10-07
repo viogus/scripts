@@ -1,0 +1,126 @@
+Deployment-level country selection (VPNGATE_COUNTRY / VPNGATE_COUNTRY_LOCK).
+
+docker-compose.yml can pin the node pool to a country:
+
+    environment:
+      - VPNGATE_COUNTRY=JP        # ISO alpha-2 code, or a name ("日本" / "Japan")
+
+With a single country the routing mode is additionally locked to it
+(routing_mode=fixed_region), so the app only ever connects to the best node
+*inside* that country and the background prober only measures its nodes.
+Several countries (VPNGATE_COUNTRY=JP,KR) narrow the candidate pool without
+locking the region; VPNGATE_COUNTRY_LOCK=0 keeps the pool filter only and
+leaves other countries available as a fallback. Unsetting the variable restores
+panel-driven routing.
+
+apply_country_env() is called from load_ui_config(), so the environment wins
+over the persisted ui_auth.json on every load and the panel shows the enforced
+values in 路由设置 / 节点国家筛选.
+
+diff --git a/vpngate_manager.py b/vpngate_manager.py
+index f1c58b6..312f0e9 100644
+--- a/vpngate_manager.py
++++ b/vpngate_manager.py
+@@ -316,6 +316,90 @@ def normalize_discovery_countries(value: Any) -> list[str]:
+             break
+     return normalized
+ 
++# ---- deployment-level country preference (container environment) -------------
++# VPNGATE_COUNTRY pins the node pool to one or more countries; with a single
++# country routing is additionally locked to it (routing_mode=fixed_region), so
++# the best node *inside* that country is always chosen. Accepts ISO 3166-1
++# alpha-2 codes ("JP") or the country names shown in the panel ("日本"/"Japan"),
++# separated by commas or spaces. VPNGATE_COUNTRY_LOCK=0 keeps the scope filter
++# but leaves other countries available as a fallback. Unset = the panel decides.
++FORCED_COUNTRY_RAW = os.environ.get("VPNGATE_COUNTRY", "").strip()
++FORCED_COUNTRY_LOCK = str(os.environ.get("VPNGATE_COUNTRY_LOCK", "1")).strip().lower() not in {"0", "false", "no", "off"}
++_country_env_warned = False
++
++def country_code_from_name(name: str) -> str:
++    """Map a country name ("日本"/"Japan") to its ISO alpha-2 code.
++
++    Reads nodes.json directly instead of reusing normalize_routing_country():
++    this helper is also reached by the module-level `_init_cfg` bootstrap that
++    runs before most of the module's functions are defined.
++    """
++    target = str(name or "").strip()
++    if not target:
++        return ""
++    translated = vpn_utils.COUNTRY_TRANSLATIONS.get(target, target).casefold()
++    try:
++        rows = json.loads(NODES_FILE.read_text(encoding="utf-8"))
++    except (OSError, json.JSONDecodeError):
++        rows = []
++    if not isinstance(rows, list):
++        return ""
++    for node in rows:
++        if not isinstance(node, dict):
++            continue
++        code = str(node.get("country_short") or "").strip().upper()
++        if not re.fullmatch(r"[A-Z]{2}", code):
++            continue
++        node_name = str(node.get("country") or "").strip()
++        if vpn_utils.COUNTRY_TRANSLATIONS.get(node_name, node_name).casefold() == translated:
++            return code
++    return ""
++
++def parse_country_env(value: Any) -> list[str]:
++    """Resolve VPNGATE_COUNTRY tokens (codes or names) into ISO alpha-2 codes."""
++    codes: list[str] = []
++    for token in re.split(r"[,\s/;]+", str(value or "").strip()):
++        if not token:
++            continue
++        upper = token.upper()
++        code = upper if re.fullmatch(r"[A-Z]{2}", upper) else country_code_from_name(token)
++        if re.fullmatch(r"[A-Z]{2}", code) and code not in codes:
++            codes.append(code)
++    return codes[:250]
++
++def apply_country_env(config: dict[str, Any]) -> bool:
++    """Force VPNGATE_COUNTRY onto a UI config; True when anything changed."""
++    global _country_env_warned
++    if not FORCED_COUNTRY_RAW:
++        return False
++    countries = parse_country_env(FORCED_COUNTRY_RAW)
++    if not countries:
++        if not _country_env_warned:
++            _country_env_warned = True
++            print(f"[配置] VPNGATE_COUNTRY={FORCED_COUNTRY_RAW!r} 无法解析为国家代码，已忽略（示例：JP 或 日本）", flush=True)
++        return False
++    changed = False
++    if normalize_discovery_countries(config.get("discovery_countries")) != countries:
++        config["discovery_countries"] = countries
++        changed = True
++    if FORCED_COUNTRY_LOCK:
++        current_mode = str(config.get("routing_mode") or "auto")
++        if len(countries) == 1:
++            if str(config.get("force_country") or "").strip().upper() != countries[0]:
++                config["force_country"] = countries[0]
++                changed = True
++            if current_mode in ("", "auto", "fixed_region") and current_mode != "fixed_region":
++                config["routing_mode"] = "fixed_region"
++                changed = True
++        elif str(config.get("force_country") or "").strip():
++            # A multi-country scope cannot be locked to one region: drop a stale
++            # lock so the app picks the best node across the whole scope.
++            config["force_country"] = ""
++            if current_mode == "fixed_region":
++                config["routing_mode"] = "auto"
++            changed = True
++    return changed
++
+ def load_ui_config() -> dict[str, Any]:
+     with lock:
+         auth_file = DATA_DIR / "ui_auth.json"
+@@ -378,6 +462,11 @@ def load_ui_config() -> dict[str, Any]:
+         if normalized_discovery_countries != config.get("discovery_countries"):
+             config["discovery_countries"] = normalized_discovery_countries
+             updated = True
++
++        # Deployment-level country preference (VPNGATE_COUNTRY) wins over the
++        # persisted panel settings so a compose file can pin the country.
++        if apply_country_env(config):
++            updated = True
+             
+         if not auth_file.exists() or updated:
+             try:
