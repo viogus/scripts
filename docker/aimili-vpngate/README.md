@@ -2,7 +2,7 @@
 
 [AimiliVPN](https://github.com/OpenMili/aimili-vpngate) — 基于 VPNGate 公开节点的 SOCKS5/HTTP 代理网关。零 Python 依赖，纯标准库。
 
-**镜像**：`ghcr.io/viogus/aimili-vpngate:latest`（~40MB，Alpine 多阶段构建）
+**镜像**：`ghcr.io/viogus/aimili-vpngate:latest`（~47MB，Alpine 3.24 多阶段构建）
 
 ## 用法
 
@@ -132,13 +132,29 @@ requests.get("https://www.google.com", proxies=proxies)
 
 ## 镜像优化
 
-| 策略 | 节省 |
-|------|------|
-| Alpine 基础镜像（~7MB vs Debian ~74MB） | ~67MB |
-| 多阶段构建（git 不入最终镜像） | ~15MB |
-| 剥离 Python stdlib 无用模块（turtledemo/idlelib/test/lib2to3/ensurepip） | ~20MB |
-| 清理 `__pycache__` / `.pyc` / `.pyo` | ~2MB |
-| 单次 `apk add` + heredoc RUN（减少层） | — |
+实测：本地 arm64 构建 `docker images` **91.2MB → 61.3MB（-33%）**；arm 主机
+（overlay2，未压缩口径）旧版 65.5MB，新版约 47MB。
+
+| 策略 | 说明 | 节省 |
+|------|------|------|
+| Alpine 基础镜像 + 多阶段构建 | `alpine:3.24`；`git`/`patch`/构建依赖只留在 builder 阶段 | 相对 Debian 单阶段 ~70MB |
+| 去掉 `iptables`（含 `/usr/lib/xtables` 121 个文件） | 上游只在 VPS 环境自检里跑 `iptables -S`，try/except 包裹，缺二进制即跳过 | ~7.8MB |
+| 去掉 `procps-ng` 与完整 `iproute2`/`iproute2-tc` | `openvpn` 自己依赖 `iproute2-minimal`（提供 `/sbin/ip`）；`sysctl/ps/pgrep/pkill/free/nproc/route/ping` 都用 busybox 内建 | ~3.3MB |
+| `ca-certificates` → `ca-certificates-bundle` | 只保留 CA 证书包，不装完整 ca-certificates | ~0.5MB |
+| 剥离未被导入的 stdlib 模块 | `ensurepip/pydoc_data/unittest/asyncio/multiprocessing/xml/dbm/curses/sqlite3/turtle/test*` 等；`email` 必须保留（`http.server` 依赖） | ~7.0MB |
+| 删除只被上述模块链接的共享库 | `libsqlite3/libreadline/libncursesw/libpanelw` | ~2.4MB |
+| 清 `__pycache__`/`.pyc`，语法校验加 `-B` | 否则校验本身会重新生成缓存（该层 581kB → 4kB） | ~0.6MB |
+| 删除运行期用不到的仓库文件 | `.github`/`docs`/`tests`/`scripts`/`install.sh`/`*.md`/`compose.yaml`；`mirror/` 必须保留（离线节点快照回退） | ~0.2MB |
+
+两个坑，已在 Dockerfile 内注释：
+
+- `/bin/sh` 是 busybox ash，**不展开 `{a,b}` 花括号**。旧版写的
+  `rm -rf /usr/lib/python3.*/{turtledemo,idlelib,...}` 一直静默无效（`ensurepip`、
+  `turtledemo` 始终留在镜像里），现改为显式循环 + `find`。
+- 语法校验要用 `python3 -B`，否则它按需生成 `.pyc`，把刚删掉的缓存又长回来。
+
+容器内已无 `iptables`、`sqlite3`、`curses`：上游仅在 VPS 自检里可选调用 `iptables`，
+其余模块从不导入，不影响节点选择与代理功能。
 
 ## 构建
 

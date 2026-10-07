@@ -1,4 +1,5 @@
-FROM alpine:latest AS builder
+# ---- build stage: fetch upstream and apply our patches ----------------------
+FROM alpine:3.24 AS builder
 # Upstream tag/branch to build; pin a release tag to freeze the base revision.
 ARG UPSTREAM_REF=main
 COPY patches/ /tmp/patches/
@@ -10,18 +11,49 @@ RUN apk add --no-cache git patch \
            git apply -p1 --whitespace=nowarn "$patch_file" \
                || { echo "!!! $(basename "$patch_file") no longer applies - upstream changed, rebase it in patches/"; exit 1; }; \
        done \
-    && rm -rf /tmp/patches /opt/aimilivpn/.git
+    && rm -rf /tmp/patches /opt/aimilivpn/.git \
+    && rm -rf /opt/aimilivpn/.github /opt/aimilivpn/.gitignore /opt/aimilivpn/.dockerignore \
+              /opt/aimilivpn/docs /opt/aimilivpn/tests /opt/aimilivpn/scripts \
+              /opt/aimilivpn/install.sh /opt/aimilivpn/README.md /opt/aimilivpn/RELEASE_NOTES.md \
+              /opt/aimilivpn/compose.yaml /opt/aimilivpn/Dockerfile
+# kept on purpose: *.py, VERSION, LICENSE and mirror/ (offline node fallback,
+# BUNDLED_SNAPSHOT_FILE in vpngate_manager.py).
 
-FROM alpine:latest
+# ---- runtime stage ----------------------------------------------------------
+FROM alpine:3.24
+# Packages intentionally NOT installed (checked against the upstream sources):
+#   iptables  - only used by `iptables -S` inside an advisory VPS self-check that
+#               is wrapped in try/except; the package is 7.8 MB of xtables exts
+#   procps-ng - everything needed (sysctl) already comes from busybox
+#   iproute2  - openvpn depends on iproute2-minimal, which ships /sbin/ip
 RUN <<'SRC'
   set -eu
   apk add --no-cache \
-    openvpn python3 curl ca-certificates iptables iproute2 procps
+    openvpn python3 curl ca-certificates-bundle iproute2-minimal
 
-  # strip unused Python stdlib (~20MB)
-  rm -rf /usr/lib/python3.*/{turtledemo,idlelib,test,lib2to3,ensurepip}
-  find /usr/lib/python3.* -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-  find /usr/lib/python3.* -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete 2>/dev/null || true
+  # Trim the Python stdlib: nothing in *.py imports these (module list checked
+  # via `grep -hE '^(import|from)' *.py`: base64 collections concurrent csv
+  # hashlib http io json os pathlib queue re secrets select shlex signal socket
+  # subprocess sys threading time typing urllib uuid + local modules; http/urllib
+  # pull in email.*, so email must stay).
+  # NOTE: /bin/sh is busybox ash and does NOT expand {...} - list paths apart.
+  for py in /usr/lib/python3.*; do
+    rm -rf \
+      "$py/ensurepip" "$py/pydoc_data" "$py/unittest" "$py/asyncio" \
+      "$py/multiprocessing" "$py/turtledemo" "$py/turtle.py" \
+      "$py/_pydecimal.py" "$py/xml" "$py/dbm" "$py/curses" "$py/sqlite3"
+    rm -rf "$py"/config-*
+    rm -f "$py"/lib-dynload/_test*.so "$py"/lib-dynload/_ctypes_test*.so \
+          "$py"/lib-dynload/_curses*.so "$py"/lib-dynload/readline*.so \
+          "$py"/lib-dynload/_sqlite3*.so "$py"/lib-dynload/_dbm*.so \
+          "$py"/lib-dynload/_gdbm*.so "$py"/lib-dynload/pyexpat*.so
+    find "$py" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+    find "$py" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete 2>/dev/null || true
+  done
+  # shared objects that only the removed modules loaded
+  # (nothing else links them: only libncursesw had users, the procps tools)
+  rm -f /usr/lib/libsqlite3.so.* /usr/lib/libreadline.so.* \
+        /usr/lib/libncursesw.so.* /usr/lib/libpanelw.so.*
 
   mkdir -p /opt/aimilivpn/vpngate_data
 SRC
@@ -29,8 +61,8 @@ SRC
 COPY --from=builder /opt/aimilivpn /opt/aimilivpn
 WORKDIR /opt/aimilivpn
 
-# the patched sources must still be valid Python
-RUN python3 -c "import ast, pathlib; ast.parse(pathlib.Path('vpngate_manager.py').read_text(encoding='utf-8'))"
+# the patched sources must still be valid Python (-B keeps __pycache__ out)
+RUN python3 -B -c "import ast, pathlib; [ast.parse(p.read_text(encoding='utf-8')) for p in pathlib.Path('.').glob('*.py')]"
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
