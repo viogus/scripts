@@ -171,7 +171,7 @@ requests.get("https://www.google.com", proxies=proxies)
 
 | 口径 | 优化前 | 第一轮 | 第二轮 | 第三轮（当前） |
 |------|--------|--------|--------|----------------|
-| arm 主机 overlay2 未压缩 | 65.5MB | 43.5MB | 36.2MB | ~31.4MB |
+| arm 主机 overlay2 未压缩 | 65.5MB | 43.5MB | 36.2MB | 31.4MB |
 | OCI 压缩层合计（registry 真正传输量） | — | 14.63MB | 12.62MB | **10.61MB（-15.9%）** |
 | 本地 colima `docker images` | 91.2MB | 61.3MB | 51.7MB | 44.7MB |
 
