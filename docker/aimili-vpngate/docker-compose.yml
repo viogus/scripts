@@ -50,7 +50,9 @@ services:
       WEB_PASSWORD: "${WEB_PASSWORD:-}"
       SECRET_PATH: "${SECRET_PATH:-}"
 
-      # 代理认证：7928 只要能被人碰到就建议设置，否则谁都能白嫖你的出口 IP
+      # 代理认证：7928 只要能被人碰到就建议设置，否则谁都能白嫖你的出口 IP。
+      # 两行必须一起给值（只设一个 = 用户 + 空密码这种"认证开着但没锁"的状态）；
+      # 两行都不填 = 免认证，这是默认行为。
       LOCAL_PROXY_USER: "${LOCAL_PROXY_USER:-}"
       LOCAL_PROXY_PASS: "${LOCAL_PROXY_PASS:-}"
 

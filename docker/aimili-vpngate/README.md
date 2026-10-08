@@ -93,8 +93,8 @@ docker logs aimili-vpngate
 | `WEB_USERNAME` | 随机 12 位 | 登录用户名 |
 | `WEB_PASSWORD` | 随机 12 位 | 登录密码 |
 | `SECRET_PATH` | 随机 12 位 | URL 路径后缀 |
-| `LOCAL_PROXY_USER` | (空) | SOCKS5/HTTP 代理认证用户名。设置后代理必须认证。 |
-| `LOCAL_PROXY_PASS` | (空) | SOCKS5/HTTP 代理认证密码。设置后代理必须认证。 |
+| `LOCAL_PROXY_USER` | (空) | SOCKS5/HTTP 代理认证用户名。**必须与下一行成对设置**；只设一个会得到「用户名 + 空密码」的弱认证，两个都不设 = 免认证。 |
+| `LOCAL_PROXY_PASS` | (空) | SOCKS5/HTTP 代理认证密码。7928 会被人碰到就必须设置，否则谁都能白嫖你的出口 IP。 |
 | `VPNGATE_LOG_MAX_BYTES` | `16777216`（16 MiB） | `vpngate.log` 单文件上限（字节）。`0` = 关闭轮转（旧行为，会无限增长）。 |
 | `VPNGATE_LOG_BACKUP_COUNT` | `3` | 保留 `vpngate.log.1 .. .N` 的历史份数；`0` = 只截断不留档。 |
 | `VPNGATE_COUNTRY` | (空) | 只在该国家/地区内选节点。ISO 两字母代码（`KR`）或面板里的国家名（`韩国`/`Korea`），多个用逗号分隔（`KR,JP`）。单国时同时把路由模式锁定为「固定地区」。 |
