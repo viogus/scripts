@@ -71,3 +71,5 @@ services:
 #   PYTHONUNBUFFERED=1
 #   VPNGATE_LOG_MAX_BYTES=16777216  # vpngate.log 单文件上限，0 = 关闭轮转
 #   VPNGATE_LOG_BACKUP_COUNT=3
+#   VPNGATE_CONFIG_KEEP_SECONDS=86400  # configs/ 里无引用的 .ovpn 保留多久，0 = 不清
+#   VPNGATE_CONFIG_MAX_FILES=500       # configs/ 目录硬上限（自动清理），0 = 不限

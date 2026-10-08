@@ -55,7 +55,8 @@ services:
 带完整注释的版本就是仓库里的 `docker-compose.yml`；`${...}` 的值可以写进同目录的 `.env`
 （compose 会自动读取）。镜像已内置 `VPNGATE_DATA_DIR`、`LOCAL_PROXY_HOST=::`（双栈监听，
 **端口映射依赖它**）、`DEPLOYMENT_MODE=docker`、`PYTHONUNBUFFERED=1`、
-`VPNGATE_LOG_MAX_BYTES=16777216`、`VPNGATE_LOG_BACKUP_COUNT=3`，无需重复声明。
+`VPNGATE_LOG_MAX_BYTES=16777216`、`VPNGATE_LOG_BACKUP_COUNT=3`、
+`VPNGATE_CONFIG_KEEP_SECONDS=86400`、`VPNGATE_CONFIG_MAX_FILES=500`，无需重复声明。
 
 `ui_auth.json` 一旦在数据目录里生成，改环境变量就不再生效（面板里的路由设置同理）；
 要解除国家锁定，把面板改回「自动」，或删掉 `vpngate-data/ui_auth.json` 后重建容器。
@@ -130,6 +131,8 @@ docker logs aimili-vpngate
 | `LOCAL_PROXY_PASS` | (空) | SOCKS5/HTTP 代理认证密码。7928 会被人碰到就必须设置，否则谁都能白嫖你的出口 IP。 |
 | `VPNGATE_LOG_MAX_BYTES` | `16777216`（16 MiB） | `vpngate.log` 单文件上限（字节）。`0` = 关闭轮转（旧行为，会无限增长）。 |
 | `VPNGATE_LOG_BACKUP_COUNT` | `3` | 保留 `vpngate.log.1 .. .N` 的历史份数；`0` = 只截断不留档。 |
+| `VPNGATE_CONFIG_KEEP_SECONDS` | `86400`（24 小时） | `vpngate_data/configs/` 里「不被当前节点池引用」的 `.ovpn` 保留多久，超过即自动删除。`0` = 关闭按时间清理。 |
+| `VPNGATE_CONFIG_MAX_FILES` | `500` | `configs/` 目录的硬上限：按时间清理后仍超过时，从最旧的无引用文件开始删。`0` = 关闭个数上限。 |
 | `VPNGATE_COUNTRY` | (空) | 只在该国家/地区内选节点。ISO 两字母代码（`KR`）或面板里的国家名（`韩国`/`Korea`），多个用逗号分隔（`KR,JP`）。单国时同时把路由模式锁定为「固定地区」。 |
 | `VPNGATE_COUNTRY_LOCK` | `1` | `0` = 只收窄候选池、不锁定路由；该国节点全部失效时仍可回退到其他国家。 |
 
@@ -182,6 +185,23 @@ docker logs aimili-vpngate
 : > ./aimili-data/vpngate.log    # 可选：升级前先清掉旧的超大日志，立即回收空间
 docker compose up -d             # 重建容器，应用 logging 限制与新版镜像
 ```
+
+`vpngate_data/configs/` 是第二个只涨不消的目录。上游每轮维护都会给「池里但磁盘上
+还没有」的节点写一份 `<node_id>.ovpn`，却从不删除离开节点池的那些，所以孤儿文件会
+一直堆积：实测 arm 上运行四周攒到 **22 449 个文件 / 264 MB**，而 `nodes.json` 只引用
+其中 22 个。镜像里的 `patches/0004-prune-stale-node-configs.patch` 会在**启动时**和
+**每轮维护结束时**清理一遍：
+
+- 只删「当前节点池没有引用」**且**「修改时间早于 `VPNGATE_CONFIG_KEEP_SECONDS`」的
+  `.ovpn`——正在连接的节点配置受宽限期保护，不会被删；
+- `VPNGATE_CONFIG_MAX_FILES` 是兜底的硬上限，仍然超出时从最旧的无引用文件开始删；
+- 正在进行的节点测试文件（`.test_<id>_<uuid>.ovpn`，点开头，存活只有几秒）不参与
+  「个数上限」的计算，且远年轻于宽限期，所以两条规则都不会打断正在跑的探测；被中断
+  遗留的测试文件会在超过宽限期后一并回收。非 `.ovpn` 文件和目录一律不动；
+- 清理结果会打印到 stdout（因此也进 `vpngate.log`），形如
+  `[configs] 已清理 22427 个过期节点配置，当前保留 22 个（节点池引用 22 个）`。
+
+两个变量都设为 `0` 即恢复上游的无限增长行为。
 
 ## 使用代理
 

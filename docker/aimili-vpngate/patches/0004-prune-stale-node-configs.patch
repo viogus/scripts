@@ -1,0 +1,127 @@
+Bound the DATA_DIR/configs directory.
+
+The pool maintenance pass writes one "<node_id>.ovpn" per node that is missing
+from DATA_DIR/configs and never removes the configs of nodes that left the
+pool, so that directory only grows: the container on our arm host had been up
+for four weeks and held 22449 files / 264 MB, while nodes.json referenced just
+22 of them.
+
+prune_config_dir() runs once at startup and at the end of every maintenance
+cycle with the current pool as the keep set. A file is removed only when
+
+  * no node in the pool references it, and
+  * it is older than VPNGATE_CONFIG_KEEP_SECONDS (default 24h),
+
+so the config of an in-flight connection is never pulled out from under
+openvpn. VPNGATE_CONFIG_MAX_FILES (default 500) is a hard cap on top of that:
+if the directory is still larger, the oldest unreferenced files go first.
+Setting both knobs to 0 restores the previous unbounded behaviour.
+
+In-flight node tests (".test_<id>_<uuid>.ovpn", created and removed within
+seconds) are exempt from the cap and, being far younger than the grace period,
+from the age rule as well, so neither rule can cut a probe short; abandoned
+test files are collected once they age out. Non-.ovpn files and directories
+are never touched, and the number of removed files is printed to stdout (and
+therefore mirrored into vpngate.log by the Tee from patch 0001).
+
+diff --git a/vpngate_manager.py b/vpngate_manager.py
+index c8ee151..ce78863 100644
+--- a/vpngate_manager.py
++++ b/vpngate_manager.py
+@@ -167,6 +167,12 @@ WEB_LOG_MAX_ENTRIES = 500
+ # LOG_MAX_BYTES <= 0 disables rotation (the previous unbounded behaviour).
+ LOG_MAX_BYTES = env_int("VPNGATE_LOG_MAX_BYTES", 16 * 1024 * 1024, 0, 1 << 40)
+ LOG_BACKUP_COUNT = env_int("VPNGATE_LOG_BACKUP_COUNT", 3, 0, 20)
++# DATA_DIR/configs holds one .ovpn per node: the maintenance pass writes the
++# ones that are missing but never removes the ones whose node left the pool, so
++# the directory only grows (22449 files / 264 MB after four weeks of uptime).
++# Keep it bounded by age and by a hard file cap; 0 disables that half.
++CONFIG_KEEP_SECONDS = env_int("VPNGATE_CONFIG_KEEP_SECONDS", 24 * 3600, 0, 1 << 40)
++CONFIG_MAX_FILES = env_int("VPNGATE_CONFIG_MAX_FILES", 500, 0, 1000000)
+ 
+ lock = threading.RLock()
+ maintenance_lock = threading.Lock()
+@@ -2500,6 +2506,63 @@ def connect_node(node_id: str) -> str:
+         finish_connection_attempt(token, cancel_event)
+         set_state(pending_node_id="")
+ 
++def prune_config_dir(keep_files: set[str] | None = None) -> int:
++    """Drop stale .ovpn files so DATA_DIR/configs cannot grow without bound.
++
++    A file is only removed when the current node pool does not reference it and
++    it is older than CONFIG_KEEP_SECONDS, so the config of an in-flight
++    connection is never touched. VPNGATE_CONFIG_MAX_FILES caps the number of
++    regular configs on top of that rule; both knobs set to 0 restores the old
++    behaviour. In-flight node tests (".test_<id>_<uuid>.ovpn", created and
++    removed within seconds) are exempt from the cap and, being far younger than
++    the grace period, also from the age rule; abandoned ones are collected once
++    they age out.
++    """
++    if not CONFIG_DIR.is_dir():
++        return 0
++    if CONFIG_KEEP_SECONDS <= 0 and CONFIG_MAX_FILES <= 0:
++        return 0
++    if keep_files is None:
++        keep_files = {
++            Path(node["config_file"]).name
++            for node in read_nodes()
++            if node.get("config_file")
++        }
++    files: list[tuple[float, Path]] = []
++    for entry in CONFIG_DIR.iterdir():
++        if entry.suffix != ".ovpn" or not entry.is_file():
++            continue
++        try:
++            files.append((entry.stat().st_mtime, entry))
++        except OSError:
++            continue
++    files.sort()
++    doomed: set[Path] = set()
++    if CONFIG_KEEP_SECONDS > 0:
++        cutoff = time.time() - CONFIG_KEEP_SECONDS
++        doomed = {path for mtime, path in files if mtime < cutoff and path.name not in keep_files}
++    if CONFIG_MAX_FILES > 0:
++        counted = [(mtime, path) for mtime, path in files
++                   if path not in doomed and not path.name.startswith(".")]
++        surplus = len(counted) - CONFIG_MAX_FILES
++        for _mtime, path in counted:
++            if surplus <= 0:
++                break
++            if path.name in keep_files:
++                continue
++            doomed.add(path)
++            surplus -= 1
++    removed = 0
++    for path in doomed:
++        try:
++            path.unlink()
++            removed += 1
++        except OSError:
++            continue
++    if removed:
++        print(f"[configs] 已清理 {removed} 个过期节点配置，当前保留 {len(files) - removed} 个（节点池引用 {len(keep_files)} 个）", flush=True)
++    return removed
++
+ def maintain_valid_nodes(force: bool = False) -> str:
+     global active_openvpn_process, active_openvpn_node_id, is_connecting
+     ensure_dirs()
+@@ -2606,6 +2669,11 @@ def maintain_valid_nodes(force: bool = False) -> str:
+                         pass
+                         
+             write_json(NODES_FILE, merged)
++            prune_config_dir({
++                Path(node["config_file"]).name
++                for node in merged
++                if node.get("config_file")
++            })
+             ip_enrichment_wakeup.set()
+ 
+         initial_tested_ids: set[str] = set()
+@@ -7481,6 +7549,7 @@ class Tee:
+ 
+ def main() -> None:
+     ensure_dirs()
++    prune_config_dir()
+     kill_existing_openvpn_processes()
+     
+     log_file = DATA_DIR / "vpngate.log"
