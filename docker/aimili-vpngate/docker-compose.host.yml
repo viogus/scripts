@@ -1,0 +1,70 @@
+# aimili-vpngate —— host 网络模式变体
+#
+#   docker compose -f docker-compose.host.yml up -d
+#
+# 什么时候用：想让容器直接占用宿主机端口（不经过 docker-proxy 的转发）、或者让 LAN
+# 设备直连 7928 而不依赖端口映射。否则请用 docker-compose.yml（bridge 模式，默认）。
+#
+# 与 docker-compose.yml 的四处差别，前三处是硬性的：
+#   1. 去掉 ports：host 模式下容器端口就是宿主端口，写了会被丢弃（compose 会 WARN）。
+#   2. 去掉 sysctls：host 网络下 runc 直接拒绝启动，报
+#      `sysctl "net.ipv4.conf.all.rp_filter" not allowed in host network namespace`。
+#      rp_filter 由 entrypoint.sh 里的 `sysctl -w ... || true` 自己设置，实测能成功
+#      —— 也就是说这一项仍然会改到宿主机全局（arm 上 all 从 0 变成 2）。
+#   3. devices / cap_add 不能省：host 模式不会补 /dev/net/tun，也不会补 NET_ADMIN。
+#      （代理出口用 SO_BINDTODEVICE 绑 tun0，需要 CAP_NET_RAW，它本来就在 docker
+#       默认能力集里，所以不用额外加。）
+#   4. 一台宿主机只能跑一个实例：8787/7928 会撞车，tun0 也只能有一个。
+#
+# 安全性：源码里 openvpn 一律带 `--route-nopull`（vpngate_manager.py 全部调用点都传
+# route_nopull=True），代理出口是 SO_BINDTODEVICE 绑 tun0（proxy_server.py:207），
+# 所以宿主机的默认路由不会被 VPN 接管，SSH 不会断；tun0 会出现在宿主机上。但容器
+# 拿到的是宿主 netns 的 NET_ADMIN，理论上能改宿主路由（镜像里已删掉 iptables，
+# 但 `ip` 还在）。
+services:
+  aimili-vpngate:
+    image: ghcr.io/viogus/aimili-vpngate:latest
+    container_name: aimili-vpngate
+    pull_policy: always
+    restart: unless-stopped
+    network_mode: host
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+
+    volumes:
+      - ./vpngate-data:/opt/aimilivpn/vpngate_data
+
+    environment:
+      WEB_PORT: "8787"
+
+      # 只在这个国家内选最优连接，并锁定路由模式。删掉这两行即交回面板。
+      VPNGATE_COUNTRY: "${VPNGATE_COUNTRY:-KR}"
+      VPNGATE_COUNTRY_LOCK: "${VPNGATE_COUNTRY_LOCK:-1}"
+
+      # 凭据：留空 = 首次启动随机生成（docker compose logs 里能看到）
+      WEB_USERNAME: "${WEB_USERNAME:-}"
+      WEB_PASSWORD: "${WEB_PASSWORD:-}"
+      SECRET_PATH: "${SECRET_PATH:-}"
+
+      # 代理认证：两行必须一起给值，只设一个 = 用户 + 空密码；都不填 = 免认证
+      LOCAL_PROXY_USER: "${LOCAL_PROXY_USER:-}"
+      LOCAL_PROXY_PASS: "${LOCAL_PROXY_PASS:-}"
+
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 7928), 3); s.close()"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+# 镜像里已内置：VPNGATE_DATA_DIR / LOCAL_PROXY_HOST=:: / DEPLOYMENT_MODE=docker /
+# PYTHONUNBUFFERED=1 / VPNGATE_LOG_MAX_BYTES=16777216 / VPNGATE_LOG_BACKUP_COUNT=3

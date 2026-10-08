@@ -2,7 +2,7 @@
 
 [AimiliVPN](https://github.com/OpenMili/aimili-vpngate) — 基于 VPNGate 公开节点的 SOCKS5/HTTP 代理网关。零 Python 依赖，纯标准库。
 
-**镜像**：`ghcr.io/viogus/aimili-vpngate:latest`（~36MB，Alpine 3.24 多阶段构建）
+**镜像**：`ghcr.io/viogus/aimili-vpngate:latest`（~31MB，Alpine 3.24 多阶段构建）
 
 ## 用法
 
@@ -78,6 +78,29 @@ docker run -d \
   -e VPNGATE_COUNTRY=KR \
   ghcr.io/viogus/aimili-vpngate:latest
 ```
+
+### host 网络模式（可选）
+
+仓库里的 `docker-compose.host.yml` 是 `network_mode: host` 变体，用法：
+
+```bash
+docker compose -f docker-compose.host.yml up -d
+```
+
+容器直接占用宿主机 8787/7928，不经过 docker-proxy。改这份文件时有三点不能照抄：
+
+- **必须删掉 `ports:`** —— host 模式下容器端口就是宿主端口，写了会被丢弃（compose 会 WARN）。
+- **必须删掉 `sysctls:`** —— host 网络下 runc 拒绝启动：
+  `sysctl "net.ipv4.conf.all.rp_filter" not allowed in host network namespace`。
+  `rp_filter` 由 `entrypoint.sh` 里的 `sysctl -w … || true` 自己设置，实测能成功，
+  所以这一项**仍然会改到宿主机全局**（实测 arm 上 `all` 从 `0` 变成 `2`）。
+- **`devices: /dev/net/tun` 和 `cap_add: NET_ADMIN` 不能省** —— host 模式不会补这两样。
+  代理出口用 `SO_BINDTODEVICE` 绑 `tun0`（`proxy_server.py:207`），需要 `CAP_NET_RAW`，
+  它本来就在 docker 默认能力集里，不用额外加。
+
+宿主机默认路由不会被 VPN 接管（openvpn 一律带 `--route-nopull`，全部调用点都传
+`route_nopull=True`），所以 SSH 安全；但 `tun0` 会出现在宿主机上，且一台宿主机只能跑
+一个实例（端口 + `tun0` 都会撞车）。
 
 启动后查看日志获取 Web 管理面板地址和登录凭据：
 
