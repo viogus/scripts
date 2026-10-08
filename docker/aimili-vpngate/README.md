@@ -92,15 +92,25 @@ docker compose -f docker-compose.host.yml up -d
 - **必须删掉 `ports:`** —— host 模式下容器端口就是宿主端口，写了会被丢弃（compose 会 WARN）。
 - **必须删掉 `sysctls:`** —— host 网络下 runc 拒绝启动：
   `sysctl "net.ipv4.conf.all.rp_filter" not allowed in host network namespace`。
-  `rp_filter` 由 `entrypoint.sh` 里的 `sysctl -w … || true` 自己设置，实测能成功，
-  所以这一项**仍然会改到宿主机全局**（实测 arm 上 `all` 从 `0` 变成 `2`）。
+  而 `entrypoint.sh` / `setup_policy_routing()` 里那几行 `sysctl -w …` 也设不了：容器里的
+  `/proc/sys` 是只读挂载（`proc on /proc/sys type proc (ro,…)`），实测报
+  `sysctl: error setting key 'net.ipv4.conf.all.rp_filter': Read-only file system`，
+  被 `|| true` 静默吞掉。所以 host 模式下 **`rp_filter` 完全不会被动到**（arm 实测部署前后
+  都是 `all=0 / default=2`，`tun0` 建出来后继承 `default=2`）。只有 bridge 模式的 `sysctls:`
+  才能真正生效 —— docker 在创建容器时写入，那时还是独立 netns。若宿主机是严格模式（`1`）
+  且出现 DNS 回包丢失，请在宿主机上改，而不是写进这个 stack。
 - **`devices: /dev/net/tun` 和 `cap_add: NET_ADMIN` 不能省** —— host 模式不会补这两样。
   代理出口用 `SO_BINDTODEVICE` 绑 `tun0`（`proxy_server.py:207`），需要 `CAP_NET_RAW`，
   它本来就在 docker 默认能力集里，不用额外加。
 
-宿主机默认路由不会被 VPN 接管（openvpn 一律带 `--route-nopull`，全部调用点都传
-`route_nopull=True`），所以 SSH 安全；但 `tun0` 会出现在宿主机上，且一台宿主机只能跑
-一个实例（端口 + `tun0` 都会撞车）。
+宿主机默认路由不会被 VPN 接管：openvpn 一律带 `--route-nopull`（全部调用点都传
+`route_nopull=True`），实测日志里服务端推送的 `redirect-gateway def1` 被 openvpn 判为
+`Options error: option 'redirect-gateway' cannot be used in this context ([PUSH-OPTIONS])`，
+出口靠 `SO_BINDTODEVICE` 绑 `tun0`。但**策略路由是加在宿主机上的**：
+`setup_policy_routing()`（`vpngate_manager.py:1548`）会先删掉宿主机上已有的 `table 100`
+规则和路由，再加 `ip rule oif tun0 lookup 100` + `table 100 default dev tun0`（停止时
+`cleanup_policy_routing()` 清理）。arm 实测宿主机 default 路由不变，只多出这一条 rule；
+`tun0` 会出现在宿主机上，且一台宿主机只能跑一个实例。
 
 启动后查看日志获取 Web 管理面板地址和登录凭据：
 

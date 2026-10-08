@@ -9,18 +9,22 @@
 #   1. 去掉 ports：host 模式下容器端口就是宿主端口，写了会被丢弃（compose 会 WARN）。
 #   2. 去掉 sysctls：host 网络下 runc 直接拒绝启动，报
 #      `sysctl "net.ipv4.conf.all.rp_filter" not allowed in host network namespace`。
-#      rp_filter 由 entrypoint.sh 里的 `sysctl -w ... || true` 自己设置，实测能成功
-#      —— 也就是说这一项仍然会改到宿主机全局（arm 上 all 从 0 变成 2）。
+#      也别指望程序自己设：容器里 /proc/sys 是只读挂载，`sysctl -w` 报
+#      "Read-only file system"（被 entrypoint 的 || true 吞掉）。所以 host 模式下
+#      rp_filter 完全不会被动到（实测宿主 all=0 / default=2 前后不变）。要调请在
+#      宿主机上调，而不是写进这个 stack。
 #   3. devices / cap_add 不能省：host 模式不会补 /dev/net/tun，也不会补 NET_ADMIN。
 #      （代理出口用 SO_BINDTODEVICE 绑 tun0，需要 CAP_NET_RAW，它本来就在 docker
 #       默认能力集里，所以不用额外加。）
 #   4. 一台宿主机只能跑一个实例：8787/7928 会撞车，tun0 也只能有一个。
 #
 # 安全性：源码里 openvpn 一律带 `--route-nopull`（vpngate_manager.py 全部调用点都传
-# route_nopull=True），代理出口是 SO_BINDTODEVICE 绑 tun0（proxy_server.py:207），
-# 所以宿主机的默认路由不会被 VPN 接管，SSH 不会断；tun0 会出现在宿主机上。但容器
-# 拿到的是宿主 netns 的 NET_ADMIN，理论上能改宿主路由（镜像里已删掉 iptables，
-# 但 `ip` 还在）。
+# route_nopull=True），服务端推送的 redirect-gateway 会被 openvpn 拒绝应用；代理出口是
+# SO_BINDTODEVICE 绑 tun0（proxy_server.py:207），所以宿主机的默认路由不会被 VPN 接管，
+# SSH 不会断。但策略路由确实会动宿主机：setup_policy_routing() 会先删掉宿主机上已有的
+# table 100 规则/路由，再加 `ip rule oif tun0 lookup 100` + `table 100 default dev tun0`
+# （停止时 cleanup_policy_routing() 清理）。另外容器拿到的是宿主 netns 的 NET_ADMIN，
+# 理论上能改宿主路由（镜像里已删掉 iptables，但 `ip` 还在）。
 services:
   aimili-vpngate:
     image: ghcr.io/viogus/aimili-vpngate:latest
