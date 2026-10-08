@@ -1,16 +1,28 @@
+# aimili-vpngate —— 推荐配置
+#
+#   docker compose up -d && docker compose logs -f      # 首次启动会打印面板地址与凭据
+#   docker compose pull && docker compose up -d         # 手动更新（用 watchtower 则不用管）
+#
+# 可选：在同一个目录放一个 .env，把下面 ${...} 的值写进去（compose 会自动读取），
+# 例如 WEB_PASSWORD=xxx / VPNGATE_COUNTRY=KR。
 services:
   aimili-vpngate:
     image: ghcr.io/viogus/aimili-vpngate:latest
+    container_name: aimili-vpngate
+    pull_policy: always
     restart: unless-stopped
-    # container stdout is a second copy of vpngate.log — keep it bounded too
+
+    # 容器 stdout 是 vpngate.log 的第二份拷贝，一并做上限
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
     ports:
-      - "8787:8787"   # web panel
-      - "7928:7928"   # SOCKS5/HTTP proxy
+      - "7928:7928"                 # SOCKS5/HTTP 代理，给本机其它服务用
+      - "8787:8787"                 # web 面板；只想内网访问就改成 "127.0.0.1:8787:8787"
+
     devices:
       - /dev/net/tun:/dev/net/tun
     cap_add:
@@ -18,21 +30,42 @@ services:
     sysctls:
       - net.ipv4.conf.all.rp_filter=2
       - net.ipv4.conf.default.rp_filter=2
-    volumes:
-      - aimili-data:/opt/aimilivpn/vpngate_data
-    environment:
-      - WEB_PORT=8787
-      # - WEB_USERNAME=admin
-      # - WEB_PASSWORD=your_password
-      # - SECRET_PATH=mysecret
-      # - LOCAL_PROXY_USER=proxy_user      # SOCKS5/HTTP 代理认证
-      # - LOCAL_PROXY_PASS=proxy_pass      # 设置后代理需用户名密码
-      # 只在这个国家内选最优连接：ISO 两字母代码，或用面板里的国家名（日本/Japan），
-      # 多个用逗号分隔；单国时同时锁定路由模式为「固定地区」（只连该国节点）。
-      # - VPNGATE_COUNTRY=KR
-      # - VPNGATE_COUNTRY_LOCK=0           # 设为 0 只收窄候选池，失效可回退到其他国家
-      # - VPNGATE_LOG_MAX_BYTES=16777216   # vpngate.log 单文件上限（字节），0 = 不轮转
-      # - VPNGATE_LOG_BACKUP_COUNT=3       # 保留的 vpngate.log.N 历史份数
 
-volumes:
-  aimili-data:
+    volumes:
+      # ui_auth.json / state.json / nodes.json / vpngate.log 都在这里，务必持久化
+      - ./vpngate-data:/opt/aimilivpn/vpngate_data
+
+    environment:
+      WEB_PORT: "8787"
+
+      # 只在这个国家内选最优连接。单国时同时把路由模式锁成「固定地区」
+      # （该国节点全挂就断开重试，不会偷偷换国）。多国写 "KR,JP" 只收窄候选池；
+      # 想要更宽的备选池就设 VPNGATE_COUNTRY_LOCK=0；完全交回面板就删掉这两行。
+      VPNGATE_COUNTRY: "${VPNGATE_COUNTRY:-KR}"
+      VPNGATE_COUNTRY_LOCK: "${VPNGATE_COUNTRY_LOCK:-1}"
+
+      # 凭据：留空 = 首次启动随机生成（docker compose logs 里能看到）。
+      # 注意 data 目录里一旦有 ui_auth.json 就不再重新生成，改这里不会生效。
+      WEB_USERNAME: "${WEB_USERNAME:-}"
+      WEB_PASSWORD: "${WEB_PASSWORD:-}"
+      SECRET_PATH: "${SECRET_PATH:-}"
+
+      # 代理认证：7928 只要能被人碰到就建议设置，否则谁都能白嫖你的出口 IP
+      LOCAL_PROXY_USER: "${LOCAL_PROXY_USER:-}"
+      LOCAL_PROXY_PASS: "${LOCAL_PROXY_PASS:-}"
+
+    # 可选：探活代理端口（镜像里 python3 一定在）
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 7928), 3); s.close()"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+# 镜像里已内置这些默认值，一般不用再写：
+#   VPNGATE_DATA_DIR=/opt/aimilivpn/vpngate_data
+#   LOCAL_PROXY_HOST=::            # 双栈监听，端口映射必须靠它；别改成 127.0.0.1
+#   DEPLOYMENT_MODE=docker
+#   PYTHONUNBUFFERED=1
+#   VPNGATE_LOG_MAX_BYTES=16777216  # vpngate.log 单文件上限，0 = 关闭轮转
+#   VPNGATE_LOG_BACKUP_COUNT=3

@@ -12,6 +12,8 @@
 services:
   aimili-vpngate:
     image: ghcr.io/viogus/aimili-vpngate:latest
+    container_name: aimili-vpngate
+    pull_policy: always
     restart: unless-stopped
     logging:                      # 容器 stdout 是 vpngate.log 的第二份拷贝，一并限制
       driver: json-file
@@ -19,8 +21,8 @@ services:
         max-size: "10m"
         max-file: "3"
     ports:
-      - "8787:8787"   # web 管理面板
       - "7928:7928"   # SOCKS5/HTTP 代理
+      - "8787:8787"   # web 管理面板；只想内网访问改成 "127.0.0.1:8787:8787"
     devices:
       - /dev/net/tun:/dev/net/tun
     cap_add:
@@ -29,19 +31,34 @@ services:
       - net.ipv4.conf.all.rp_filter=2
       - net.ipv4.conf.default.rp_filter=2
     volumes:
-      - ./aimili-data:/opt/aimilivpn/vpngate_data
+      - ./vpngate-data:/opt/aimilivpn/vpngate_data   # ui_auth/state/nodes.json + vpngate.log
     environment:
-      - WEB_PORT=8787
-      # - WEB_USERNAME=admin        # 可选，默认随机生成
-      # - WEB_PASSWORD=your_pass    # 可选，默认随机生成
-      # - SECRET_PATH=mysecret      # 可选，默认随机生成
-      # - LOCAL_PROXY_USER=proxy    # 可选，SOCKS5/HTTP 代理认证用户名
-      # - LOCAL_PROXY_PASS=pwd      # 可选，SOCKS5/HTTP 代理认证密码
-      # - VPNGATE_COUNTRY=KR        # 可选，只在该国家内选最优连接（韩国/Korea 亦可）
-      # - VPNGATE_COUNTRY_LOCK=0    # 可选，只收窄候选池，失效可回退到其他国家
-      # - VPNGATE_LOG_MAX_BYTES=16777216   # 可选，vpngate.log 单文件上限（字节），0 = 不轮转
-      # - VPNGATE_LOG_BACKUP_COUNT=3       # 可选，保留的 vpngate.log.N 历史份数
+      WEB_PORT: "8787"
+      # 只在该国家内选最优连接；单国时同时锁定路由模式。删掉即交回面板
+      VPNGATE_COUNTRY: "${VPNGATE_COUNTRY:-KR}"
+      VPNGATE_COUNTRY_LOCK: "${VPNGATE_COUNTRY_LOCK:-1}"
+      # 留空 = 首次启动随机生成（docker logs 里能看到）
+      WEB_USERNAME: "${WEB_USERNAME:-}"
+      WEB_PASSWORD: "${WEB_PASSWORD:-}"
+      SECRET_PATH: "${SECRET_PATH:-}"
+      # 7928 会被面板以外的人碰到就必须设置
+      LOCAL_PROXY_USER: "${LOCAL_PROXY_USER:-}"
+      LOCAL_PROXY_PASS: "${LOCAL_PROXY_PASS:-}"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 7928), 3); s.close()"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 ```
+
+带完整注释的版本就是仓库里的 `docker-compose.yml`；`${...}` 的值可以写进同目录的 `.env`
+（compose 会自动读取）。镜像已内置 `VPNGATE_DATA_DIR`、`LOCAL_PROXY_HOST=::`（双栈监听，
+**端口映射依赖它**）、`DEPLOYMENT_MODE=docker`、`PYTHONUNBUFFERED=1`、
+`VPNGATE_LOG_MAX_BYTES=16777216`、`VPNGATE_LOG_BACKUP_COUNT=3`，无需重复声明。
+
+`ui_auth.json` 一旦在数据目录里生成，改环境变量就不再生效（面板里的路由设置同理）；
+要解除国家锁定，把面板改回「自动」，或删掉 `vpngate-data/ui_auth.json` 后重建容器。
 
 ### docker run
 
@@ -49,13 +66,16 @@ services:
 docker run -d \
   --name aimili-vpngate \
   --restart unless-stopped \
-  -p 8787:8787 \
+  --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
   -p 7928:7928 \
+  -p 8787:8787 \
   --device /dev/net/tun:/dev/net/tun \
   --cap-add NET_ADMIN \
   --sysctl net.ipv4.conf.all.rp_filter=2 \
   --sysctl net.ipv4.conf.default.rp_filter=2 \
-  -v ./aimili-data:/opt/aimilivpn/vpngate_data \
+  -v ./vpngate-data:/opt/aimilivpn/vpngate_data \
+  -e WEB_PORT=8787 \
+  -e VPNGATE_COUNTRY=KR \
   ghcr.io/viogus/aimili-vpngate:latest
 ```
 
