@@ -206,13 +206,15 @@ requests.get("https://www.google.com", proxies=proxies)
 
 底座选型也验证过：换 `scratch` 只省 0.3MB（-2%），还丢掉 `apk`；换 Tiny Core
 也不划算——社区镜像（Docker Hub 上 74 个 tinycore/picore repo）几乎全是 amd64，
-底座 3.3–4.4MB 压缩，并不比 `alpine` 的 3.99MB 小；arm64 只有 `zkei/tinycore-rpi`
-（38.9MB）和 KubeVirt 的 `cdi-func-test-tinycore`（16.7MB）这类非通用镜像，ghcr.io
-也只有 `ghcr.io/innovarew/docker-tinycore`（x86_64）。自制 piCore64 底座确实更小
-（2.41MiB 压缩，省约 1.6MB），但 TC 的 aarch64 仓库只到 Python 3.11，且单个
-`python3.11.tcz` 就有 20.4MB、连依赖约 25–28MB（.tcz 本身已是压缩包），远超 Alpine
-整个运行层 6.34MB，还要丢掉 `apk` 与 Alpine 的安全更新。结论：**保留 Alpine，体积从
-载荷里省**。
+底座 3.3–4.4MB 压缩，并不比 `alpine` 的 3.99MB 小（最像样的
+`dslater/tinycore:17.1-x86_64` 实测 4.44MB，只有 amd64，且其中 0.64MB 是用不到的
+`squashfs-tools`）；arm64 只有 `zkei/tinycore-rpi`（38.9MB）和 KubeVirt 的
+`cdi-func-test-tinycore`（16.7MB）这类非通用镜像，ghcr.io 也只有
+`ghcr.io/innovarew/docker-tinycore`（x86_64）。自制 piCore64 底座确实更小
+（2.41MiB 压缩，省约 1.6MB），但 TC 的 Python 包本身就超标：x86_64 的
+`python3.14.tcz` 20.5MB、aarch64 只到 3.11 且 `python3.11.tcz` 20.4MB，连依赖约
+25–28MB（.tcz 本身已是压缩包），远超 Alpine 整个运行层 6.34MB，还要丢掉 `apk` 与
+Alpine 的安全更新。结论：**保留 Alpine，体积从载荷里省**。
 
 ## 构建
 
