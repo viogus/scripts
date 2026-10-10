@@ -87,6 +87,8 @@ declare -f has_cmd detect_init detect_os ensure_openrc_base \
 
 多架构镜像（amd64/arm64/armv7），每周自动更新，推送到 [ghcr.io/viogus](https://github.com/viogus/scripts/pkgs/container/)。
 
+底座选型（Tiny Core vs Alpine vs scratch）与全仓库体积实测见 [`docs/superpowers/specs/2026-10-07-docker-base-selection.md`](docs/superpowers/specs/2026-10-07-docker-base-selection.md)。
+
 ### frp-rs（frps / frpc）
 
 基于 [viogus/frp-rs](https://github.com/viogus/frp-rs)，自写 Rust 实现，兼容 fatedier/frp V1 wire protocol。

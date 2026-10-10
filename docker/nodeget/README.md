@@ -90,3 +90,11 @@ services:
 ## 更新
 
 每天自动从 viogus/NodeGet（默认，含 TimescaleDB）抓取最新 release 并重建；手动触发可指定 nodeget_repo 与版本。
+
+为避免“版本号没变但重新上传了二进制”的情况漏更新，定时构建前会先比对 release 资产的 sha256 指纹：
+
+- 对当前镜像实际用到的架构二进制（musl，armv7 含 gnu 回退）取 sha256 摘要，拼成一个指纹；
+- 指纹以 src-<fingerprint> 标签记录在已发布镜像上；
+- 指纹未变 → 跳过，不发新版本；指纹变了（包括同版本重传二进制）→ 重建并覆盖 latest / 版本号 / src-<fingerprint> 标签。
+
+镜像同时带有 org.nodeget.source-sha 标签，便于追溯构建来源。

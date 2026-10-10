@@ -47,20 +47,59 @@ jobs:
         env:
           REPO: ${{ inputs.nodeget_repo || 'viogus/NodeGet' }}
         run: |
+          # Fetch the whole release payload so the source fingerprint step can
+          # read the per-asset sha256 digests. Manual dispatch may pin a tag.
           if [ -n "${{ inputs.nodeget_version }}" ]; then
-            echo "nodeget_version=${{ inputs.nodeget_version }}" >> $GITHUB_OUTPUT
+            VER="${{ inputs.nodeget_version }}"
+            API="https://api.github.com/repos/${REPO}/releases/tags/v${VER}"
           else
-            VER=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" \
-              | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
-            if [ -z "$VER" ]; then
-              echo "::warning::Failed to fetch latest NodeGet release from ${REPO}, falling back to 0.2.11"
-              VER="0.2.11"
-            fi
-            echo "nodeget_version=$VER" >> $GITHUB_OUTPUT
+            API="https://api.github.com/repos/${REPO}/releases/latest"
           fi
+
+          RELEASE_JSON=$(curl -fsSL "$API" 2>/dev/null || true)
+          printf '%s' "$RELEASE_JSON" > "$RUNNER_TEMP/release.json"
+
+          if [ -z "$VER" ]; then
+            VER=$(printf '%s' "$RELEASE_JSON" \
+              | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^"]+)".*/\1/p' | head -1)
+          fi
+          if [ -z "$VER" ]; then
+            echo "::warning::Failed to fetch latest NodeGet release from ${REPO}, falling back to 0.2.11"
+            VER="0.2.11"
+          fi
+          echo "nodeget_version=$VER" >> $GITHUB_OUTPUT
           echo "nodeget_repo=${REPO}" >> $GITHUB_OUTPUT
 
-      - name: Check if image already published
+      - name: Compute source fingerprint
+        id: fingerprint
+        run: |
+          # Fingerprint the exact release assets this component consumes (incl.
+          # the armv7 musl -> gnu fallback). A republished release with the same
+          # version but different binaries yields a different fingerprint, so it
+          # still rebuilds; identical binaries are skipped.
+          COMP="${{ matrix.component }}"
+          ASSETS="${COMP}-linux-x86_64-musl ${COMP}-linux-aarch64-musl \
+            ${COMP}-linux-armv7-musleabihf ${COMP}-linux-armv7-gnueabihf"
+
+          if [ -s "$RUNNER_TEMP/release.json" ] && jq -e . "$RUNNER_TEMP/release.json" >/dev/null 2>&1; then
+            FP=""
+            for a in $ASSETS; do
+              d=$(jq -r --arg n "$a" \
+                '.assets[] | select(.name==$n) | (.digest // ("updated:" + .updated_at))' \
+                "$RUNNER_TEMP/release.json" | head -1)
+              { [ -n "$d" ] && [ "$d" != "null" ]; } || d="missing"
+              FP="${FP}${a}=${d}"$'\n'
+            done
+            SHA=$(printf '%s' "$FP" | sha256sum | awk '{print $1}')
+          else
+            echo "::warning::release.json unavailable, fingerprinting by version only"
+            SHA=$(printf 'version=%s\n' "${{ steps.version.outputs.nodeget_version }}" | sha256sum | awk '{print $1}')
+          fi
+
+          echo "source_sha=${SHA}" >> $GITHUB_OUTPUT
+          echo "source fingerprint for ${COMP}: ${SHA}"
+
+      - name: Check if source already published
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,16 +110,30 @@ jobs:
             exit 0
           fi
 
-          VER="${{ steps.version.outputs.nodeget_version }}"
+          SRC="${{ steps.fingerprint.outputs.source_sha }}"
+          OWNER="${{ github.repository_owner }}"
           COMP="${{ matrix.component }}"
-          EXISTS=$(gh api "orgs/${{ github.repository_owner }}/packages/container/${COMP}/versions" \
-            --jq '.[].metadata.container.tags[]' 2>/dev/null | grep -Fx "${VER}" || true)
+          TAG="src-${SRC}"
+
+          # Ask the GHCR registry directly for the tag list — robust to whether
+          # the package owner is a user or an org (the packages REST API needs
+          # /users vs /orgs and correct scopes).
+          TOKEN=$(curl -fsSL -u "${GITHUB_ACTOR}:${GH_TOKEN}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER}/${COMP}:pull" \
+            2>/dev/null | jq -r .token 2>/dev/null || true)
+
+          EXISTS=""
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+            EXISTS=$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" \
+              "https://ghcr.io/v2/${OWNER}/${COMP}/tags/list" 2>/dev/null \
+              | jq -r '.tags[]?' 2>/dev/null | grep -Fx "${TAG}" || true)
+          fi
 
           if [ -n "$EXISTS" ]; then
-            echo "Tag ${COMP}:${VER} already published, skipping."
+            echo "Source ${SRC} already published as ${COMP}:${TAG}, skipping."
             echo "skip=true" >> $GITHUB_OUTPUT
           else
-            echo "Tag ${COMP}:${VER} not found, building..."
+            echo "Source ${SRC} not published for ${COMP}, building..."
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
@@ -109,6 +162,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.version.outputs.nodeget_version }}
+            type=raw,value=src-${{ steps.fingerprint.outputs.source_sha }}
 
       - name: Build and push
         if: steps.check.outputs.skip != 'true'
@@ -120,7 +174,9 @@ jobs:
             NODEGET_VERSION=${{ steps.version.outputs.nodeget_version }}
             NODEGET_REPO=${{ steps.version.outputs.nodeget_repo }}
             NODEGET_COMPONENT=${{ matrix.component }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.nodeget.source-sha=${{ steps.fingerprint.outputs.source_sha }}
           tags: ${{ steps.meta.outputs.tags }}
           push: true
           provenance: false

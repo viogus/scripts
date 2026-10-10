@@ -88,3 +88,5 @@ docker build --build-arg OPENSNELL_VERSION=v1.0.2 -t opensnell-server docker/ope
 ## 更新
 
 每周自动检查 [OpenSnell releases](https://github.com/missuo/opensnell/releases)，有新版本即重建。
+
+为避免重复发版，定时构建前先比对源码指纹（tag 解析出的 git commit + 版本号）：指纹以 `src-<fingerprint>` 标签记录在已发布镜像上，指纹未变则跳过；tag 被重指/force-push 导致 commit 变化时也会重建。镜像另带 `org.opensnell.source-sha` 标签便于追溯。

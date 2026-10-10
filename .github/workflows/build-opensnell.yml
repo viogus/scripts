@@ -33,37 +33,78 @@ jobs:
       - name: Determine OpenSnell version
         id: version
         run: |
+          # Save the release payload so the fingerprint step can use it; a
+          # manual dispatch may pin any tag/branch ref.
           if [ -n "${{ inputs.opensnell_version }}" ]; then
-            echo "opensnell_version=${{ inputs.opensnell_version }}" >> $GITHUB_OUTPUT
+            VER="${{ inputs.opensnell_version }}"
           else
-            VER=$(curl -s https://api.github.com/repos/missuo/opensnell/releases/latest \
-              | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+            RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/missuo/opensnell/releases/latest" 2>/dev/null || true)
+            printf '%s' "$RELEASE_JSON" > "$RUNNER_TEMP/release.json"
+            VER=$(printf '%s' "$RELEASE_JSON" \
+              | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
             if [ -z "$VER" ]; then
               echo "::warning::Failed to fetch latest OpenSnell version, falling back to v1.0.2"
               VER="v1.0.2"
             fi
-            echo "opensnell_version=$VER" >> $GITHUB_OUTPUT
+          fi
+          echo "opensnell_version=$VER" >> $GITHUB_OUTPUT
+
+      - name: Compute source fingerprint
+        id: fingerprint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # OpenSnell is built from source, so fingerprint the resolved git
+          # commit of the ref plus the version string baked into the binary.
+          # A retagged / force-pushed release yields a new commit -> rebuild;
+          # an unchanged ref is skipped.
+          VER="${{ steps.version.outputs.opensnell_version }}"
+          COMMIT=$(gh api "repos/missuo/opensnell/commits/${VER}" --jq .sha 2>/dev/null || true)
+          # gh api prints its error JSON to stdout on failure, so validate shape.
+          if ! printf '%s' "$COMMIT" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::warning::Could not resolve commit for ${VER}, fingerprinting by version only"
+            COMMIT="unresolved"
           fi
 
-      - name: Check if image already published
+          SHA=$(printf 'version=%s\ncommit=%s\n' "$VER" "$COMMIT" | sha256sum | awk '{print $1}')
+          echo "source_sha=${SHA}" >> $GITHUB_OUTPUT
+          echo "source fingerprint: version=${VER} commit=${COMMIT} -> ${SHA}"
+
+      - name: Check if source already published
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # only skip on schedule; push/workflow_dispatch always build
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "skip=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          VER="${{ steps.version.outputs.opensnell_version }}"
-          EXISTS=$(gh api "orgs/${{ github.repository_owner }}/packages/container/opensnell-server/versions" \
-            --jq '.[].metadata.container.tags[]' 2>/dev/null | grep -Fx "${VER}" || true)
+          SRC="${{ steps.fingerprint.outputs.source_sha }}"
+          OWNER="${{ github.repository_owner }}"
+          COMP="opensnell-server"
+          TAG="src-${SRC}"
+
+          # Ask the GHCR registry directly for the tag list — robust to whether
+          # the package owner is a user or an org (the packages REST API needs
+          # /users vs /orgs and correct scopes).
+          TOKEN=$(curl -fsSL -u "${GITHUB_ACTOR}:${GH_TOKEN}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER}/${COMP}:pull" \
+            2>/dev/null | jq -r .token 2>/dev/null || true)
+
+          EXISTS=""
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+            EXISTS=$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" \
+              "https://ghcr.io/v2/${OWNER}/${COMP}/tags/list" 2>/dev/null \
+              | jq -r '.tags[]?' 2>/dev/null | grep -Fx "${TAG}" || true)
+          fi
 
           if [ -n "$EXISTS" ]; then
-            echo "Tag opensnell-server:${VER} already published, skipping."
+            echo "Source ${SRC} already published as ${COMP}:${TAG}, skipping."
             echo "skip=true" >> $GITHUB_OUTPUT
           else
-            echo "Tag opensnell-server:${VER} not found, building..."
+            echo "Source ${SRC} not published for ${COMP}, building..."
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
@@ -92,6 +133,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.version.outputs.opensnell_version }}
+            type=raw,value=src-${{ steps.fingerprint.outputs.source_sha }}
 
       - name: Build and push
         if: steps.check.outputs.skip != 'true'
@@ -101,7 +143,9 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           build-args: |
             OPENSNELL_VERSION=${{ steps.version.outputs.opensnell_version }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opensnell.source-sha=${{ steps.fingerprint.outputs.source_sha }}
           tags: ${{ steps.meta.outputs.tags }}
           push: true
           provenance: false
