@@ -1,0 +1,93 @@
+name: Build & Push shadowsocks-rust Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker/shadowsocks/**'
+      - '.github/workflows/build-shadowsocks.yml'
+  schedule:
+    # Weekly refresh. Upstream rarely rebuilds, but Alpine keeps shipping
+    # security fixes and `apk upgrade` only picks them up on a fresh build,
+    # so a schedule (rather than an upstream-digest fingerprint) drives it.
+    - cron: '37 3 * * 1'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve upstream manifest digest
+        id: upstream
+        run: |
+          # Anonymous pull token: the upstream package is public. The digest
+          # changes only when upstream rebuilds; it is stamped onto the image
+          # tags so it stays clear which base a given build came from.
+          TOKEN=$(curl -fsSL \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:shadowsocks/ssserver-rust:pull" \
+            | jq -r .token)
+          DIGEST=$(curl -fsSI \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/shadowsocks/ssserver-rust/manifests/latest" \
+            | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }')
+          if [ -z "$DIGEST" ]; then
+            echo "::error::Could not resolve upstream manifest digest"
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+          echo "short=$(printf '%s' "${DIGEST#sha256:}" | cut -c1-12)" >> $GITHUB_OUTPUT
+          echo "upstream digest: ${DIGEST}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # `shadowsocks-server-rust` is the production name; `ssserver-rust`
+          # is the same build kept under the original name for compatibility.
+          # Both packages already exist and are public — a CI push neither
+          # creates nor changes their visibility.
+          images: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/shadowsocks-server-rust
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/ssserver-rust
+          tags: |
+            type=raw,value=latest
+            type=raw,value=upstream-${{ steps.upstream.outputs.short }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/shadowsocks
+          platforms: linux/amd64,linux/arm64
+          # re-resolve the upstream base and never reuse a cached
+          # `RUN apk upgrade` layer, otherwise a rebuild could ship the very
+          # package versions it is meant to replace.
+          pull: true
+          no-cache: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          provenance: false
