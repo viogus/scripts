@@ -8,14 +8,16 @@ on:
       - 'docker/shadowsocks/**'
       - '.github/workflows/build-shadowsocks.yml'
   schedule:
-    # Weekly refresh. Upstream rarely rebuilds, but Alpine keeps shipping
-    # security fixes and `apk upgrade` only picks them up on a fresh build,
-    # so a schedule (rather than an upstream-digest fingerprint) drives it.
+    # The image is scratch + exactly one upstream artifact (the statically
+    # linked ssserver), so a rebuild only matters when upstream republishes
+    # that binary. The weekly run resolves the digest and skips when it is
+    # already published; it is what picks up a new upstream build on its own.
     - cron: '37 3 * * 1'
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
+  PACKAGE: shadowsocks-server-rust
 
 jobs:
   build:
@@ -31,8 +33,8 @@ jobs:
         id: upstream
         run: |
           # Anonymous pull token: the upstream package is public. The digest
-          # changes only when upstream rebuilds; it is stamped onto the image
-          # tags so it stays clear which base a given build came from.
+          # changes only when upstream rebuilds, and is stamped onto the image
+          # tags so it stays clear which binary a build copied.
           TOKEN=$(curl -fsSL \
             "https://ghcr.io/token?service=ghcr.io&scope=repository:shadowsocks/ssserver-rust:pull" \
             | jq -r .token)
@@ -49,13 +51,51 @@ jobs:
           echo "short=$(printf '%s' "${DIGEST#sha256:}" | cut -c1-12)" >> $GITHUB_OUTPUT
           echo "upstream digest: ${DIGEST}"
 
+      - name: Check if this upstream build is already published
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # push and workflow_dispatch always build; the schedule skips when
+          # the upstream binary it would copy is already published.
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          TAG="upstream-${{ steps.upstream.outputs.short }}"
+          # Ask the registry for the tag list directly — robust to whether the
+          # package owner is a user or an org (the packages REST API needs
+          # /users vs /orgs and the right scopes).
+          TOKEN=$(curl -fsSL -u "${GITHUB_ACTOR}:${GH_TOKEN}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${GITHUB_REPOSITORY_OWNER}/${PACKAGE}:pull" \
+            2>/dev/null | jq -r .token 2>/dev/null || true)
+
+          EXISTS=""
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+            EXISTS=$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" \
+              "https://ghcr.io/v2/${GITHUB_REPOSITORY_OWNER}/${PACKAGE}/tags/list" 2>/dev/null \
+              | jq -r '.tags[]?' 2>/dev/null | grep -Fx "${TAG}" || true)
+          fi
+
+          if [ -n "$EXISTS" ]; then
+            echo "Upstream build ${TAG} already published, skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream build ${TAG} not published yet, building..."
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set up QEMU
+        if: steps.check.outputs.skip != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to ghcr.io
+        if: steps.check.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -63,6 +103,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
+        if: steps.check.outputs.skip != 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -78,15 +119,14 @@ jobs:
             type=raw,value=upstream-${{ steps.upstream.outputs.short }}
 
       - name: Build and push
+        if: steps.check.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: docker/shadowsocks
           platforms: linux/amd64,linux/arm64
-          # re-resolve the upstream base and never reuse a cached
-          # `RUN apk upgrade` layer, otherwise a rebuild could ship the very
-          # package versions it is meant to replace.
+          # re-resolve the upstream image: its binary is the one thing this
+          # image ships, and the Dockerfile has no RUN step to cache anyway.
           pull: true
-          no-cache: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: true
