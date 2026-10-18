@@ -178,6 +178,29 @@ services:
 | `SNELL_UDP` | `true` | UDP-over-TCP |
 | `SNELL_QUIC` | `true` | QUIC 代理模式 |
 
+## 其他工具
+
+### rtk-sandbox-allow.mjs（macOS）
+
+DeepSeek Harness 的 `workspace-write` 会话用 Seatbelt 约束命令：除工作区、`/tmp`
+与平台临时目录外一律拒绝写入。rtk 的状态目录在
+`~/Library/Application Support/rtk`（`history.db`、`recall.db`、`tee/`），不在可写根内，
+于是它的写入被**静默**拒绝 —— 输出压缩照常，但节省账本与 tee 备份都不会产生。
+
+这个脚本只给该目录开一条定向可写根，落在 dsh 的 Seatbelt profile 构建处；进程内的
+`read`/`write`/`edit` 围栏不受影响。
+
+```sh
+./rtk-sandbox-allow.mjs status   # 看是否已打补丁、有没有备份
+./rtk-sandbox-allow.mjs apply    # 打补丁（幂等，带真实 sandbox-exec 写入测试）
+./rtk-sandbox-allow.mjs revert   # 恢复最近一次备份
+```
+
+- 改动的是 `@deepseek-ai/dsh-sandbox-local/lib/index.js`，备份写在同目录的
+  `index.js.dsh-rtk.bak-<时间戳>`。
+- **重启 harness 后生效**；app 升级可能重装该包并抹掉补丁，重跑 `apply` 即可。
+- 不想打补丁的替代方案：把该会话切到 `danger-full-access`（放弃隔离）。
+
 ## 许可
 
 MIT License
