@@ -1,0 +1,16 @@
+services:
+  homeassistant:
+    image: ghcr.io/viogus/homeassistant:2026.10.4
+    container_name: homeassistant
+    restart: unless-stopped
+    # HA 的自动发现（mDNS / SSDP / 局域网广播）需要 host 网络。
+    # 只在内网跑、不需要发现的场景可以换成 ports: ["8123:8123"]。
+    network_mode: host
+    volumes:
+      - ./data:/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: Asia/Shanghai
+      # 想以非 root 跑的话，把下面两行的注释去掉，并且先 chown -R 1000:1000 ./data
+      # 注意：nmap 的 SYN 扫描、部分设备追踪需要 root，普通用户会退化
+      # user: "1000:1000"

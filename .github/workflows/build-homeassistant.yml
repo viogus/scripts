@@ -1,0 +1,176 @@
+name: Build & Push Home Assistant (Alpine) Docker Image
+
+# 自建 kurapov/alpine-homeassistant 的替代镜像，推到 ghcr.io（Docker Hub 现在
+# 到处被限流，自己的 registry 拉起来才稳）。
+#   Dockerfile : docker/homeassistant/Dockerfile（紧跟上游，只把 jemalloc 换成 apk 包）
+#   HA 版本    : 默认取 PyPI 上最新的正式版；也可以在 workflow_dispatch 里指定
+#   架构       : linux/amd64, linux/arm64, linux/arm/v7（后两个在 amd64 runner 上走 QEMU）
+#   跳过       : ghcr 上已有同名 tag 就不重建（cron 跑起来只会在 HA 发新版时干活）
+#
+# 一次三架构构建实测 ~75 分钟（上游同样配置：2026.10.4，05:03 -> 06:16 UTC）。
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker/homeassistant/**'
+      - '.github/workflows/build-homeassistant.yml'
+  schedule:
+    - cron: '41 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      ha_version:
+        description: 'Home Assistant version (e.g. 2026.10.4). Empty = latest stable on PyPI'
+        required: false
+        default: ''
+        type: string
+      force:
+        description: 'Rebuild even when the image tag already exists'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository_owner }}/homeassistant
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve Home Assistant version
+        id: v
+        run: |
+          set -euo pipefail
+          V='${{ inputs.ha_version }}'
+          if [ -z "$V" ]; then
+            # info.version 可能是 beta（2026.11.0b0），所以从 releases 里挑最高的正式版
+            V=$(curl -fsS https://pypi.org/pypi/homeassistant/json \
+              | jq -r '.releases | keys[]' \
+              | grep -E '^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$' \
+              | sort -V | tail -1)
+          fi
+          if ! printf '%s' "$V" | grep -Eq '^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$'; then
+            echo "WARN: cannot resolve a sane Home Assistant version (got '$V'), falling back to 2026.10.4" >&2
+            V=2026.10.4
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "minor=${V%.*}" >> "$GITHUB_OUTPUT"
+          echo "Home Assistant $V"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if version already published
+        id: check
+        run: |
+          set -euo pipefail
+          if [ '${{ inputs.force }}' = 'true' ]; then
+            echo "manual dispatch with force, rebuilding"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
+          if docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists, skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$TAG not found, building"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Extract metadata
+        if: steps.check.outputs.skip != 'true'
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.v.outputs.version }}
+            type=raw,value=${{ steps.v.outputs.minor }}
+
+      - name: Build and push
+        if: steps.check.outputs.skip != 'true'
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: docker/homeassistant
+          file: docker/homeassistant/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          build-args: |
+            VERSION=${{ steps.v.outputs.version }}
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            COMMIT=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          provenance: false
+          cache-from: type=gha,scope=homeassistant
+          cache-to: type=gha,mode=max,scope=homeassistant
+
+      # 推完立刻在原生 amd64 上把镜像跑起来，等 /manifest.json 返回 200 才算发布成功。
+      - name: Smoke test the published image
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          IMG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
+          docker pull "$IMG"
+          docker run -d --name hass-smoke -p 8123:8123 "$IMG"
+          ok=false
+          for i in $(seq 1 60); do
+            if curl -fsS -m 5 http://127.0.0.1:8123/manifest.json >/dev/null 2>&1; then
+              ok=true
+              echo "Home Assistant answered after ~$((i * 5))s"
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ok" != true ]; then
+            echo "=== container logs (tail) ==="
+            docker logs --tail 80 hass-smoke || true
+            docker rm -f hass-smoke || true
+            exit 1
+          fi
+          echo "=== version in container ==="
+          docker exec hass-smoke hass --version
+          docker rm -f hass-smoke
+
+      - name: Summary
+        run: |
+          {
+            echo "### Home Assistant ${{ steps.v.outputs.version }}"
+            echo
+            if [ '${{ steps.check.outputs.skip }}' = 'true' ]; then
+              echo "已存在，跳过构建：\`${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}\`"
+            else
+              echo "已推送："
+              echo
+              echo '```'
+              echo "docker pull ${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
+              echo "docker pull ${REGISTRY}/${IMAGE}:latest"
+              echo '```'
+              echo
+              echo "平台：linux/amd64, linux/arm64, linux/arm/v7"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
