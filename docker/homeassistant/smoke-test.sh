@@ -17,8 +17,17 @@ PORT="${SMOKE_PORT:-18123}"
 DATA="$(mktemp -d)"
 
 cleanup() {
-    docker rm -f "$NAME" >/dev/null 2>&1 || true
-    rm -rf "$DATA"
+    # 收尾失败不该把整个测试判成红的，这里全部吞掉错误。
+    set +e
+    docker rm -f "$NAME" >/dev/null 2>&1
+    if [ -d "$DATA" ]; then
+        # HA 在容器里以 root 跑，bind mount 里的文件属于 root：Linux runner 上宿主机
+        # 用户直接 rm 会 permission denied，所以借镜像自己（root）把内容清空。
+        docker run --rm -v "$DATA:/data" --entrypoint sh "$IMAGE" \
+            -c 'rm -rf /data/* /data/.[!.]* /data/..?*' >/dev/null 2>&1
+        rm -rf "$DATA" >/dev/null 2>&1
+    fi
+    set -e
 }
 trap cleanup EXIT
 
