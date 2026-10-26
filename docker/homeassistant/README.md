@@ -2,7 +2,7 @@
 
 把 [`kurapov/alpine-homeassistant`](https://hub.docker.com/r/kurapov/alpine-homeassistant)（源码：[2sheds/alpine-homeassistant](https://github.com/2sheds/alpine-homeassistant)）的 Dockerfile 拿来自己构建，推到 `ghcr.io` 上，摆脱 Docker Hub 的限流和“上游哪天不构建了”的风险。
 
-顺便说清楚这镜像是什么：**不是**官方 HA 镜像（官方是 Debian + Python venv，~1.3 GB），而是把一个只剩 HA 的 musl 运行时装进 Alpine，压缩体积 ~372 MB（其中约 65 MB 是小米集成带来的 ffmpeg + numpy）。代价见下面「已知代价」。
+顺便说清楚这镜像是什么：**不是**官方 HA 镜像（官方是 Debian + Python venv，~1.3 GB），而是把一个只剩 HA 的 musl 运行时装进 Alpine，压缩体积 ~380 MB（其中约 65 MB 是小米集成带来的 ffmpeg + numpy）。代价见下面「已知代价」。
 
 ## 镜像
 
@@ -109,7 +109,7 @@ docker restart homeassistant        # entrypoint 会重新播种
 * **没有 HA Supervisor / Add-ons**。Add-on 是官方 HA OS 那一套的东西，这个镜像只有 HA Core。要装集成请走 HACS 或直接装到 `custom_components`。
 * **musl 上没有预编译 wheel 的包要现场编译**。构建里带了 `build-base cargo cmake libjpeg-turbo-dev` 等编译依赖（同一层装完再 `apk del`，不进最终镜像），所以构建慢；正好撞上这种包时，armv7 的 QEMU 构建会更慢。
 * **armv7 只是“能构建出来”**，没有在真机上验过。32 位 ARM 上 HA 的 Python 依赖覆盖本来就不如 64 位，真要用建议 arm64。
-* **体积从 ~307 MB 涨到 ~372 MB**，主要是 `ffmpeg`（apk 装完 142 MB，压缩后约 60 MB）和 `numpy`。前者是 `xiaomi_home` 的硬依赖（见上一节），后者是它 manifest 里声明要的。不想要这些只能自己改 Dockerfile 去掉集成。
+* **体积从 ~307 MB 涨到 ~380 MB**，主要是 `ffmpeg`（apk 装完 142 MB，压缩后约 60 MB）和 `numpy`。前者是 `xiaomi_home` 的硬依赖（见上一节），后者是它 manifest 里声明要的。不想要这些只能自己改 Dockerfile 去掉集成。
 * **HA 的可选集成依赖仍然不全**：`ssdp` / `bluetooth` / `tts` 这几个默认集成启动时会因为缺 `async_upnp_client` / `pyusb` / `mutagen` 报 ERROR。这不影响 `xiaomi_home`（它走小米云 + 局域网 MQTT，不依赖 HA 的蓝牙/USB），真要用那些集成就往 `custom_components` 补依赖或往 `PLUGINS` 里加。
 * 版本号是 HA Core 的版本；镜像 tag 与 PyPI 上的 `homeassistant` 版本一一对应。
 
