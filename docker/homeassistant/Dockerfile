@@ -7,11 +7,15 @@
 #   image  : https://hub.docker.com/r/kurapov/alpine-homeassistant
 # and published to ghcr.io instead of Docker Hub.
 #
-# 与上游 Dockerfile 的差异只有两处：
+# 与上游 Dockerfile 的差异只有三处：
 #   1. jemalloc 直接用 Alpine main 仓库里的 `jemalloc` 包，不再 FROM 一个第三方
 #      镜像（kurapov/alpine-jemalloc）只为了拷一个 .so —— 少一个上游依赖，且
 #      x86_64 / aarch64 / armhf 三个架构的 main 仓库里都有这个包；
-#   2. 默认 VERSION / OCI labels 换成本仓库的构建值（CI 会覆盖 VERSION）。
+#   2. 基础镜像用 python:3.14-alpine 而不是上游现在的 3.15.0-alpine：
+#      python 3.15 的镜像已经没有 linux/arm/v7 了（buildx 直接
+#      "no match for platform"），而 HA 2026.10 要求 >=3.14.2 且支持 3.14，
+#      3.14 的 cp314 musllinux wheel 覆盖也比刚出的 3.15 更全；
+#   3. 默认 VERSION / OCI labels 换成本仓库的构建值（CI 会覆盖 VERSION）。
 # 基础镜像、包列表、插件清单、entrypoint 全部保持上游原样。
 #
 # 上游能把 HA 装进 musl 的关键是两条：homeassistant 本体走 PyPI 的 musllinux
@@ -19,7 +23,7 @@
 # index；实在没有 wheel 的包由 build-base / cargo / cmake 现场编译（编译依赖在
 # 同一层里装完再 apk del，不进最终镜像）。
 
-FROM python:3.15.0-alpine
+FROM python:3.14-alpine
 
 LABEL Description="Home Assistant"
 
@@ -45,7 +49,7 @@ LABEL \
   org.opencontainers.image.revision="${COMMIT}" \
   org.opencontainers.image.version="${VERSION}" \
   org.opencontainers.image.source="${VCS_URL}" \
-  org.opencontainers.image.base.name="docker.io/library/python:3.15.0-alpine"
+  org.opencontainers.image.base.name="docker.io/library/python:3.14-alpine"
 
 RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     apk add --no-cache --virtual=build-dependencies build-base libffi-dev ${DEPS} && \

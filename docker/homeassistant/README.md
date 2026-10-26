@@ -11,7 +11,7 @@
 | 镜像 | `ghcr.io/viogus/homeassistant` |
 | tag | `:latest` `:2026.10` `:2026.10.4`（跟着 HA 版本走） |
 | 平台 | linux/amd64, linux/arm64, linux/arm/v7 |
-| 基础镜像 | `python:3.15.0-alpine` |
+| 基础镜像 | `python:3.14-alpine`（HA 2026.10 要求 ≥3.14.2） |
 | 入口 | `hass --config=/data` |
 | 端口 | 8123 |
 | 用户 | 默认 root（容器内另有 `hass` 用户，uid/gid 1000，可用 `--user` 切） |
@@ -65,6 +65,7 @@ services:
 | 差异 | 原因 |
 |------|------|
 | jemalloc 用 Alpine main 仓库的 `jemalloc` 包，不再 `FROM kurapov/alpine-jemalloc:5.3.0` 只为了拷一个 `libjemalloc.so.2` | 少一个第三方镜像依赖；`v3.23`/`v3.24` 的 x86_64 / aarch64 / armhf main 仓库里都有这个包 |
+| 基础镜像 `python:3.14-alpine`，不是上游 2026-10-25 起用的 `python:3.15.0-alpine` | `python:3.15.0-alpine` **没有 linux/arm/v7**（buildx 报 `no match for platform`，实测过）；HA 2026.10 要求 ≥3.14.2 且只声明支持 3.14，cp314 的 musllinux wheel 也齐得多 |
 | 默认 `VERSION` / OCI labels 换成本仓库的构建值 | CI 会用 `--build-arg VERSION=...` 覆盖 |
 
 `LD_PRELOAD=/usr/lib/libjemalloc.so.2` 保留（HA 的小对象分配多，jemalloc 比 musl malloc 稳）。
@@ -81,8 +82,8 @@ services:
 本机 Docker 拉 Docker Hub 被墙的话，先把基础镜像从镜像站拉下来改 tag：
 
 ```bash
-docker pull docker.m.daocloud.io/library/python:3.15.0-alpine
-docker tag  docker.m.daocloud.io/library/python:3.15.0-alpine python:3.15.0-alpine
+docker pull docker.m.daocloud.io/library/python:3.14-alpine
+docker tag  docker.m.daocloud.io/library/python:3.14-alpine python:3.14-alpine
 
 docker build \
   --build-arg VERSION=2026.10.4 \

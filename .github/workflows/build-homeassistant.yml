@@ -64,6 +64,7 @@ jobs:
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "minor=${V%.*}" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           echo "Home Assistant $V"
 
       - name: Log in to ghcr.io
@@ -120,10 +121,11 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           build-args: |
             VERSION=${{ steps.v.outputs.version }}
-            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            BUILD_DATE=${{ steps.v.outputs.build_date }}
             COMMIT=${{ github.sha }}
+          # 不传 labels: — 镜像描述走 Dockerfile 里的 OCI LABEL，metadata-action
+          # 自动生成的会写成 title=scripts / version=latest，反而更糟。
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
           push: true
           provenance: false
           cache-from: type=gha,scope=homeassistant
