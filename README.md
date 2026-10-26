@@ -178,6 +178,23 @@ services:
 | `SNELL_UDP` | `true` | UDP-over-TCP |
 | `SNELL_QUIC` | `true` | QUIC 代理模式 |
 
+### Home Assistant（Alpine）
+
+`ghcr.io/viogus/homeassistant` — 自建 [kurapov/alpine-homeassistant](https://github.com/2sheds/alpine-homeassistant)（源码 [2sheds/alpine-homeassistant](https://github.com/2sheds/alpine-homeassistant)），按 HA Core 版本自动跟进，压缩体积 ~310MB（官方镜像 ~1.3GB）。**只有 HA Core，没有 Supervisor / Add-ons**。底座、差异点与已知代价见 [`docker/homeassistant/README.md`](docker/homeassistant/README.md)。
+
+```yaml
+services:
+  homeassistant:
+    image: ghcr.io/viogus/homeassistant:latest
+    restart: unless-stopped
+    network_mode: host        # 设备自动发现（mDNS/SSDP）需要
+    volumes:
+      - ./data:/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: Asia/Shanghai
+```
+
 ## 其他工具
 
 ### rtk-sandbox-allow.mjs（macOS）

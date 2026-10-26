@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1
+# 不用 `# syntax=docker/dockerfile:1`：本 Dockerfile 没有用到 dockerfile:1 的新
+# 语法，却会让每次构建都去 Docker Hub 拉 docker/dockerfile 前端镜像 —— 被墙的
+# 本机构建会直接卡在这一步。
 #
 # Home Assistant on Alpine / musl.
 #
