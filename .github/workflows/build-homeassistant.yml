@@ -4,8 +4,11 @@ name: Build & Push Home Assistant (Alpine) Docker Image
 # 到处被限流，自己的 registry 拉起来才稳）。
 #   Dockerfile : docker/homeassistant/Dockerfile（紧跟上游，只把 jemalloc 换成 apk 包）
 #   HA 版本    : 默认取 PyPI 上最新的正式版；也可以在 workflow_dispatch 里指定
+#   Xiaomi Home: 预装小米官方集成，默认取 XiaoMi/ha_xiaomi_home 最新 release
 #   架构       : linux/amd64, linux/arm64, linux/arm/v7（后两个在 amd64 runner 上走 QEMU）
-#   跳过       : ghcr 上已有同名 tag 就不重建（cron 跑起来只会在 HA 发新版时干活）
+#   跳过       : ghcr 上已有同名 tag，且镜像 label 里的 Xiaomi Home 版本与本次解析
+#                出来的一致，才跳过 —— 只比 tag 会漏掉“HA 没动但小米集成发新版”
+#                的情况。
 #
 # 一次三架构构建实测 ~75 分钟（上游同样配置：2026.10.4，05:03 -> 06:16 UTC）。
 
@@ -22,6 +25,11 @@ on:
     inputs:
       ha_version:
         description: 'Home Assistant version (e.g. 2026.10.4). Empty = latest stable on PyPI'
+        required: false
+        default: ''
+        type: string
+      xiaomi_home_version:
+        description: 'Xiaomi Home integration tag (e.g. v0.5.0). Empty = latest release on GitHub'
         required: false
         default: ''
         type: string
@@ -72,6 +80,22 @@ jobs:
           echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           echo "Home Assistant $V"
 
+          # Xiaomi Home 集成（custom_components，不在 PyPI 上，只能跟 GitHub release）
+          XM='${{ inputs.xiaomi_home_version }}'
+          if [ -z "$XM" ]; then
+            # 不用 .tag_name 直接信：release 可能是 draft/prerelease，这里只认正式 tag
+            XM=$(curl -fsS https://api.github.com/repos/XiaoMi/ha_xiaomi_home/releases/latest \
+              | jq -r '.tag_name // ""')
+          fi
+          if ! printf '%s' "$XM" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "WARN: cannot resolve a sane Xiaomi Home version (got '$XM'), falling back to v0.5.0" >&2
+            XM=v0.5.0
+          fi
+          # 统一成上游的 tag 形式（v0.5.0），Dockerfile 直接拼在 tarball URL 里
+          XM="v${XM#v}"
+          echo "xiaomi_home=${XM}" >> "$GITHUB_OUTPUT"
+          echo "Xiaomi Home $XM"
+
       - name: Log in to ghcr.io
         uses: docker/login-action@v4
         with:
@@ -89,11 +113,25 @@ jobs:
             exit 0
           fi
           TAG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
-          if docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
-            echo "$TAG already exists, skipping"
+          WANT_XM='${{ steps.v.outputs.xiaomi_home }}'
+          if ! docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
+            echo "$TAG not found, building"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # tag 在就去比 label 里的小米集成版本：HA 没发新版、但上游集成发了，
+          # 也应该重建。label 缺失（老镜像）同样按“需要重建”处理。
+          AMD=$(docker buildx imagetools inspect "$TAG" --raw \
+            | jq -r '.manifests[] | select(.platform.architecture=="amd64") | .digest' \
+            | head -1)
+          HAVE_XM=$(docker buildx imagetools inspect "$TAG@$AMD" \
+            --format '{{index .Image.Config.Labels "org.opencontainers.image.xiaomi_home.version"}}' \
+            2>/dev/null || true)
+          if [ "$HAVE_XM" = "$WANT_XM" ]; then
+            echo "$TAG already ships Xiaomi Home $HAVE_XM, skipping"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "$TAG not found, building"
+            echo "$TAG ships Xiaomi Home '${HAVE_XM:-<none>}', wanted '$WANT_XM' -> rebuilding"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -128,6 +166,7 @@ jobs:
             VERSION=${{ steps.v.outputs.version }}
             BUILD_DATE=${{ steps.v.outputs.build_date }}
             COMMIT=${{ github.sha }}
+            XIAOMI_HOME_VERSION=${{ steps.v.outputs.xiaomi_home }}
           # 不传 labels: — 镜像描述走 Dockerfile 里的 OCI LABEL，metadata-action
           # 自动生成的会写成 title=scripts / version=latest，反而更糟。
           tags: ${{ steps.meta.outputs.tags }}
@@ -136,40 +175,28 @@ jobs:
           cache-from: type=gha,scope=homeassistant
           cache-to: type=gha,mode=max,scope=homeassistant
 
-      # 推完立刻在原生 amd64 上把镜像跑起来，等 /manifest.json 返回 200 才算发布成功。
+      # 推完立刻在原生 amd64 上把镜像跑起来。除了 /manifest.json 返回 200，还要
+      # 确认 Xiaomi Home 集成真的加载得起来（播种、依赖、config flow 三步），
+      # 详见 docker/homeassistant/smoke-test.sh。
       - name: Smoke test the published image
         if: steps.check.outputs.skip != 'true'
+        env:
+          XM_VERSION: ${{ steps.v.outputs.xiaomi_home }}
         run: |
           set -euo pipefail
           IMG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
           docker pull "$IMG"
-          docker run -d --name hass-smoke -p 8123:8123 "$IMG"
-          ok=false
-          for i in $(seq 1 60); do
-            if curl -fsS -m 5 http://127.0.0.1:8123/manifest.json >/dev/null 2>&1; then
-              ok=true
-              echo "Home Assistant answered after ~$((i * 5))s"
-              break
-            fi
-            sleep 5
-          done
-          if [ "$ok" != true ]; then
-            echo "=== container logs (tail) ==="
-            docker logs --tail 80 hass-smoke || true
-            docker rm -f hass-smoke || true
-            exit 1
-          fi
-          echo "=== version in container ==="
-          docker exec hass-smoke hass --version
-          docker rm -f hass-smoke
+          bash docker/homeassistant/smoke-test.sh "$IMG" "$XM_VERSION"
 
       - name: Summary
         run: |
           {
             echo "### Home Assistant ${{ steps.v.outputs.version }}"
             echo
+            echo "Xiaomi Home 集成：\`${{ steps.v.outputs.xiaomi_home }}\`"
+            echo
             if [ '${{ steps.check.outputs.skip }}' = 'true' ]; then
-              echo "已存在，跳过构建：\`${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}\`"
+              echo "已存在同名 tag 且集成版本一致，跳过构建：\`${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}\`"
             else
               echo "已推送："
               echo
