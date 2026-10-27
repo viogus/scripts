@@ -75,6 +75,22 @@ DHCP/SSDP/USB 发现（aiodhcpwatcher、scapy、async-upnp-client、serialx…�
 要用这些功能就换 full；也可以在 `configuration.yaml` 里打开对应集成，让 HA 自己联网
 pip 装 —— 那些包会落在容器的可写层里。
 
+### slim/micro 上千万别留 `default_config:`
+
+从官方镜像迁过来的老 `configuration.yaml` 第一行通常是 `default_config:`。slim / micro 没有它那批
+依赖，后果比"报几条错"严重：`usb`、`ssdp`、`bluetooth` 会在 import 阶段失败，HA 卡在 bootstrap
+阶段等它们，**config entry 根本不会被 setup** —— 表现就是 UI 半启动、HomeKit 之类"配置好了但
+不干活"，日志里只有 `Phase config_entry_setup ... took 0.00s` 这种一句带过的行。
+
+entrypoint 现在会在启动时检测并直接 WARN：
+
+```
+[entrypoint] WARN: /config/configuration.yaml still loads default_config:, but this is
+             the micro variant which does not ship its dependencies.
+```
+
+要么把它注释掉（参考 `/usr/local/share/homeassistant/configuration.yaml.slim`），要么用 full 变体。
+
 ### micro 多裁了什么
 
 micro 在 slim 基础上继续删（都在**同一层**里删，见下）：

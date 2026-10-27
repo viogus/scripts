@@ -202,7 +202,9 @@ async def main():
                 headers=headers,
             )
 
-        # HomeKit 的依赖（HAP-python 等）不在 default_config 里，单独验一遍
+        # HomeKit 的依赖（HAP-python 等）不在 default_config 里，单独验一遍。
+        # 光起 flow 不够：要把 bridge 真的建出来，否则「entry setup 0.00s、没有监听」
+        # 这种静默失败测不出来。
         if "homekit" not in handlers:
             raise SystemExit("homekit missing from flow handlers (PLUGINS?)")
         hk = await call(
@@ -213,13 +215,24 @@ async def main():
             headers=headers,
         )
         print(f"    homekit flow: type={hk.get('type')} step={hk.get('step_id')}")
-        if hk.get("flow_id"):
-            await call(
+        for _step in range(6):
+            if hk.get("type") in ("create_entry", "abort"):
+                break
+            data = {}
+            for field in hk.get("data_schema") or []:
+                for key, spec in (field.get("schema") or {}).items():
+                    if isinstance(spec, dict) and "default" in spec:
+                        data[key] = spec["default"]
+            hk = await call(
                 session,
-                "DELETE",
+                "POST",
                 f"/api/config/config_entries/flow/{hk['flow_id']}",
+                json=data,
                 headers=headers,
             )
+        if hk.get("type") != "create_entry":
+            raise SystemExit(f"homekit flow did not create an entry: {hk}")
+        print(f"    homekit bridge created: {hk.get('title')}")
 
         # 前端首屏会发的几条 websocket 命令
         async with session.ws_connect(f"{BASE}/api/websocket") as ws:
@@ -267,5 +280,17 @@ async def main():
 
 asyncio.run(main())
 PY
+
+echo "==> homekit bridge is listening on 21064"
+hk_up=false
+for _i in $(seq 1 30); do
+    if docker exec "$NAME" sh -c 'netstat -ltn 2>/dev/null | grep -q ":21064"'; then
+        hk_up=true
+        echo "    21064 listening"
+        break
+    fi
+    sleep 2
+done
+[ "$hk_up" = true ] || fail "homekit bridge did not start listening on 21064"
 
 echo "==> smoke test passed"

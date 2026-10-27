@@ -109,6 +109,7 @@ seed_slim_config() {
     [ -d "$config_dir/.storage" ] && return 0
     template=/usr/local/share/homeassistant/configuration.yaml.slim
     [ -f "$template" ] || return 0
+    mkdir -p "$config_dir" 2>/dev/null || true
     if ! cp "$template" "$config_dir/configuration.yaml" 2>/dev/null; then
         echo "[entrypoint] WARN: cannot seed slim configuration.yaml" >&2
         return 0
@@ -127,7 +128,24 @@ seed_slim_config() {
 CONFIG_DIR_PATH="$(pick_config_dir)"
 echo "[entrypoint] config dir: $CONFIG_DIR_PATH"
 link_other_path "$CONFIG_DIR_PATH"
+warn_if_default_config() {
+    config_dir="$1"
+    case "${HA_VARIANT:-full}" in slim|micro) ;; *) return 0 ;; esac
+    conf="$config_dir/configuration.yaml"
+    [ -f "$conf" ] || return 0
+    # 旧配置大多来自官方镜像，第一行就是 default_config:；slim/micro 没有它那批
+    # 依赖（usb/ssdp/bluetooth…），实测会卡在 bootstrap，config entry 根本不 setup。
+    if grep -qE '^[[:space:]]*default_config:' "$conf"; then
+        echo "[entrypoint] WARN: $conf still loads default_config:, but this is the" \
+             "${HA_VARIANT} variant which does not ship its dependencies." >&2
+        echo "[entrypoint] WARN: expect setup failures (usb/ssdp/bluetooth) and a stalled" \
+             "bootstrap; comment it out or switch to the full variant." >&2
+        echo "[entrypoint] WARN: reference config: /usr/local/share/homeassistant/configuration.yaml.slim" >&2
+    fi
+}
+
 seed_slim_config "$CONFIG_DIR_PATH"
+warn_if_default_config "$CONFIG_DIR_PATH"
 seed_custom_components "$CONFIG_DIR_PATH"
 
 # 保持原来的用法：`docker run <img>` 和 `docker run <img> --debug` 都走 hass；
