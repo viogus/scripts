@@ -67,12 +67,33 @@ services:
 | tag | 内容 | 压缩 | 磁盘 |
 |-----|------|------|------|
 | `:latest` `:2026.10.4` `:2026.10` | **full**：default_config 依赖齐全，行为与官方镜像对齐 | 431 MB | 1.89 GB |
-| `:slim` `:2026.10.4-slim` | **slim**：去掉只被 default_config 用到的包 | ~385 MB | 1.72 GB |
+| `:slim` `:2026.10.4-slim` | **slim**：去掉只被 default_config 用到的包 | 384 MB | 1.72 GB |
+| `:micro` `:2026.10.4-micro` | **micro**：slim + 只留 en/zh-Hans 翻译、去掉 es5/sourcemap/无用 stdlib | ~290 MB | 1.17 GB |
 
 slim 少装的包：`av`（stream / 摄像头转流）、蓝牙栈（habluetooth / bleak / dbus-fast…）、
 DHCP/SSDP/USB 发现（aiodhcpwatcher、scapy、async-upnp-client、serialx…）、go2rtc-client。
 要用这些功能就换 full；也可以在 `configuration.yaml` 里打开对应集成，让 HA 自己联网
 pip 装 —— 那些包会落在容器的可写层里。
+
+### micro 多裁了什么
+
+micro 在 slim 基础上继续删（都在**同一层**里删，见下）：
+
+| 删掉 | 原始 | 代价 |
+|------|------|------|
+| 组件翻译，只留 `en` / `zh-Hans` | 158 MB | 其他语言界面回退英文 |
+| 前端静态翻译（每语言 3 份：json / .br / .gz）只留中英 | ~65 MB | 同上 |
+| `frontend_es5`（老浏览器 bundle） | 72 MB | IE / 旧 Safari 打不开 Web UI |
+| 所有 `*.map` sourcemap | 54 MB | 浏览器 devtools 里没源码 |
+| `idlelib` / `tkinter` / `ensurepip` / `pydoc_data` / `test` | ~4 MB | 无（这些用不到） |
+
+实测：压缩 431 → 281 MB、磁盘 1.89 → 1.17 GB，启动时间 12s 不变（对比删 pyc 的 62s）。
+中文界面单独验过：`frontend/get_translations(zh-Hans)` 返回 154 个汉字串，
+`static/translations/config/` 下只剩 `en-*` / `zh-Hans-*`。
+
+**踩过的坑**：这些删除必须写在安装那层的同一个 `RUN` 里。单独加一层 `RUN rm ...`
+删文件，镜像一点都没变小 —— 后一层的删除只是 whiteout，前面那层的字节还在，
+`docker save` / `push` 出来一样大。
 
 ### slim 为什么必须自带一份 configuration.yaml
 

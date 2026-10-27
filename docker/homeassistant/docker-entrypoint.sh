@@ -103,7 +103,7 @@ seed_custom_components() {
 
 seed_slim_config() {
     config_dir="$1"
-    [ "${HA_VARIANT:-full}" = "slim" ] || return 0
+    case "${HA_VARIANT:-full}" in slim|micro) ;; *) return 0 ;; esac
     # 只给全新安装种；已有 configuration.yaml 或 .storage 的一律不碰
     [ -f "$config_dir/configuration.yaml" ] && return 0
     [ -d "$config_dir/.storage" ] && return 0

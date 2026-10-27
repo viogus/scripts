@@ -58,7 +58,8 @@ ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabu
 #   --build-arg "HA_REQUIREMENTS_URL=https://api.github.com/repos/home-assistant/core/contents/requirements_all.txt?ref=2026.10.4"
 ARG HA_REQUIREMENTS_URL=""
 
-# 变体：full = 装齐 default_config 依赖；slim = 只装始终会加载的那批 + 小米集成。
+# 变体：full = 装齐 default_config 依赖；slim = 只装始终会加载的那批 + 小米集成；
+# micro = slim + 裁掉翻译（只留 en/zh-Hans）、frontend_es5、sourcemap 和用不到的 stdlib。
 # SLIM_EXCLUDE 是「只被 default_config 用到的包」，实测删掉后 HA 能干净启动、
 # 历史/日志/能源面板和 sun 都正常（见 docker/homeassistant/README.md 的验证记录）。
 #
@@ -66,6 +67,7 @@ ARG HA_REQUIREMENTS_URL=""
 # 千万别放进排除表：gazetteer-matcher（conversation 的默认 agent）、
 # hass-nabucasa（http/forwarded.py 顶层 import）。
 ARG VARIANT="full"
+ARG TRIM_ASSETS="0"
 ARG SLIM_EXCLUDE="av|go2rtc-client|habluetooth|bleak|bleak-retry-connector|bluetooth-adapters|bluetooth-auto-recovery|bluetooth-data-tools|dbus-fast|async-upnp-client|asyncinotify|python-didl-lite|serialx|aiousbwatcher|aiodhcpwatcher|aiodiscover|pyroute2|cached-ipaddress|scapy"
 
 # Xiaomi Home 集成（小米官方，custom_components 形式分发，不在 PyPI 上）。
@@ -88,7 +90,12 @@ LABEL \
   org.opencontainers.image.base.name="docker.io/library/python:3.14-alpine" \
   org.opencontainers.image.xiaomi_home.version="${XIAOMI_HOME_VERSION}" \
   org.opencontainers.image.homeassistant.dockerfile-sha="${DOCKERFILE_SHA}" \
-  org.opencontainers.image.homeassistant.variant="${VARIANT}"
+  org.opencontainers.image.homeassistant.variant="${VARIANT}" \
+  org.opencontainers.image.homeassistant.trims="${TRIM_ASSETS}"
+
+# 注意：micro 的裁剪（翻译 / es5 / sourcemap / stdlib）必须放在**这一层**里做。
+# 试过单独加一层 RUN 删文件，结果镜像一点没小 —— 后面的层删文件只是白out，
+# 前面那层的字节还在（docker save 出来一样大）。同一层内删才能真正释放。
 
 RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     apk add --no-cache --virtual=build-dependencies build-base libffi-dev ${DEPS} && \
@@ -98,7 +105,7 @@ RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     wget -q --header="Accept: application/vnd.github.raw" -O /usr/src/requirements_all.txt "$REQ_URL" && \
     grep -w -E "${PLUGINS}" /usr/src/requirements_all.txt | grep -v '#' > /tmp/req_all.txt || \
       { echo "ERROR: no plugin pins matched in requirements_all.txt (source: $REQ_URL)" >&2; head -5 /usr/src/requirements_all.txt >&2; exit 1; } && \
-    if [ "${VARIANT}" = "slim" ]; then \
+    if [ "${VARIANT}" = "slim" ] || [ "${VARIANT}" = "micro" ]; then \
       grep -v -E "^(${SLIM_EXCLUDE})==" /tmp/req_all.txt > /tmp/requirements_plugins.txt; \
       echo "slim: kept $(wc -l < /tmp/requirements_plugins.txt) / $(wc -l < /tmp/req_all.txt) plugin pins" >&2; \
     else \
@@ -107,7 +114,20 @@ RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     pip3 install --no-cache-dir homeassistant=="${VERSION}" && \
     pip3 install --no-cache-dir --prefer-binary --extra-index-url ${WHEELS_INDEX} -r /tmp/requirements_plugins.txt && \
     apk del build-dependencies && \
-    rm -rf /tmp/* /var/tmp/* /var/cache/apk/*
+    rm -rf /tmp/* /var/tmp/* /var/cache/apk/* && \
+    if [ "${TRIM_ASSETS}" = "1" ]; then \
+      SP=/usr/local/lib/python3.14/site-packages; \
+      find "$SP/homeassistant/components" -path '*/translations/*' -name '*.json' \
+        ! -name 'en.json' ! -name 'zh-Hans.json' -delete; \
+      find "$SP/hass_frontend/static/translations" -type f -name '*.json*' \
+        ! -name 'en-*' ! -name 'zh-Hans-*' ! -name 'en.json' ! -name 'zh-Hans.json' -delete; \
+      rm -rf "$SP/hass_frontend/frontend_es5"; \
+      find "$SP" -name '*.map' -delete; \
+      rm -rf /usr/local/lib/python3.14/idlelib /usr/local/lib/python3.14/turtledemo \
+             /usr/local/lib/python3.14/tkinter /usr/local/lib/python3.14/ensurepip \
+             /usr/local/lib/python3.14/pydoc_data /usr/local/lib/python3.14/test; \
+      echo "micro: trimmed translations/es5/sourcemaps/stdlib"; \
+    fi
 
 # musl 的 malloc 对 HA 这种大量小对象的负载不太友好，上游同样挂 jemalloc。
 ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2

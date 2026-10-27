@@ -14,6 +14,7 @@ set -euo pipefail
 IMAGE="${1:?usage: smoke-test.sh <image-ref> [expected-xiaomi-version]}"
 WANT_XM="${2:-}"
 SLIM="${SMOKE_SLIM:-0}"
+MICRO="${SMOKE_MICRO:-0}"
 NAME="hass-smoke-$$"
 PORT="${SMOKE_PORT:-18123}"
 DATA="$(mktemp -d)"
@@ -60,6 +61,22 @@ docker logs "$NAME" 2>&1 | grep -q "config dir: /config" \
     || fail "entrypoint did not pick /config as the config dir"
 [ "$(docker exec "$NAME" readlink /data)" = "/config" ] \
     || fail "/data is not linked to /config"
+
+if [ "$MICRO" = "1" ]; then
+    echo "==> micro: trimmed assets, zh-Hans kept"
+    if docker exec "$NAME" test -d /usr/local/lib/python3.14/site-packages/hass_frontend/frontend_es5; then
+        fail "micro image still ships frontend_es5"
+    fi
+    docker exec "$NAME" sh -c 'ls /usr/local/lib/python3.14/site-packages/hass_frontend/static/translations/zh-Hans-*' \
+        >/dev/null 2>&1 || fail "micro: zh-Hans frontend translations missing"
+    docker exec "$NAME" sh -c 'ls /usr/local/lib/python3.14/site-packages/hass_frontend/static/translations/de-*' \
+        >/dev/null 2>&1 && fail "micro: de translations should have been removed"
+    docker exec "$NAME" sh -c 'test -f /usr/local/lib/python3.14/site-packages/homeassistant/components/sensor/translations/zh-Hans.json' \
+        || fail "micro: component zh-Hans translations missing"
+    if docker exec "$NAME" sh -c 'find /usr/local/lib/python3.14/site-packages -name "*.map" | head -1' | grep -q .; then
+        fail "micro: sourcemaps still present"
+    fi
+fi
 
 if [ "$SLIM" = "1" ]; then
     echo "==> slim: seeded configuration.yaml without default_config"

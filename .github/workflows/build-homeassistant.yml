@@ -56,7 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         # full = 装齐 default_config 依赖；slim = 只装始终加载的那批 + 小米集成
-        variant: [full, slim]
+        variant: [full, slim, micro]
     permissions:
       contents: read
       packages: write
@@ -125,7 +125,10 @@ jobs:
             exit 0
           fi
           TAG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
-          if [ '${{ matrix.variant }}' = 'slim' ]; then TAG="${TAG}-slim"; fi
+          case '${{ matrix.variant }}' in
+            slim)  TAG="${TAG}-slim" ;;
+            micro) TAG="${TAG}-micro" ;;
+          esac
           WANT_XM='${{ steps.v.outputs.xiaomi_home }}'
           WANT_SHA='${{ steps.v.outputs.dockerfile_sha }}'
           if ! docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
@@ -173,6 +176,8 @@ jobs:
             type=raw,value=${{ steps.v.outputs.minor }},enable=${{ matrix.variant == 'full' }}
             type=raw,value=${{ steps.v.outputs.version }}-slim,enable=${{ matrix.variant == 'slim' }}
             type=raw,value=slim,enable=${{ matrix.variant == 'slim' }}
+            type=raw,value=${{ steps.v.outputs.version }}-micro,enable=${{ matrix.variant == 'micro' }}
+            type=raw,value=micro,enable=${{ matrix.variant == 'micro' }}
 
       - name: Build and push
         if: steps.check.outputs.skip != 'true'
@@ -189,6 +194,7 @@ jobs:
             XIAOMI_HOME_VERSION=${{ steps.v.outputs.xiaomi_home }}
             DOCKERFILE_SHA=${{ steps.v.outputs.dockerfile_sha }}
             VARIANT=${{ matrix.variant }}
+            TRIM_ASSETS=${{ matrix.variant == 'micro' && '1' || '0' }}
           # 不传 labels: — 镜像描述走 Dockerfile 里的 OCI LABEL，metadata-action
           # 自动生成的会写成 title=scripts / version=latest，反而更糟。
           tags: ${{ steps.meta.outputs.tags }}
@@ -204,11 +210,15 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         env:
           XM_VERSION: ${{ steps.v.outputs.xiaomi_home }}
-          SMOKE_SLIM: ${{ matrix.variant == 'slim' && '1' || '0' }}
+          SMOKE_SLIM: ${{ matrix.variant != 'full' && '1' || '0' }}
+          SMOKE_MICRO: ${{ matrix.variant == 'micro' && '1' || '0' }}
         run: |
           set -euo pipefail
           IMG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
-          if [ '${{ matrix.variant }}' = 'slim' ]; then IMG="${IMG}-slim"; fi
+          case '${{ matrix.variant }}' in
+            slim)  IMG="${IMG}-slim" ;;
+            micro) IMG="${IMG}-micro" ;;
+          esac
           docker pull "$IMG"
           bash docker/homeassistant/smoke-test.sh "$IMG" "$XM_VERSION"
 
@@ -230,7 +240,11 @@ jobs:
               echo '```'
               echo
               if [ '${{ matrix.variant }}' = 'slim' ]; then
+                if [ '${{ matrix.variant }}' = 'micro' ]; then
+                echo "micro：slim + 只留 en/zh-Hans 翻译、去掉 frontend_es5 / sourcemap / 无用 stdlib。"
+              else
                 echo "slim：不含 default_config 那批依赖，首启会种一份精简 configuration.yaml。"
+              fi
               else
                 echo "full：default_config 依赖齐全。"
               fi
