@@ -182,13 +182,14 @@ docker restart homeassistant        # entrypoint 会重新播种
 ## 已知代价
 
 * **没有 HA Supervisor / Add-ons**。Add-on 是官方 HA OS 那一套的东西，这个镜像只有 HA Core。要装集成请走 HACS 或直接装到 `custom_components`。
-* **musl 上没有预编译 wheel 的包要现场编译**。构建里带了 `build-base cargo cmake libjpeg-turbo-dev` 等编译依赖（同一层装完再 `apk del`，不进最终镜像），所以构建慢；正好撞上这种包时，armv7 的 QEMU 构建会更慢。
-* **armv7 只是“能构建出来”**，没有在真机上验过。32 位 ARM 上 HA 的 Python 依赖覆盖本来就不如 64 位，真要用建议 arm64。
+* **musl 上没有预编译 wheel 的包要现场编译**。构建里带了 `build-base cargo cmake libjpeg-turbo-dev` 等编译依赖（同一层装完再 `apk del`，不进最终镜像），所以构建慢；每次升级 HA 都要重编一遍。
+* **armv7 不再构建**。最终只发布 `linux/amd64` 和 `linux/arm64`：QEMU 下 armv7 的纯 Python 依赖要现场编译，单构建就要几小时，而且 HA 2026.10 的 Python 3.14 在 32 位上覆盖不佳。
+* **预装依赖覆盖四类**：`default_config` 会 import 的那些；Xiaomi Home 要的；HomeKit Bridge 要的（`HAP-python` / `homekit-audio-proxy` / `PyQRCode` / `base36`，合计 324 KB）；以及**首次启动时 HA 会自己建 config entry、缺依赖就永远 setup 失败**的几项（`apple_tv` → `pyatv`，`xiaomi_miio` 设备发现 → `python-miio`，`met` → `PyMetno`，`google_translate` → `gTTS`，`radio_browser` → `radios` + `pycountry`）。其他集成（ZHA、ESPHome、Hue…）第一次添加时由 HA 自己联网 pip 装依赖，**离线环境下这些集成用不了**。
+* **`pyatv` 和 `python-miio` 依赖的 `miniaudio` / `netifaces` 没有 musllinux wheel**，构建期现场编译；`netifaces 0.11.0` 在 GCC 15 下会把 `int-conversion` 当错误（`netifaces.c:1808`），所以安装那条命令带 `CFLAGS=-Wno-error=int-conversion`。这两项编译完就是真扩展，**不需要任何桩包**，升级 HA 时也不会丢。
 * **体积 ~431 MB**：`ffmpeg`（apk 装完 142 MB，压缩后约 60 MB，小米集成的硬依赖）+ 让 `default_config` 跑通的那批 Python 包装进去约 40 MB。相比官方 2.3 GB 还是小一个量级，但已经不是“只剩 HA 本体”的 ~310 MB 了。
 * **`default_config` 现在只有 `go2rtc` 一项会报错**（`Could not find go2rtc docker binary`）。`go2rtc` 是 HA 2026.10 才进 `default_config` 的，官方 core 镜像的 Dockerfile 里同样没有这个二进制，属于与官方一致的已知项；要摄像头转流就自己下载一个静态 `go2rtc` 放到 `PATH` 里，或忽略它。除它之外的 `conversation` / `tts` / `ssdp` / `usb` / `dhcp` / `analytics` / `mobile_app` / `infrared` / `radio_frequency` 依赖都已装齐。
-* **预装依赖只覆盖三块**：`default_config` 会 import 的那些、Xiaomi Home 要的、HomeKit Bridge 要的
-  （`HAP-python` / `homekit-audio-proxy` / `PyQRCode` / `base36`，合计 324 KB）。其他集成（ZHA、ESPHome、
-  Hue…）第一次添加时由 HA 自己联网 pip 装依赖，**离线环境下这些集成用不了**。
+* **预装依赖只覆盖四类**（`default_config` 必装 + Xiaomi Home + HomeKit + 首启自动建 entry 的那几项），
+  别的集成第一次添加时由 HA 自己联网 pip 装依赖。
 * **地图图层依赖外网**。HA 2026 的 `map_tiles` 集成是把 OSM 的 `vector.openstreetmap.org`（矢量瓦片）
   和 `tile.openstreetmap.org`（栅格）代理过来，镜像里没有本地瓦片。这两个域名不通时，地图会「有底框、
   没有图层」—— 实测容器内两个域名都超时/拒绝连接，和镜像、裁剪都无关（官方镜像同样如此），得在网络层解决。

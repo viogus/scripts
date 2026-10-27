@@ -53,7 +53,13 @@ ARG DEPS="openssl-dev cargo zlib-dev libjpeg-turbo-dev cmake"
 #   * HAP-python / homekit-audio-proxy / PyQRCode / base36 是 HomeKit Bridge 必需的
 #     （homekit 的 manifest 声明），总共 324 KB。它们不在 default_config 里，之前漏了，
 #     结果是任何变体上配 HomeKit 都报 "No module named 'pyhap'"。
-ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabucasa|aiohttp_cors|scapy|aiodiscover|psutil-home-assistant|securetar|ha-ffmpeg|construct|paho-mqtt|numpy|psutil|hassil|aiohasupervisor|mutagen|async-upnp-client|aiousbwatcher|aiodhcpwatcher|av|PyTurboJPEG|pymicro-vad|pyspeex-noise|serialx|gazetteer-matcher|go2rtc-client|infrared-protocols|rf-protocols|HAP-python|homekit-audio-proxy|PyQRCode|base36"
+#   * pyatv / python-miio 以及 PyMetno / gTTS / radios + pycountry 是另一类坑：
+#     HA 在首次启动会自己给这些集成建 config entry（apple_tv、xiaomi_miio 的设备发现、
+#     met 天气、google_translate、radio_browser），依赖不在镜像里时 entry 永远 setup
+#     失败、日志刷 "No module named ..."。pyatv 的 miniaudio 和 python-miio 的
+#     netifaces 没有 musllinux wheel，由本层的 build-dependencies 现场编译 —— 所以
+#     这里不需要任何桩包。升级 HA 时这些包跟随 requirements_all 的新 pin 自动更新。
+ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabucasa|aiohttp_cors|scapy|aiodiscover|psutil-home-assistant|securetar|ha-ffmpeg|construct|paho-mqtt|numpy|psutil|hassil|aiohasupervisor|mutagen|async-upnp-client|aiousbwatcher|aiodhcpwatcher|av|PyTurboJPEG|pymicro-vad|pyspeex-noise|serialx|gazetteer-matcher|go2rtc-client|infrared-protocols|rf-protocols|HAP-python|homekit-audio-proxy|PyQRCode|base36|pyatv|python-miio|PyMetno|gTTS|radios|pycountry"
 
 # requirements_all.txt 的来源。默认走上游 raw（CI 上没问题）；国内本机构建时
 # raw.githubusercontent.com 常常解析被污染，可以换成任何能拿到同一份文件的地址，
@@ -115,6 +121,7 @@ RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
       cp /tmp/req_all.txt /tmp/requirements_plugins.txt; \
     fi && \
     pip3 install --no-cache-dir homeassistant=="${VERSION}" && \
+    CFLAGS="-Wno-error=int-conversion" \
     pip3 install --no-cache-dir --prefer-binary --extra-index-url ${WHEELS_INDEX} -r /tmp/requirements_plugins.txt && \
     apk del build-dependencies && \
     rm -rf /tmp/* /var/tmp/* /var/cache/apk/* && \

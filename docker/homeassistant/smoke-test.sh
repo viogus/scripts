@@ -107,6 +107,13 @@ docker exec "$NAME" python3 -c \
     'import construct, paho.mqtt.client, haffmpeg, numpy, cryptography, psutil; print("    deps ok")' \
     || fail "cannot import one of construct / paho.mqtt / haffmpeg / numpy / cryptography / psutil"
 
+echo "==> discovery-only integrations' deps importable (pyatv / python-miio)"
+# apple_tv 要 miniaudio、xiaomi_miio 要 netifaces，两个都没有 musllinux wheel，
+# 构建期现场编译。这里连编译产物一起 import，确认不是桩包。
+docker exec "$NAME" python3 -c \
+    'import pyatv, miio, miniaudio, netifaces; import gtts, radios, pycountry, metno; print("    deps ok")' \
+    || fail "cannot import pyatv / miio / miniaudio / netifaces (or met/radio_browser/google_translate deps)"
+
 echo "==> default_config did not fail on missing packages"
 # go2rtc 是唯一允许的例外：官方 core 镜像同样没有 go2rtc 二进制。
 BAD=$(docker logs "$NAME" 2>&1 | grep -E "Setup failed for '" | grep -v "go2rtc" || true)
