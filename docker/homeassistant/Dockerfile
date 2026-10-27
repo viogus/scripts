@@ -32,6 +32,7 @@ LABEL Description="Home Assistant"
 
 ARG BRANCH="none"
 ARG COMMIT="local-build"
+ARG DOCKERFILE_SHA="local"
 ARG BUILD_DATE="1970-01-01T00:00:00Z"
 ARG NAME="viogus/homeassistant"
 ARG VCS_URL="https://github.com/viogus/scripts"
@@ -75,7 +76,8 @@ LABEL \
   org.opencontainers.image.version="${VERSION}" \
   org.opencontainers.image.source="${VCS_URL}" \
   org.opencontainers.image.base.name="docker.io/library/python:3.14-alpine" \
-  org.opencontainers.image.xiaomi_home.version="${XIAOMI_HOME_VERSION}"
+  org.opencontainers.image.xiaomi_home.version="${XIAOMI_HOME_VERSION}" \
+  org.opencontainers.image.homeassistant.dockerfile-sha="${DOCKERFILE_SHA}"
 
 RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     apk add --no-cache --virtual=build-dependencies build-base libffi-dev ${DEPS} && \

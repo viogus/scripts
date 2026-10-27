@@ -96,6 +96,13 @@ jobs:
           echo "xiaomi_home=${XM}" >> "$GITHUB_OUTPUT"
           echo "Xiaomi Home $XM"
 
+          # 构建脚本指纹：只比 HA/集成版本的话，改了 Dockerfile、entrypoint 或本
+          # workflow 也会被“tag 已存在”跳过，修改永远发不出去。
+          SHA=$(cat docker/homeassistant/Dockerfile docker/homeassistant/docker-entrypoint.sh \
+            .github/workflows/build-homeassistant.yml | sha256sum | cut -c1-16)
+          echo "dockerfile_sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "build fingerprint $SHA"
+
       - name: Log in to ghcr.io
         uses: docker/login-action@v4
         with:
@@ -114,6 +121,7 @@ jobs:
           fi
           TAG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
           WANT_XM='${{ steps.v.outputs.xiaomi_home }}'
+          WANT_SHA='${{ steps.v.outputs.dockerfile_sha }}'
           if ! docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
             echo "$TAG not found, building"
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -127,11 +135,15 @@ jobs:
           HAVE_XM=$(docker buildx imagetools inspect "$TAG@$AMD" \
             --format '{{index .Image.Config.Labels "org.opencontainers.image.xiaomi_home.version"}}' \
             2>/dev/null || true)
-          if [ "$HAVE_XM" = "$WANT_XM" ]; then
-            echo "$TAG already ships Xiaomi Home $HAVE_XM, skipping"
+          HAVE_SHA=$(docker buildx imagetools inspect "$TAG@$AMD" \
+            --format '{{index .Image.Config.Labels "org.opencontainers.image.homeassistant.dockerfile-sha"}}' \
+            2>/dev/null || true)
+          if [ "$HAVE_XM" = "$WANT_XM" ] && [ "$HAVE_SHA" = "$WANT_SHA" ]; then
+            echo "$TAG already ships Xiaomi Home $HAVE_XM (build $HAVE_SHA), skipping"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "$TAG ships Xiaomi Home '${HAVE_XM:-<none>}', wanted '$WANT_XM' -> rebuilding"
+            echo "$TAG has Xiaomi Home '${HAVE_XM:-<none>}' build '${HAVE_SHA:-<none>}'," \
+                 "wanted '$WANT_XM' build '$WANT_SHA' -> rebuilding"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -167,6 +179,7 @@ jobs:
             BUILD_DATE=${{ steps.v.outputs.build_date }}
             COMMIT=${{ github.sha }}
             XIAOMI_HOME_VERSION=${{ steps.v.outputs.xiaomi_home }}
+            DOCKERFILE_SHA=${{ steps.v.outputs.dockerfile_sha }}
           # 不传 labels: — 镜像描述走 Dockerfile 里的 OCI LABEL，metadata-action
           # 自动生成的会写成 title=scripts / version=latest，反而更糟。
           tags: ${{ steps.meta.outputs.tags }}
