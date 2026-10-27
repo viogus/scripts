@@ -58,6 +58,16 @@ ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabu
 #   --build-arg "HA_REQUIREMENTS_URL=https://api.github.com/repos/home-assistant/core/contents/requirements_all.txt?ref=2026.10.4"
 ARG HA_REQUIREMENTS_URL=""
 
+# 变体：full = 装齐 default_config 依赖；slim = 只装始终会加载的那批 + 小米集成。
+# SLIM_EXCLUDE 是「只被 default_config 用到的包」，实测删掉后 HA 能干净启动、
+# 历史/日志/能源面板和 sun 都正常（见 docker/homeassistant/README.md 的验证记录）。
+#
+# 下面这几个看着像 default_config 专用，其实被 always-on 组件在模块级 import，
+# 千万别放进排除表：gazetteer-matcher（conversation 的默认 agent）、
+# hass-nabucasa（http/forwarded.py 顶层 import）。
+ARG VARIANT="full"
+ARG SLIM_EXCLUDE="av|go2rtc-client|habluetooth|bleak|bleak-retry-connector|bluetooth-adapters|bluetooth-auto-recovery|bluetooth-data-tools|dbus-fast|async-upnp-client|asyncinotify|python-didl-lite|serialx|aiousbwatcher|aiodhcpwatcher|aiodiscover|pyroute2|cached-ipaddress|scapy"
+
 # Xiaomi Home 集成（小米官方，custom_components 形式分发，不在 PyPI 上）。
 ARG XIAOMI_HOME_REPO="XiaoMi/ha_xiaomi_home"
 ARG XIAOMI_HOME_VERSION="v0.5.0"
@@ -77,7 +87,8 @@ LABEL \
   org.opencontainers.image.source="${VCS_URL}" \
   org.opencontainers.image.base.name="docker.io/library/python:3.14-alpine" \
   org.opencontainers.image.xiaomi_home.version="${XIAOMI_HOME_VERSION}" \
-  org.opencontainers.image.homeassistant.dockerfile-sha="${DOCKERFILE_SHA}"
+  org.opencontainers.image.homeassistant.dockerfile-sha="${DOCKERFILE_SHA}" \
+  org.opencontainers.image.homeassistant.variant="${VARIANT}"
 
 RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     apk add --no-cache --virtual=build-dependencies build-base libffi-dev ${DEPS} && \
@@ -85,8 +96,14 @@ RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     adduser -h /data -D -G hass -s /bin/sh -u ${UID} hass && \
     REQ_URL="${HA_REQUIREMENTS_URL:-https://raw.githubusercontent.com/home-assistant/home-assistant/${VERSION}/requirements_all.txt}" && \
     wget -q --header="Accept: application/vnd.github.raw" -O /usr/src/requirements_all.txt "$REQ_URL" && \
-    grep -w -E "${PLUGINS}" /usr/src/requirements_all.txt | grep -v '#' > /tmp/requirements_plugins.txt || \
+    grep -w -E "${PLUGINS}" /usr/src/requirements_all.txt | grep -v '#' > /tmp/req_all.txt || \
       { echo "ERROR: no plugin pins matched in requirements_all.txt (source: $REQ_URL)" >&2; head -5 /usr/src/requirements_all.txt >&2; exit 1; } && \
+    if [ "${VARIANT}" = "slim" ]; then \
+      grep -v -E "^(${SLIM_EXCLUDE})==" /tmp/req_all.txt > /tmp/requirements_plugins.txt; \
+      echo "slim: kept $(wc -l < /tmp/requirements_plugins.txt) / $(wc -l < /tmp/req_all.txt) plugin pins" >&2; \
+    else \
+      cp /tmp/req_all.txt /tmp/requirements_plugins.txt; \
+    fi && \
     pip3 install --no-cache-dir homeassistant=="${VERSION}" && \
     pip3 install --no-cache-dir --prefer-binary --extra-index-url ${WHEELS_INDEX} -r /tmp/requirements_plugins.txt && \
     apk del build-dependencies && \
@@ -123,6 +140,12 @@ RUN apk add --no-cache ffmpeg && \
     python3 -c "import construct, paho.mqtt.client, haffmpeg, numpy, cryptography, psutil; print('xiaomi_home deps ok')" && \
     test -f /usr/local/share/homeassistant/custom_components/xiaomi_home/manifest.json && \
     rm -rf /tmp/* /var/tmp/* /var/cache/apk/*
+
+ENV HA_VARIANT="${VARIANT}"
+
+# slim 变体的起始配置：entrypoint 在配置目录为空时种下，避免 HA 自己写回
+# 带 default_config: 的模板（那份模板要求 full 的依赖）。
+COPY configuration.slim.yaml /usr/local/share/homeassistant/configuration.yaml.slim
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh

@@ -101,9 +101,33 @@ seed_custom_components() {
     done
 }
 
+seed_slim_config() {
+    config_dir="$1"
+    [ "${HA_VARIANT:-full}" = "slim" ] || return 0
+    # 只给全新安装种；已有 configuration.yaml 或 .storage 的一律不碰
+    [ -f "$config_dir/configuration.yaml" ] && return 0
+    [ -d "$config_dir/.storage" ] && return 0
+    template=/usr/local/share/homeassistant/configuration.yaml.slim
+    [ -f "$template" ] || return 0
+    if ! cp "$template" "$config_dir/configuration.yaml" 2>/dev/null; then
+        echo "[entrypoint] WARN: cannot seed slim configuration.yaml" >&2
+        return 0
+    fi
+    # 这些伴生文件平时由 HA 自己写（homeassistant/config.py 的
+    # _write_default_config），但它只在 configuration.yaml 不存在时才动手 ——
+    # 我们已经写了一份，所以得自己补齐，否则配置解析直接失败并进 recovery mode。
+    [ -f "$config_dir/secrets.yaml" ] || : >"$config_dir/secrets.yaml"
+    [ -f "$config_dir/automations.yaml" ] || printf '[]' >"$config_dir/automations.yaml"
+    [ -f "$config_dir/scripts.yaml" ] || : >"$config_dir/scripts.yaml"
+    [ -f "$config_dir/scenes.yaml" ] || : >"$config_dir/scenes.yaml"
+    [ -d "$config_dir/themes" ] || mkdir -p "$config_dir/themes" 2>/dev/null || true
+    echo "[entrypoint] seeded slim configuration.yaml (no default_config)"
+}
+
 CONFIG_DIR_PATH="$(pick_config_dir)"
 echo "[entrypoint] config dir: $CONFIG_DIR_PATH"
 link_other_path "$CONFIG_DIR_PATH"
+seed_slim_config "$CONFIG_DIR_PATH"
 seed_custom_components "$CONFIG_DIR_PATH"
 
 # 保持原来的用法：`docker run <img>` 和 `docker run <img> --debug` 都走 hass；

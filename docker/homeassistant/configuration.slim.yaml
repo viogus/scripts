@@ -1,0 +1,32 @@
+# slim 变体专用的起始 configuration.yaml —— entrypoint 在配置目录为空时种下。
+#
+# 为什么不写 default_config：slim 镜像没有装它那批依赖（stream/av、蓝牙栈、
+# DHCP/SSDP/USB 发现、mobile_app、cloud、go2rtc…），写了只会得到一屏 setup 失败。
+# 需要哪个就取消注释 —— 注意 HA 会自己 pip 装依赖，容器得能联网并且可写。
+#
+# 还有一层原因：HA 在找不到 configuration.yaml 时会自己写一份带 `default_config:`
+# 的模板（homeassistant/config.py 的 DEFAULT_CONFIG）。所以必须赶在 HA 启动前落这个
+# 文件，否则首启就被它覆盖成 full 配置。
+
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+# 历史曲线 / 日志 / 能源面板（recorder 由 history 自动拉起）
+history:
+logbook:
+energy:
+
+# 只在 default_config 里；不写就没有 sun.sun，日出日落类自动化会挂
+sun:
+
+# 想要的功能，取消注释即可：
+# mobile_app:   # 手机 App 推送（会拉 gazetteer-matcher）
+# ssdp:         # SSDP 自动发现（async-upnp-client）
+# dhcp:         # DHCP 自动发现（aiodhcpwatcher + scapy）
+# bluetooth:    # 蓝牙设备（habluetooth / bleak / dbus-fast）
+# cloud:        # Nabu Casa 远程访问（hass-nabucasa）
+# go2rtc:       # 摄像头转流（go2rtc-client + 需要一个 go2rtc 二进制）

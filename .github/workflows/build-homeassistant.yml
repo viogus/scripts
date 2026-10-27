@@ -52,6 +52,11 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        # full = 装齐 default_config 依赖；slim = 只装始终加载的那批 + 小米集成
+        variant: [full, slim]
     permissions:
       contents: read
       packages: write
@@ -120,6 +125,7 @@ jobs:
             exit 0
           fi
           TAG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
+          if [ '${{ matrix.variant }}' = 'slim' ]; then TAG="${TAG}-slim"; fi
           WANT_XM='${{ steps.v.outputs.xiaomi_home }}'
           WANT_SHA='${{ steps.v.outputs.dockerfile_sha }}'
           if ! docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
@@ -162,9 +168,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.v.outputs.version }}
-            type=raw,value=${{ steps.v.outputs.minor }}
+            type=raw,value=latest,enable=${{ matrix.variant == 'full' }}
+            type=raw,value=${{ steps.v.outputs.version }},enable=${{ matrix.variant == 'full' }}
+            type=raw,value=${{ steps.v.outputs.minor }},enable=${{ matrix.variant == 'full' }}
+            type=raw,value=${{ steps.v.outputs.version }}-slim,enable=${{ matrix.variant == 'slim' }}
+            type=raw,value=slim,enable=${{ matrix.variant == 'slim' }}
 
       - name: Build and push
         if: steps.check.outputs.skip != 'true'
@@ -180,13 +188,14 @@ jobs:
             COMMIT=${{ github.sha }}
             XIAOMI_HOME_VERSION=${{ steps.v.outputs.xiaomi_home }}
             DOCKERFILE_SHA=${{ steps.v.outputs.dockerfile_sha }}
+            VARIANT=${{ matrix.variant }}
           # 不传 labels: — 镜像描述走 Dockerfile 里的 OCI LABEL，metadata-action
           # 自动生成的会写成 title=scripts / version=latest，反而更糟。
           tags: ${{ steps.meta.outputs.tags }}
           push: true
           provenance: false
-          cache-from: type=gha,scope=homeassistant
-          cache-to: type=gha,mode=max,scope=homeassistant
+          cache-from: type=gha,scope=homeassistant-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=homeassistant-${{ matrix.variant }}
 
       # 推完立刻在原生 amd64 上把镜像跑起来。除了 /manifest.json 返回 200，还要
       # 确认 Xiaomi Home 集成真的加载得起来（播种、依赖、config flow 三步），
@@ -195,9 +204,11 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         env:
           XM_VERSION: ${{ steps.v.outputs.xiaomi_home }}
+          SMOKE_SLIM: ${{ matrix.variant == 'slim' && '1' || '0' }}
         run: |
           set -euo pipefail
           IMG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
+          if [ '${{ matrix.variant }}' = 'slim' ]; then IMG="${IMG}-slim"; fi
           docker pull "$IMG"
           bash docker/homeassistant/smoke-test.sh "$IMG" "$XM_VERSION"
 
@@ -206,17 +217,23 @@ jobs:
           {
             echo "### Home Assistant ${{ steps.v.outputs.version }}"
             echo
-            echo "Xiaomi Home 集成：\`${{ steps.v.outputs.xiaomi_home }}\`"
+            echo "变体：\`${{ matrix.variant }}\`　Xiaomi Home：\`${{ steps.v.outputs.xiaomi_home }}\`"
             echo
             if [ '${{ steps.check.outputs.skip }}' = 'true' ]; then
-              echo "已存在同名 tag 且集成版本一致，跳过构建：\`${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}\`"
+              echo "已存在同名 tag、集成版本与构建指纹一致，跳过：\`${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}$([ '${{ matrix.variant }}' = 'slim' ] && echo '-slim')\`"
             else
               echo "已推送："
               echo
               echo '```'
-              echo "docker pull ${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
-              echo "docker pull ${REGISTRY}/${IMAGE}:latest"
+              echo "docker pull ${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}$([ '${{ matrix.variant }}' = 'slim' ] && echo '-slim')"
+              echo "docker pull ${REGISTRY}/${IMAGE}:$([ '${{ matrix.variant }}' = 'slim' ] && echo 'slim' || echo 'latest')"
               echo '```'
+              echo
+              if [ '${{ matrix.variant }}' = 'slim' ]; then
+                echo "slim：不含 default_config 那批依赖，首启会种一份精简 configuration.yaml。"
+              else
+                echo "full：default_config 依赖齐全。"
+              fi
               echo
               echo "平台：linux/amd64, linux/arm64"
             fi

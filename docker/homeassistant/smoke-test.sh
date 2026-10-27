@@ -13,6 +13,7 @@ set -euo pipefail
 
 IMAGE="${1:?usage: smoke-test.sh <image-ref> [expected-xiaomi-version]}"
 WANT_XM="${2:-}"
+SLIM="${SMOKE_SLIM:-0}"
 NAME="hass-smoke-$$"
 PORT="${SMOKE_PORT:-18123}"
 DATA="$(mktemp -d)"
@@ -60,6 +61,17 @@ docker logs "$NAME" 2>&1 | grep -q "config dir: /config" \
 [ "$(docker exec "$NAME" readlink /data)" = "/config" ] \
     || fail "/data is not linked to /config"
 
+if [ "$SLIM" = "1" ]; then
+    echo "==> slim: seeded configuration.yaml without default_config"
+    docker exec "$NAME" test -f /config/configuration.yaml \
+        || fail "slim image did not seed configuration.yaml"
+    docker exec "$NAME" grep -q "^history:" /config/configuration.yaml \
+        || fail "slim configuration.yaml missing history:"
+    if docker exec "$NAME" grep -q "^default_config:" /config/configuration.yaml; then
+        fail "slim configuration.yaml still contains default_config:"
+    fi
+fi
+
 echo "==> custom components were seeded into the mounted config dir"
 docker exec "$NAME" test -f /config/custom_components/xiaomi_home/manifest.json \
     || fail "custom_components/xiaomi_home/manifest.json missing in /config"
@@ -91,7 +103,7 @@ fi
 
 echo "==> xiaomi_home registered; frontend websocket commands work"
 # 容器内监听 8123；宿主机映射到 $PORT。
-docker exec -i "$NAME" python3 - 8123 <<'PY' || fail "integration or frontend websocket check failed"
+docker exec -i "$NAME" python3 - 8123 "$SLIM" <<'PY' || fail "integration or frontend websocket check failed"
 import asyncio
 import json
 import sys
@@ -99,6 +111,7 @@ import sys
 import aiohttp
 
 PORT = sys.argv[1] if len(sys.argv) > 1 else "8123"
+SLIM = len(sys.argv) > 2 and sys.argv[2] == "1"
 BASE = f"http://127.0.0.1:{PORT}"
 CLIENT_ID = f"{BASE}/"
 
@@ -180,12 +193,32 @@ async def main():
             if auth.get("type") != "auth_ok":
                 raise SystemExit(f"ws auth failed: {auth}")
 
+            if SLIM:
+                from_slim_panels = set()
+                await ws.send_json({"id": 90, "type": "get_panels"})
+                res = await ws.receive_json()
+                if res.get("success"):
+                    from_slim_panels = set(res["result"])
+                missing = {"history", "logbook", "energy"} - from_slim_panels
+                if missing:
+                    raise SystemExit(f"slim panels missing: {sorted(missing)}")
+                print(f"    slim panels ok ({len(from_slim_panels)} panels)")
+
+                await ws.send_json({"id": 91, "type": "get_states"})
+                res = await ws.receive_json()
+                if not res.get("success") or not any(
+                    s.get("entity_id") == "sun.sun" for s in res["result"]
+                ):
+                    raise SystemExit("slim: sun.sun missing (configuration.yaml?)")
+                print("    slim sun.sun present")
+
             commands = [
                 ("manifest/list", {"type": "manifest/list"}),
                 ("get_panels", {"type": "get_panels"}),
                 ("config_entries/subscribe", {"type": "config_entries/subscribe"}),
             ]
-            for i, (name, payload) in enumerate(commands, start=1):
+            first_id = 100 if SLIM else 1
+            for i, (name, payload) in enumerate(commands, start=first_id):
                 await ws.send_json({"id": i, **payload})
                 res = await ws.receive_json()
                 if not res.get("success"):

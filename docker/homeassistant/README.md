@@ -9,7 +9,7 @@
 | 项 | 值 |
 |----|----|
 | 镜像 | `ghcr.io/viogus/homeassistant` |
-| tag | `:latest` `:2026.10` `:2026.10.4`（跟着 HA 版本走） |
+| tag | `:latest` `:2026.10` `:2026.10.4`（full）／`:slim` `:2026.10.4-slim`（slim） |
 | 平台 | linux/amd64, linux/arm64（armv7 已丢弃：QEMU 下构建慢且没人验过） |
 | 基础镜像 | `python:3.14-alpine`（HA 2026.10 要求 ≥3.14.2） |
 | 入口 | `/usr/local/bin/docker-entrypoint.sh` → `hass --config=<配置目录>` |
@@ -61,6 +61,41 @@ services:
 * **host 网络**是推荐做法：mDNS / SSDP / 局域网广播这类设备自动发现，桥接网络下基本残废。要隔离就用 `ports: ["8123:8123"]`，发现能力会打折。
 * 升级：改 tag 再 `docker compose up -d`。配置、数据库、备份都在卷上，不会丢。
 * 以非 root 跑：`chown -R 1000:1000 ./config` 后加 `user: "1000:1000"`。注意 nmap 的 SYN 扫描和部分设备追踪需要 root，切了会退化。
+
+## 两个变体：full / slim
+
+| tag | 内容 | 压缩 | 磁盘 |
+|-----|------|------|------|
+| `:latest` `:2026.10.4` `:2026.10` | **full**：default_config 依赖齐全，行为与官方镜像对齐 | 431 MB | 1.89 GB |
+| `:slim` `:2026.10.4-slim` | **slim**：去掉只被 default_config 用到的包 | ~385 MB | 1.72 GB |
+
+slim 少装的包：`av`（stream / 摄像头转流）、蓝牙栈（habluetooth / bleak / dbus-fast…）、
+DHCP/SSDP/USB 发现（aiodhcpwatcher、scapy、async-upnp-client、serialx…）、go2rtc-client。
+要用这些功能就换 full；也可以在 `configuration.yaml` 里打开对应集成，让 HA 自己联网
+pip 装 —— 那些包会落在容器的可写层里。
+
+### slim 为什么必须自带一份 configuration.yaml
+
+HA 在找不到 `configuration.yaml` 时会自己写一份模板，**第一行就是 `default_config:`**
+（`homeassistant/config.py` 的 `DEFAULT_CONFIG`）。slim 没有那批依赖，首启就会是一屏
+setup 失败。所以 entrypoint 会先落一份精简配置（history / logbook / energy / sun）。
+
+顺带一个实测撞出来的坑：HA 只在 `configuration.yaml` **不存在**时才补
+`automations.yaml` / `scripts.yaml` / `scenes.yaml`。我们先写了配置，就得自己把这三个
+伴生文件建好，否则 HA 解析配置直接失败并进 **recovery mode**（只有 frontend，其他全不加载）。
+entrypoint 现在连着一起建。
+
+### 不能进排除表的包（踩过的坑）
+
+* `gazetteer-matcher`：`conversation`（always-on 的 base platform）的默认 agent 在模块级 import 它，
+  虽然它只在 mobile_app 的 manifest 里出现。
+* `hass-nabucasa`：`http/forwarded.py` 顶层 `from hass_nabucasa import remote`。
+* `PyNaCl`：`securetar` 的传递依赖，而 `securetar` 在 `hass` 的启动路径上
+  （`homeassistant/backup_restore.py`），卸掉 HA 直接起不来。
+
+前两个都是「manifest 里查不到、但代码里 import」的依赖 —— 所以裁剪不能只信 manifest，
+必须真启动一遍。CI 对两个变体各跑一次 smoke test，其中一条断言就是日志里不许出现
+`No module named`。
 
 ## 预装集成：Xiaomi Home
 
