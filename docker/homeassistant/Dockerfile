@@ -50,7 +50,10 @@ ARG DEPS="openssl-dev cargo zlib-dev libjpeg-turbo-dev cmake"
 #     ssdp / usb / dhcp / analytics / homeassistant_alerts / assist_pipeline 全部
 #     setup 失败，前端会带着一堆 unknown_error 转圈。pymicro-vad 和 pyspeex-noise
 #     没有 musllinux wheel，就在本层用 build-dependencies 现场编译。
-ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabucasa|aiohttp_cors|scapy|aiodiscover|psutil-home-assistant|securetar|ha-ffmpeg|construct|paho-mqtt|numpy|psutil|hassil|aiohasupervisor|mutagen|async-upnp-client|aiousbwatcher|aiodhcpwatcher|av|PyTurboJPEG|pymicro-vad|pyspeex-noise|serialx|gazetteer-matcher|go2rtc-client|infrared-protocols|rf-protocols"
+#   * HAP-python / homekit-audio-proxy / PyQRCode / base36 是 HomeKit Bridge 必需的
+#     （homekit 的 manifest 声明），总共 324 KB。它们不在 default_config 里，之前漏了，
+#     结果是任何变体上配 HomeKit 都报 "No module named 'pyhap'"。
+ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabucasa|aiohttp_cors|scapy|aiodiscover|psutil-home-assistant|securetar|ha-ffmpeg|construct|paho-mqtt|numpy|psutil|hassil|aiohasupervisor|mutagen|async-upnp-client|aiousbwatcher|aiodhcpwatcher|av|PyTurboJPEG|pymicro-vad|pyspeex-noise|serialx|gazetteer-matcher|go2rtc-client|infrared-protocols|rf-protocols|HAP-python|homekit-audio-proxy|PyQRCode|base36"
 
 # requirements_all.txt 的来源。默认走上游 raw（CI 上没问题）；国内本机构建时
 # raw.githubusercontent.com 常常解析被污染，可以换成任何能拿到同一份文件的地址，

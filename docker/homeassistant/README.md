@@ -170,6 +170,12 @@ docker restart homeassistant        # entrypoint 会重新播种
 * **armv7 只是“能构建出来”**，没有在真机上验过。32 位 ARM 上 HA 的 Python 依赖覆盖本来就不如 64 位，真要用建议 arm64。
 * **体积 ~431 MB**：`ffmpeg`（apk 装完 142 MB，压缩后约 60 MB，小米集成的硬依赖）+ 让 `default_config` 跑通的那批 Python 包装进去约 40 MB。相比官方 2.3 GB 还是小一个量级，但已经不是“只剩 HA 本体”的 ~310 MB 了。
 * **`default_config` 现在只有 `go2rtc` 一项会报错**（`Could not find go2rtc docker binary`）。`go2rtc` 是 HA 2026.10 才进 `default_config` 的，官方 core 镜像的 Dockerfile 里同样没有这个二进制，属于与官方一致的已知项；要摄像头转流就自己下载一个静态 `go2rtc` 放到 `PATH` 里，或忽略它。除它之外的 `conversation` / `tts` / `ssdp` / `usb` / `dhcp` / `analytics` / `mobile_app` / `infrared` / `radio_frequency` 依赖都已装齐。
+* **预装依赖只覆盖三块**：`default_config` 会 import 的那些、Xiaomi Home 要的、HomeKit Bridge 要的
+  （`HAP-python` / `homekit-audio-proxy` / `PyQRCode` / `base36`，合计 324 KB）。其他集成（ZHA、ESPHome、
+  Hue…）第一次添加时由 HA 自己联网 pip 装依赖，**离线环境下这些集成用不了**。
+* **地图图层依赖外网**。HA 2026 的 `map_tiles` 集成是把 OSM 的 `vector.openstreetmap.org`（矢量瓦片）
+  和 `tile.openstreetmap.org`（栅格）代理过来，镜像里没有本地瓦片。这两个域名不通时，地图会「有底框、
+  没有图层」—— 实测容器内两个域名都超时/拒绝连接，和镜像、裁剪都无关（官方镜像同样如此），得在网络层解决。
 * **`pymicro-vad` / `pyspeex-noise` 没有 musllinux wheel**，在构建期的编译层现场编译（`build-dependencies` 在同一层装完再删），所以主层构建时间比纯 wheel 方案长几分钟。
 * 版本号是 HA Core 的版本；镜像 tag 与 PyPI 上的 `homeassistant` 版本一一对应。
 

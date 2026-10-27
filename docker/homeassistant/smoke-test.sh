@@ -202,6 +202,25 @@ async def main():
                 headers=headers,
             )
 
+        # HomeKit 的依赖（HAP-python 等）不在 default_config 里，单独验一遍
+        if "homekit" not in handlers:
+            raise SystemExit("homekit missing from flow handlers (PLUGINS?)")
+        hk = await call(
+            session,
+            "POST",
+            "/api/config/config_entries/flow",
+            json={"handler": "homekit"},
+            headers=headers,
+        )
+        print(f"    homekit flow: type={hk.get('type')} step={hk.get('step_id')}")
+        if hk.get("flow_id"):
+            await call(
+                session,
+                "DELETE",
+                f"/api/config/config_entries/flow/{hk['flow_id']}",
+                headers=headers,
+            )
+
         # 前端首屏会发的几条 websocket 命令
         async with session.ws_connect(f"{BASE}/api/websocket") as ws:
             await ws.receive_json()
