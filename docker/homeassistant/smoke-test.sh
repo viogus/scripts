@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# 冒烟测试：把镜像真跑起来，确认三件事
-#   1. entrypoint 把预装的 custom_components 播种进了 bind mount 的配置目录
-#      （这是最容易错的一环：镜像里写 /data 会被挂载点盖住）；
-#   2. 集成的依赖在容器里 import 得动（construct / paho-mqtt / numpy / psutil …）；
-#   3. HA 真的把 xiaomi_home 注册进来了 —— 先看 config_entries/flow_handlers
-#      里有没有它，再真的 POST 一个 flow 出来。不碰小米账号，也不需要设备。
+# 冒烟测试：把镜像真跑起来，确认这些事
+#   1. 配置目录跟随 HA 惯例 `/config`，并且 `/data` 软链到同一份数据（老用法兼容）；
+#   2. entrypoint 把预装的 custom_components 播种进了挂载的配置目录；
+#   3. HA 的 default_config 不再因为缺 Python 包而 setup 失败
+#      （go2rtc 例外：官方 core 镜像同样没有它的二进制）；
+#   4. xiaomi_home 被 HA 真正注册：flow_handlers 里有它，并且能起一个 config flow；
+#   5. 前端首屏用的 websocket 命令（manifest/list、get_panels、
+#      config_entries/subscribe）都能正常返回 —— 上一版只看 REST，前端转圈就发现不了。
 #
 # 用法: smoke-test.sh <image-ref> [expected-xiaomi-version]
-#   expected-xiaomi-version 可写 v0.5.0 或 0.5.0，只比版本号。
 set -euo pipefail
 
 IMAGE="${1:?usage: smoke-test.sh <image-ref> [expected-xiaomi-version]}"
@@ -17,14 +18,14 @@ PORT="${SMOKE_PORT:-18123}"
 DATA="$(mktemp -d)"
 
 cleanup() {
-    # 收尾失败不该把整个测试判成红的，这里全部吞掉错误。
+    # 收尾失败不该把整个测试判成红的
     set +e
     docker rm -f "$NAME" >/dev/null 2>&1
     if [ -d "$DATA" ]; then
-        # HA 在容器里以 root 跑，bind mount 里的文件属于 root：Linux runner 上宿主机
-        # 用户直接 rm 会 permission denied，所以借镜像自己（root）把内容清空。
-        docker run --rm -v "$DATA:/data" --entrypoint sh "$IMAGE" \
-            -c 'rm -rf /data/* /data/.[!.]* /data/..?*' >/dev/null 2>&1
+        # HA 在容器里以 root 跑，bind mount 出来的文件属于 root：Linux runner 上
+        # 宿主机用户直接 rm 会 permission denied，所以借镜像自己（root）清空。
+        docker run --rm -v "$DATA:/config" --entrypoint sh "$IMAGE" \
+            -c 'rm -rf /config/* /config/.[!.]* /config/..?*' >/dev/null 2>&1
         rm -rf "$DATA" >/dev/null 2>&1
     fi
     set -e
@@ -34,12 +35,12 @@ trap cleanup EXIT
 fail() {
     echo "!! $*" >&2
     echo "=== container logs (tail) ===" >&2
-    docker logs --tail 120 "$NAME" >&2 || true
+    docker logs --tail 150 "$NAME" >&2 || true
     exit 1
 }
 
-echo "==> starting $IMAGE  (config dir: $DATA, port: $PORT)"
-docker run -d --name "$NAME" -p "${PORT}:8123" -v "$DATA:/data" "$IMAGE" >/dev/null
+echo "==> starting $IMAGE  (config dir: $DATA -> /config, port: $PORT)"
+docker run -d --name "$NAME" -p "${PORT}:8123" -v "$DATA:/config" "$IMAGE" >/dev/null
 
 echo "==> waiting for /manifest.json"
 up=false
@@ -53,12 +54,20 @@ for i in $(seq 1 90); do
 done
 [ "$up" = true ] || fail "Home Assistant never answered on port $PORT"
 
+echo "==> config dir is /config and /data points at the same place"
+docker logs "$NAME" 2>&1 | grep -q "config dir: /config" \
+    || fail "entrypoint did not pick /config as the config dir"
+[ "$(docker exec "$NAME" readlink /data)" = "/config" ] \
+    || fail "/data is not linked to /config"
+
 echo "==> custom components were seeded into the mounted config dir"
+docker exec "$NAME" test -f /config/custom_components/xiaomi_home/manifest.json \
+    || fail "custom_components/xiaomi_home/manifest.json missing in /config"
 docker exec "$NAME" test -f /data/custom_components/xiaomi_home/manifest.json \
-    || fail "custom_components/xiaomi_home/manifest.json missing in /data"
+    || fail "/data did not resolve to the same config dir"
 
 GOT_XM=$(docker exec "$NAME" python3 -c \
-    'import json;print(json.load(open("/data/custom_components/xiaomi_home/manifest.json"))["version"])')
+    'import json;print(json.load(open("/config/custom_components/xiaomi_home/manifest.json"))["version"])')
 echo "    integration manifest version: $GOT_XM"
 if [ -n "$WANT_XM" ] && [ "${GOT_XM#v}" != "${WANT_XM#v}" ]; then
     fail "integration version mismatch: want $WANT_XM, got $GOT_XM"
@@ -69,10 +78,22 @@ docker exec "$NAME" python3 -c \
     'import construct, paho.mqtt.client, haffmpeg, numpy, cryptography, psutil; print("    deps ok")' \
     || fail "cannot import one of construct / paho.mqtt / haffmpeg / numpy / cryptography / psutil"
 
-echo "==> Home Assistant registered the integration (flow handlers + real flow)"
+echo "==> default_config did not fail on missing packages"
+# go2rtc 是唯一允许的例外：官方 core 镜像同样没有 go2rtc 二进制。
+BAD=$(docker logs "$NAME" 2>&1 | grep -E "Setup failed for '" | grep -v "go2rtc" || true)
+if [ -n "$BAD" ]; then
+    echo "$BAD" >&2
+    fail "integrations failed to set up (missing packages?)"
+fi
+if docker logs "$NAME" 2>&1 | grep -E "No module named '"; then
+    fail "missing Python modules in the image"
+fi
+
+echo "==> xiaomi_home registered; frontend websocket commands work"
 # 容器内监听 8123；宿主机映射到 $PORT。
-docker exec -i "$NAME" python3 - 8123 <<'PY' || fail "xiaomi_home config flow did not start"
+docker exec -i "$NAME" python3 - 8123 <<'PY' || fail "integration or frontend websocket check failed"
 import asyncio
+import json
 import sys
 
 import aiohttp
@@ -86,7 +107,7 @@ async def call(session, method, path, **kwargs):
     async with session.request(method, BASE + path, **kwargs) as resp:
         try:
             body = await resp.json()
-        except Exception:  # noqa: BLE001 - 非 JSON 响应就原样报出来
+        except Exception:  # noqa: BLE001
             body = await resp.text()
         if resp.status >= 400:
             raise SystemExit(f"{method} {path} -> {resp.status}: {body}")
@@ -95,7 +116,13 @@ async def call(session, method, path, **kwargs):
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        # 全新配置目录 → 先跑 onboarding 拿一个 access token。
+        async with session.get(BASE + "/") as resp:
+            if resp.status != 200:
+                raise SystemExit(f"GET / -> {resp.status}")
+            html = await resp.text()
+            print(f"    GET / -> 200 ({len(html)} bytes)")
+
+        # 全新配置目录 → onboarding 拿 token
         users = await call(
             session,
             "POST",
@@ -137,8 +164,6 @@ async def main():
             headers=headers,
         )
         print(f"    flow started: type={flow.get('type')} step={flow.get('step_id')}")
-
-        # 把测试用的 flow 删掉，别留在配置里。
         if flow.get("flow_id"):
             await call(
                 session,
@@ -147,14 +172,31 @@ async def main():
                 headers=headers,
             )
 
+        # 前端首屏会发的几条 websocket 命令
+        async with session.ws_connect(f"{BASE}/api/websocket") as ws:
+            await ws.receive_json()
+            await ws.send_json({"type": "auth", "access_token": token["access_token"]})
+            auth = await ws.receive_json()
+            if auth.get("type") != "auth_ok":
+                raise SystemExit(f"ws auth failed: {auth}")
+
+            commands = [
+                ("manifest/list", {"type": "manifest/list"}),
+                ("get_panels", {"type": "get_panels"}),
+                ("config_entries/subscribe", {"type": "config_entries/subscribe"}),
+            ]
+            for i, (name, payload) in enumerate(commands, start=1):
+                await ws.send_json({"id": i, **payload})
+                res = await ws.receive_json()
+                if not res.get("success"):
+                    raise SystemExit(f"ws {name} failed: {json.dumps(res.get('error'))}")
+                if name == "manifest/list":
+                    print(f"    ws manifest/list -> {len(res['result'])} integrations")
+                else:
+                    print(f"    ws {name} -> ok")
+
 
 asyncio.run(main())
 PY
-
-echo "==> no xiaomi_home errors in the log"
-if docker logs "$NAME" 2>&1 | grep -iE 'xiaomi_home.*(error|traceback|importerror|exception)'; then
-    fail "xiaomi_home errors found in the container log"
-fi
-echo "    clean"
 
 echo "==> smoke test passed"

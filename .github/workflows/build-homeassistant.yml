@@ -5,7 +5,7 @@ name: Build & Push Home Assistant (Alpine) Docker Image
 #   Dockerfile : docker/homeassistant/Dockerfile（紧跟上游，只把 jemalloc 换成 apk 包）
 #   HA 版本    : 默认取 PyPI 上最新的正式版；也可以在 workflow_dispatch 里指定
 #   Xiaomi Home: 预装小米官方集成，默认取 XiaoMi/ha_xiaomi_home 最新 release
-#   架构       : linux/amd64, linux/arm64, linux/arm/v7（后两个在 amd64 runner 上走 QEMU）
+#   架构       : linux/amd64, linux/arm64（arm64 在 amd64 runner 上走 QEMU；armv7 已丢弃）
 #   跳过       : ghcr 上已有同名 tag，且镜像 label 里的 Xiaomi Home 版本与本次解析
 #                出来的一致，才跳过 —— 只比 tag 会漏掉“HA 没动但小米集成发新版”
 #                的情况。
@@ -161,7 +161,7 @@ jobs:
         with:
           context: docker/homeassistant
           file: docker/homeassistant/Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ steps.v.outputs.version }}
             BUILD_DATE=${{ steps.v.outputs.build_date }}
@@ -205,6 +205,6 @@ jobs:
               echo "docker pull ${REGISTRY}/${IMAGE}:latest"
               echo '```'
               echo
-              echo "平台：linux/amd64, linux/arm64, linux/arm/v7"
+              echo "平台：linux/amd64, linux/arm64"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,24 +1,88 @@
 #!/bin/sh
-# Home Assistant 容器入口：先把镜像里预装的 custom_components 播种到配置目录，
-# 再把控制权交给 hass。
+# Home Assistant 容器入口。
 #
-# 为什么需要这一步：HA 只从 <config>/custom_components 加载自定义集成，而 /data
-# 通常是宿主机 bind mount —— 镜像里写进 /data 的文件会被挂载点整个盖住（named
-# volume 首次创建会拷一份，bind mount 不会）。所以预装的集成放在
+# 两件事：
+#   1. 选配置目录，并让 /config 和 /data 两个路径指向同一份数据（HA 生态默认
+#      /config：官方镜像、文档、Samba/FTPS add-on 都是它；上游 kurapov 镜像用
+#      /data）；
+#   2. 把镜像里预装的 custom_components 播种进配置目录。
+#
+# 为什么需要 1：容器里两个路径统一，才不会出现“换镜像后配置突然变空、427 个实体
+# 全没了”——官方镜像挂 /config，这个镜像原来只认 /data，切过来就踩这个坑。
+#
+# 为什么需要 2：/config 通常是 bind mount，镜像里写进去的内容会被挂载点整个盖住
+# （named volume 只会在首次创建时拷一份）。所以预装集成放在
 # /usr/local/share/homeassistant/custom_components，启动时按需补进配置目录。
-#
-# 已存在的同名集成一律不动：用户可能用 HACS 装过、或手动升级到了更新的版本，
-# 覆盖它属于越权。
+# 已存在的同名集成一律不动：用户可能用 HACS 装过、或手动升级到了更新的版本。
 set -eu
 
-CONFIG_DIR="${CONFIG_DIR:-/data}"
 SEED_DIR="/usr/local/share/homeassistant/custom_components"
 
+is_mountpoint() {
+    # musl/busybox 里没有 findmnt，直接看 mountinfo
+    [ -r /proc/self/mountinfo ] || return 1
+    grep -qs " $1 " /proc/self/mountinfo
+}
+
+has_config() {
+    [ -f "$1/configuration.yaml" ] || [ -d "$1/.storage" ]
+}
+
+pick_config_dir() {
+    # 显式指定优先
+    if [ -n "${CONFIG_DIR:-}" ]; then
+        echo "$CONFIG_DIR"
+        return 0
+    fi
+    # 已经有配置的目录优先；两个都有就按 HA 惯例选 /config
+    if [ -d /config ] && has_config /config; then
+        echo /config
+        return 0
+    fi
+    if [ -d /data ] && has_config /data; then
+        echo /data
+        return 0
+    fi
+    # 全新安装：哪个挂着就用哪个，都没挂就按 HA 惯例 /config
+    if is_mountpoint /data && ! is_mountpoint /config; then
+        echo /data
+        return 0
+    fi
+    echo /config
+}
+
+link_other_path() {
+    config_dir="$1"
+    for other in /config /data; do
+        [ "$other" = "$config_dir" ] && continue
+        # 挂载点不能盖成软链
+        if is_mountpoint "$other"; then
+            echo "[entrypoint] $other is a mountpoint, leaving it alone" >&2
+            continue
+        fi
+        # 真实目录：空的（基础镜像里 /data 就是空的）可以换成软链，有内容的不动
+        if [ -d "$other" ] && [ ! -L "$other" ]; then
+            if [ -n "$(ls -A "$other" 2>/dev/null)" ]; then
+                echo "[entrypoint] $other already has content, leaving it alone" >&2
+                continue
+            fi
+            rm -rf "$other" 2>/dev/null || true
+        fi
+        rm -f "$other" 2>/dev/null || true
+        if ln -sn "$config_dir" "$other" 2>/dev/null; then
+            echo "[entrypoint] $other -> $config_dir"
+        else
+            echo "[entrypoint] WARN: cannot link $other -> $config_dir" >&2
+        fi
+    done
+}
+
 seed_custom_components() {
+    config_dir="$1"
     [ -d "$SEED_DIR" ] || return 0
 
-    if ! mkdir -p "$CONFIG_DIR/custom_components" 2>/dev/null; then
-        echo "[entrypoint] WARN: cannot create $CONFIG_DIR/custom_components;" \
+    if ! mkdir -p "$config_dir/custom_components" 2>/dev/null; then
+        echo "[entrypoint] WARN: cannot create $config_dir/custom_components;" \
              "skip seeding (read-only mount, or running as a user without write access)" >&2
         return 0
     fi
@@ -26,7 +90,7 @@ seed_custom_components() {
     for src in "$SEED_DIR"/*/; do
         [ -d "$src" ] || continue
         name=$(basename "$src")
-        dst="$CONFIG_DIR/custom_components/$name"
+        dst="$config_dir/custom_components/$name"
         if [ -e "$dst" ]; then
             echo "[entrypoint] custom_components/$name already exists, left untouched"
         elif cp -a "$src" "$dst" 2>/dev/null; then
@@ -37,12 +101,15 @@ seed_custom_components() {
     done
 }
 
-seed_custom_components
+CONFIG_DIR_PATH="$(pick_config_dir)"
+echo "[entrypoint] config dir: $CONFIG_DIR_PATH"
+link_other_path "$CONFIG_DIR_PATH"
+seed_custom_components "$CONFIG_DIR_PATH"
 
 # 保持原来的用法：`docker run <img>` 和 `docker run <img> --debug` 都走 hass；
 # 传别的命令（`bash`、`python3 ...`）就直接执行，方便排查问题。
 case "${1:-}" in
-    "")  exec hass --config="$CONFIG_DIR" ;;
-    -*)  exec hass --config="$CONFIG_DIR" "$@" ;;
+    "")  exec hass --config="$CONFIG_DIR_PATH" ;;
+    -*)  exec hass --config="$CONFIG_DIR_PATH" "$@" ;;
     *)   exec "$@" ;;
 esac

@@ -7,13 +7,14 @@ services:
     # 只在内网跑、不需要发现的场景可以换成 ports: ["8123:8123"]。
     network_mode: host
     volumes:
-      - ./data:/data
+      - ./config:/config
       - /etc/localtime:/etc/localtime:ro
     environment:
       TZ: Asia/Shanghai
       # 镜像已预装 Xiaomi Home 集成，entrypoint 会在启动时把它补进
-      # ./data/custom_components/（已存在则不动）。换配置目录时改这个：
-      # CONFIG_DIR: /data
-      # 想以非 root 跑的话，把下面两行的注释去掉，并且先 chown -R 1000:1000 ./data
+      # ./config/custom_components/（已存在则不动）。
+      # 挂 /config（HA 惯例）或 /data 都行，entrypoint 会自动认，并把另一个软链过去。
+      # 要强制指定配置目录：CONFIG_DIR=/config
+      # 想以非 root 跑的话，把下面两行的注释去掉，并且先 chown -R 1000:1000 ./config
       # 注意：nmap 的 SYN 扫描、部分设备追踪需要 root，普通用户会退化
       # user: "1000:1000"

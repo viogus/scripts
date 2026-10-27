@@ -13,10 +13,9 @@
 #   1. jemalloc 直接用 Alpine main 仓库里的 `jemalloc` 包，不再 FROM 一个第三方
 #      镜像（kurapov/alpine-jemalloc）只为了拷一个 .so —— 少一个上游依赖，且
 #      x86_64 / aarch64 / armhf 三个架构的 main 仓库里都有这个包；
-#   2. 基础镜像用 python:3.14-alpine 而不是上游现在的 3.15.0-alpine：
-#      python 3.15 的镜像已经没有 linux/arm/v7 了（buildx 直接
-#      "no match for platform"），而 HA 2026.10 要求 >=3.14.2 且支持 3.14，
-#      3.14 的 cp314 musllinux wheel 覆盖也比刚出的 3.15 更全；
+#   2. 基础镜像用 python:3.14-alpine 而不是上游现在的 3.15.0-alpine：HA 2026.10
+#      要求 >=3.14.2 且只声明支持 3.14，cp314 的 musllinux wheel 覆盖也比刚出的
+#      3.15 全（armv7 已不构建，这条不再是硬约束，纯粹是稳）；
 #   3. 默认 VERSION / OCI labels 换成本仓库的构建值（CI 会覆盖 VERSION）；
 #   4. 预装小米官方的 Xiaomi Home 集成（https://github.com/XiaoMi/ha_xiaomi_home），
 #      连同它声明的依赖一起装进镜像，见下面 “Xiaomi Home 集成” 那一段。
@@ -42,10 +41,15 @@ ARG GUID=1000
 ARG MAKEFLAGS=-j4
 ARG VERSION="2026.10.4"
 ARG DEPS="openssl-dev cargo zlib-dev libjpeg-turbo-dev cmake"
-# PLUGINS：从 HA 的 requirements_all.txt 里挑出来预装的包。末尾几个是 Xiaomi Home
-# 集成声明要的（construct / paho-mqtt / numpy / psutil），py 版本直接跟 HA 为同一
-# 批库钉的值走；cryptography 属于 HA core 自带依赖，不需要在这里列。
-ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabucasa|aiohttp_cors|scapy|aiodiscover|psutil-home-assistant|securetar|ha-ffmpeg|construct|paho-mqtt|numpy|psutil"
+# PLUGINS：从 HA 的 requirements_all.txt 里挑出来预装的包。
+#   * 末尾构造 Xiaomi Home 的三组：ha-ffmpeg（ffmpeg 集成的 Python 侧）、
+#     construct / paho-mqtt / numpy / psutil（集成自己声明的依赖，cryptography
+#     是 HA core 自带）；版本全部跟 HA 为同一批库钉的值走。
+#   * 中间那批是 default_config 真正会 import 的包：缺了它们，conversation / tts /
+#     ssdp / usb / dhcp / analytics / homeassistant_alerts / assist_pipeline 全部
+#     setup 失败，前端会带着一堆 unknown_error 转圈。pymicro-vad 和 pyspeex-noise
+#     没有 musllinux wheel，就在本层用 build-dependencies 现场编译。
+ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabucasa|aiohttp_cors|scapy|aiodiscover|psutil-home-assistant|securetar|ha-ffmpeg|construct|paho-mqtt|numpy|psutil|hassil|aiohasupervisor|mutagen|async-upnp-client|aiousbwatcher|aiodhcpwatcher|av|PyTurboJPEG|pymicro-vad|pyspeex-noise|serialx|gazetteer-matcher|go2rtc-client|infrared-protocols|rf-protocols"
 
 # requirements_all.txt 的来源。默认走上游 raw（CI 上没问题）；国内本机构建时
 # raw.githubusercontent.com 常常解析被污染，可以换成任何能拿到同一份文件的地址，
@@ -56,6 +60,10 @@ ARG HA_REQUIREMENTS_URL=""
 # Xiaomi Home 集成（小米官方，custom_components 形式分发，不在 PyPI 上）。
 ARG XIAOMI_HOME_REPO="XiaoMi/ha_xiaomi_home"
 ARG XIAOMI_HOME_VERSION="v0.5.0"
+# 直连 codeload 而不是 github.com/.../archive/...：后者会 302 到 codeload，
+# 多一次解析就多一次被污染的機會（本地实测过 github.com 解析到坏 IP）。要换镜像
+# 源时直接覆盖这个变量。
+ARG XIAOMI_HOME_TARBALL_URL=""
 
 ENV WHEELS_INDEX="https://wheels.home-assistant.io/musllinux-index/"
 
@@ -103,8 +111,10 @@ ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2
 #     /data 写东西会被挂载点盖住。
 RUN apk add --no-cache ffmpeg && \
     mkdir -p /usr/local/share/homeassistant/custom_components && \
-    wget -q -O /tmp/xiaomi_home.tar.gz \
-      "https://github.com/${XIAOMI_HOME_REPO}/archive/refs/tags/${XIAOMI_HOME_VERSION}.tar.gz" && \
+    TARBALL_URL="${XIAOMI_HOME_TARBALL_URL:-https://codeload.github.com/${XIAOMI_HOME_REPO}/tar.gz/refs/tags/${XIAOMI_HOME_VERSION}}" && \
+    for i in 1 2 3; do wget -q -O /tmp/xiaomi_home.tar.gz "$TARBALL_URL" && break; \
+      echo "wget retry $i for $TARBALL_URL" >&2; sleep 3; done && \
+    test -s /tmp/xiaomi_home.tar.gz && \
     tar xzf /tmp/xiaomi_home.tar.gz -C /tmp && \
     cp -a /tmp/ha_xiaomi_home-*/custom_components/xiaomi_home \
       /usr/local/share/homeassistant/custom_components/ && \
