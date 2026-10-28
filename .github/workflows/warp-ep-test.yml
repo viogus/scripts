@@ -1,0 +1,44 @@
+name: WARP Endpoint Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: "WireGuard endpoint ip:port"
+        required: false
+        default: "162.159.192.1:2408"
+
+jobs:
+  warp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wireguard-tools curl jq
+          TAG=$(curl -fsSL https://api.github.com/repos/ViRb3/wgcf/releases/latest | jq -r .tag_name)
+          VER=${TAG#v}
+          sudo curl -fsSL -o /usr/local/bin/wgcf "https://github.com/ViRb3/wgcf/releases/download/${TAG}/wgcf_${VER}_linux_amd64"
+          sudo chmod +x /usr/local/bin/wgcf
+      - name: Bring up WARP against chosen endpoint
+        env:
+          ENDPOINT: ${{ inputs.endpoint }}
+        run: |
+          set -euo pipefail
+          echo "target endpoint: $ENDPOINT"
+          wgcf register --accept-tos
+          wgcf generate
+          sed -i "s|^Endpoint = .*|Endpoint = ${ENDPOINT}|" wgcf-profile.conf
+          grep Endpoint wgcf-profile.conf
+          sudo install -m 600 wgcf-profile.conf /etc/wireguard/wg0.conf
+          sudo wg-quick up wg0 || echo "wg-quick up failed"
+          for i in 1 2 3; do
+            echo "--- attempt $i ---"
+            curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|warp|loc|colo)=' || echo "trace failed"
+            sudo wg show wg0 latest-handshakes || true
+            sleep 3
+          done
+      - name: Cleanup
+        if: always()
+        run: sudo wg-quick down wg0 || true
