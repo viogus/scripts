@@ -16,7 +16,7 @@ jobs:
           VER=${TAG#v}
           sudo curl -fsSL -o /usr/local/bin/wgcf "https://github.com/ViRb3/wgcf/releases/download/${TAG}/wgcf_${VER}_linux_amd64"
           sudo chmod +x /usr/local/bin/wgcf
-          wgcf --version
+          wgcf help > /dev/null
 
       - name: Register WARP + bring up WireGuard
         run: |
