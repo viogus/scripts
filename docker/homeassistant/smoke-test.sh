@@ -97,6 +97,11 @@ if [ "$NANO" = "1" ]; then
     done
     docker exec "$NAME" test -d /usr/local/lib/python3.14/site-packages/homeassistant/components/apple_tv \
         || fail "nano dropped apple_tv (its deps are still installed)"
+    # onboarding 会建一条 shopping_list 的 entry，组件不在就是一个"加载失败"的卡片
+    docker exec "$NAME" test -d /usr/local/lib/python3.14/site-packages/homeassistant/components/shopping_list \
+        || fail "nano dropped shopping_list (onboarding persists an entry for it)"
+    docker exec "$NAME" python3 -c 'import homeassistant.components.shopping_list' \
+        || fail "shopping_list is present but does not import"
 fi
 
 if [ "$SLIM" = "1" ]; then

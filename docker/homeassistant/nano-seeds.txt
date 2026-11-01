@@ -5,5 +5,5 @@ image_upload zone tag webhook intent network sun panel_custom blueprint trace
 web_rtc sensor binary_sensor switch light climate fan cover camera media_player
 humidifier water_heater vacuum lock number select button text event update scene
 script automation group template input_boolean input_number input_select
-input_text input_button input_datetime timer counter calendar todo notify
+input_text input_button input_datetime timer counter calendar todo notify shopping_list
 alarm_control_panel device_tracker homekit zeroconf mobile_app apple_tv xiaomi_miio

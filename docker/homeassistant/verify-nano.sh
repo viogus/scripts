@@ -117,6 +117,11 @@ async def main():
 asyncio.run(main())
 PY
 
+echo "==> shopping_list is present (onboarding persists an entry for it)"
+docker exec "$NAME" python3 -c 'import homeassistant.components.shopping_list' \
+    || { echo "!! shopping_list does not import"; exit 1; }
+echo "    shopping_list ok"
+
 echo "==> HAP endpoint on 21064 (probed from inside the container)"
 code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:${HKPORT}/pair-setup" || true)
 echo "    GET /pair-setup -> HTTP $code (HAP 只认真 POST；能回状态码就说明服务在听)"
