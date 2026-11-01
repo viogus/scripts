@@ -108,7 +108,7 @@ LABEL \
 # 试过单独加一层 RUN 删文件，结果镜像一点没小 —— 后面的层删文件只是白out，
 # 前面那层的字节还在（docker save 出来一样大）。同一层内删才能真正释放。
 
-COPY prune-components.py nano-seeds.txt /tmp/
+COPY prune-components.py nano-seeds.txt /usr/src/
 
 RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     apk add --no-cache --virtual=build-dependencies build-base libffi-dev ${DEPS} && \
@@ -145,10 +145,11 @@ RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     if [ "${TRIM_COMPONENTS}" = "1" ]; then \
       SP=/usr/local/lib/python3.14/site-packages; \
       HA_COMPONENTS="$SP/homeassistant/components" \
-      KEEP_SEEDS="$(tr '\n' ' ' < /tmp/nano-seeds.txt)" \
+      KEEP_SEEDS="$(tr '\n' ' ' < /usr/src/nano-seeds.txt)" \
       DROP_PACKAGES="pycountry radios gTTS PyMetno" \
-      python3 /tmp/prune-components.py; \
-      rm -f /tmp/prune-components.py /tmp/nano-seeds.txt; \
+      python3 /usr/src/prune-components.py && \
+      rm -f /usr/src/prune-components.py /usr/src/nano-seeds.txt && \
+      test ! -d "$HA_COMPONENTS/zha"; \
     fi
 
 # musl 的 malloc 对 HA 这种大量小对象的负载不太友好，上游同样挂 jemalloc。
