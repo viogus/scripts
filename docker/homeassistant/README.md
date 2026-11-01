@@ -39,17 +39,19 @@ docker run -d --name homeassistant \
   -e TZ=Asia/Shanghai \
   -v /var/opt/docker/homeassistant:/config \
   -v /etc/localtime:/etc/localtime:ro \
-  ghcr.io/viogus/homeassistant:2026.10.4
+  ghcr.io/viogus/homeassistant:2026.10.4-nano
 ```
 
 打开 `http://<host>:8123` 就是 onboarding 页面。
+
+例子用的是 **nano**（小米 + HomeKit，254 MB）；换 full / slim / micro 只改 tag。
 
 `docker compose up -d`（本目录的 compose 默认就是 host 网络 + `./config`）：
 
 ```yaml
 services:
   homeassistant:
-    image: ghcr.io/viogus/homeassistant:2026.10.4
+    image: ghcr.io/viogus/homeassistant:2026.10.4-nano   # 换 full/slim/micro 只改这里
     container_name: homeassistant
     restart: unless-stopped
     network_mode: host

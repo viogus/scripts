@@ -1,6 +1,7 @@
 services:
   homeassistant:
-    image: ghcr.io/viogus/homeassistant:2026.10.4
+    # nano = 只留小米 + HomeKit 用得到的集成（254 MB）；换 full/slim/micro 改这一行
+    image: ghcr.io/viogus/homeassistant:2026.10.4-nano
     container_name: homeassistant
     restart: unless-stopped
     # HA 的自动发现（mDNS / SSDP / 局域网广播）需要 host 网络。
