@@ -1,3 +1,6 @@
 .claude/settings.local.json
 CODE_REVIEW.md
 .worktrees/
+
+# 本地跑镜像验证时生成的临时配置目录
+.tmp-*/
