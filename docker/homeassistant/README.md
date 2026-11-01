@@ -120,7 +120,7 @@ micro 在 slim 基础上继续删（都在**同一层**里删，见下）：
 
 ### nano 多裁了什么
 
-nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍到 118 个：只留
+nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍到 119 个：只留
 [`nano-seeds.txt`](nano-seeds.txt) 里列的种子（各类平台、`homekit`、`xiaomi_miio`、`frontend`
 那一套），再加上三轮闭包：
 
@@ -135,6 +135,8 @@ nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍�
 
 * `camera` / `stream` / `numpy` / ffmpeg 二进制：`homekit/accessories.py` 在模块层就
   `from homeassistant.components.camera import ...`，砍掉摄像头链路 = HomeKit 起不来。
+* `shopping_list`：onboarding 会给它建一条 config entry（待办清单），组件不在就是一张
+  「加载失败」的卡片；它没有额外依赖，留着几乎不占体积。
 * `pip` / `uv`：留着自己装集成。
 
 维护代价（真正的成本在这）：种子列表跟着 HA 版本走。升级后如果某个新平台没列进去，
