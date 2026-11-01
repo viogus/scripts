@@ -71,7 +71,7 @@ services:
 |-----|------|------|------|
 | `:latest` `:2026.10.4` `:2026.10` | **full**：default_config 依赖齐全，行为与官方镜像对齐 | 431 MB | 1.89 GB |
 | `:slim` `:2026.10.4-slim` | **slim**：去掉只被 default_config 用到的包 | 384 MB | 1.72 GB |
-| `:micro` `:2026.10.4-micro` | **micro**：slim + 只留 en/zh-Hans 翻译、去掉 es5/sourcemap/无用 stdlib | ~290 MB | 1.17 GB |
+| `:micro` `:2026.10.4-micro` | **micro**：slim + 只留 en/zh-Hans 翻译、去掉 es5/sourcemap/无用 stdlib | 299 MB | 1.17 GB |
 | `:nano` `:2026.10.4-nano` | **nano**：micro + 只保留这台机器实际用到的集成（见下） | 254 MB | 695 MB |
 
 slim 少装的包：`av`（stream / 摄像头转流）、蓝牙栈（habluetooth / bleak / dbus-fast…）、
