@@ -117,6 +117,30 @@ async def main():
 asyncio.run(main())
 PY
 
+echo "==> BLE stack (米家温湿度计走 bluetooth -> xiaomi_ble)"
+for comp in bluetooth bluetooth_adapters usb xiaomi_ble homekit_controller; do
+    docker exec "$NAME" test -d "/usr/local/lib/python3.14/site-packages/homeassistant/components/$comp" \
+        || { echo "!! missing integration: $comp"; exit 1; }
+done
+docker exec "$NAME" python3 -c \
+    'import bleak, habluetooth, dbus_fast, bluetooth_adapters, aiousbwatcher, serialx, pyudev, xiaomi_ble, aiohomekit; print("    BLE imports ok")' \
+    || { echo "!! BLE stack incomplete"; exit 1; }
+docker exec "$NAME" python3 -c 'import pyudev; print("    pyudev", pyudev.__version__, "-> libudev loaded")' \
+    || { echo "!! pyudev cannot load libudev"; exit 1; }
+LOGS0="$(docker logs "$NAME" 2>&1 || true)"
+# 上面故意请求过被裁掉的 zha，它自己会留一条；除此之外都不该出现
+MISSING=$(grep "Cannot find integration" <<<"$LOGS0" | grep -v "integration zha" || true)
+if [ -n "$MISSING" ]; then
+    echo "!! discovery reached an integration that is not in the image"; echo "$MISSING" | head -3; exit 1
+fi
+echo "    no 'Cannot find integration' (homekit_controller now present)"
+# 容器里没有 /run/dbus 也没有适配器，bluetooth 会 setup 失败——这属于环境，
+# 但失败原因不能是缺模块。
+if grep -q "No module named" <<<"$LOGS0"; then
+    echo "!! missing python module at runtime"; grep "No module named" <<<"$LOGS0" | head -3; exit 1
+fi
+echo "    bluetooth setup failure (if any) is environmental, not a missing module"
+
 echo "==> HAP endpoint on 21064 (probed from inside the container)"
 code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:${HKPORT}/pair-setup" || true)
 echo "    GET /pair-setup -> HTTP $code (HAP 只认真 POST；能回状态码就说明服务在听)"

@@ -73,7 +73,7 @@ services:
 | `:latest` `:2026.10.4` `:2026.10` | **full**：default_config 依赖齐全，行为与官方镜像对齐 | 431 MB | 1.89 GB |
 | `:slim` `:2026.10.4-slim` | **slim**：去掉只被 default_config 用到的包 | 384 MB | 1.72 GB |
 | `:micro` `:2026.10.4-micro` | **micro**：slim + 只留 en/zh-Hans 翻译、去掉 es5/sourcemap/无用 stdlib | 299 MB | 1.17 GB |
-| `:nano` `:2026.10.4-nano` | **nano**：micro + 只保留这台机器实际用到的集成（见下） | 254 MB | 695 MB |
+| `:nano` `:2026.10.4-nano` | **nano**：micro + 只保留这台机器实际用到的集成（见下） | 261 MB | 721 MB |
 
 slim 少装的包：`av`（stream / 摄像头转流）、蓝牙栈（habluetooth / bleak / dbus-fast…）、
 DHCP/SSDP/USB 发现（aiodhcpwatcher、scapy、async-upnp-client、serialx…）、go2rtc-client。
@@ -118,9 +118,9 @@ micro 在 slim 基础上继续删（都在**同一层**里删，见下）：
 
 ### nano 多裁了什么
 
-nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍到 118 个：只留
-[`nano-seeds.txt`](nano-seeds.txt) 里列的种子（各类平台、`homekit`、`xiaomi_miio`、`frontend`
-那一套），再加上三轮闭包：
+nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍到 126 个：只留
+[`nano-seeds.txt`](nano-seeds.txt) 里列的种子（各类平台、`homekit`、`xiaomi_miio`、`bluetooth`、
+`xiaomi_ble`、`frontend` 那一套），再加上三轮闭包：
 
 1. 种子本身；
 2. 这些集成 `manifest.json` 里的 `dependencies`；
@@ -133,7 +133,39 @@ nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍�
 
 * `camera` / `stream` / `numpy` / ffmpeg 二进制：`homekit/accessories.py` 在模块层就
   `from homeassistant.components.camera import ...`，砍掉摄像头链路 = HomeKit 起不来。
+* 蓝牙栈（`bleak` / `habluetooth` / `dbus-fast` / `bluetooth-adapters` / `aiousbwatcher` /
+  `serialx` / `asyncinotify`）以及组件 `bluetooth` / `usb` / `bluetooth_adapters`：
+  米家温湿度计这类是 BLE 广播（MiBeacon），走 `bluetooth` → `xiaomi_ble`，缺一环就是
+  「设备在米家 App 里有、HA 里没有」。
 * `pip` / `uv`：留着自己装集成。
+
+### nano 的蓝牙：多出来的是什么、怎么用
+
+nano 比其他变体多装这几样（约 +17 MB site-packages，压缩后 +7 MB）：
+
+| 加的东西 | 为什么 |
+|----------|--------|
+| `bluetooth` / `usb` / `bluetooth_adapters` 组件 | BLE 设备发现的前置；`bluetooth` 的 manifest 依赖 `usb` |
+| `xiaomi_ble` 组件 + `xiaomi-ble==1.16.1` | 解析米家 BLE 广播（MiBeacon），温湿度计就在这里 |
+| `homekit_controller` + `aiohomekit==4.0.1` | 蓝牙栈装上后它不再有额外代价，顺便让 HomeKit 设备能被接进 HA |
+| `pyudev==0.24.3` + apk `eudev-libs` | `aiousbwatcher` 在模块层 `import pyudev` 但没在依赖里声明；`pyudev` 运行时要 `libudev` |
+
+真正的蓝牙访问不进容器：适配器在宿主内核里，容器必须能看见 D-Bus 和蓝牙 socket。
+
+```yaml
+# docker-compose.yml
+    network_mode: host          # required for Bluetooth discovery
+    volumes:
+      - /run/dbus:/run/dbus:ro  # required for Bluetooth
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+```
+
+宿主机上 `bluetoothd` 得在跑（Debian: `systemctl status bluetooth`）。没有这些权限时
+`bluetooth` 集成会在 setup 阶段失败并报 D-Bus 相关错误 —— 镜像没问题，是容器权限没给够。
+CI 的 smoke 里 `bluetooth` / `usb` 的 setup 失败是同一个原因（runner 里没有 D-Bus、没有适配器），
+所以那两条被列为「环境性失败」，但缺模块会单独报错。
 
 维护代价（真正的成本在这）：种子列表跟着 HA 版本走。升级后如果某个新平台没列进去，
 那个实体就是**静默消失** —— 日志里没有任何报错，只是功能没了。要加功能就编辑
@@ -141,11 +173,10 @@ nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍�
 
 ### nano 的已知代价（对抗性验证跑出来的）
 
-* **`homekit_controller` 不在种子里**。桥一广播 `_hap._tcp`，HA 的 zeroconf 发现就会去拉
-  `homekit_controller`，日志里留一条 `Cannot find integration homekit_controller` 加一段
-  traceback（每次启动一条）。桥本身不受影响（21064 在听、HAP 应答正常）。要把 HomeKit
-  设备接进 HA 就得把它连同 BLE 栈（habluetooth / bleak / dbus-fast 那一批）一起装回来，
-  而这批正是 slim 排除掉的。
+* `homekit_controller` 曾经不在种子里：桥一广播 `_hap._tcp`，zeroconf 发现就会去拉它，
+  日志里每次启动留一条 `Cannot find integration homekit_controller` + traceback。
+  装上 BLE 栈后它已经进种子，这条噪音消失（`verify-nano.sh` 会断言日志里除了故意请求的
+  `zha` 之外没有 `Cannot find integration`）。
 * 请求被裁掉的集成（比如 `zha`）返回 `404 Invalid handler specified` —— 报错，但不崩。
 * `pip` 还在，随时能装回来（`docker exec ... pip install ...`，落在可写层）。
 * 带着 `default_config:` 的老配置只会 WARN，不会卡住 bootstrap。
