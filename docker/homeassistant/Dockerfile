@@ -77,6 +77,8 @@ ARG HA_REQUIREMENTS_URL=""
 # hass-nabucasa（http/forwarded.py 顶层 import）。
 ARG VARIANT="full"
 ARG TRIM_ASSETS="0"
+# TRIM_COMPONENTS=1 时只保留 nano-seeds.txt 里的集成及其依赖（详见 prune-components.py）
+ARG TRIM_COMPONENTS="0"
 ARG SLIM_EXCLUDE="av|go2rtc-client|habluetooth|bleak|bleak-retry-connector|bluetooth-adapters|bluetooth-auto-recovery|bluetooth-data-tools|dbus-fast|async-upnp-client|asyncinotify|python-didl-lite|serialx|aiousbwatcher|aiodhcpwatcher|aiodiscover|pyroute2|cached-ipaddress|scapy"
 
 # Xiaomi Home 集成（小米官方，custom_components 形式分发，不在 PyPI 上）。
@@ -105,6 +107,8 @@ LABEL \
 # 注意：micro 的裁剪（翻译 / es5 / sourcemap / stdlib）必须放在**这一层**里做。
 # 试过单独加一层 RUN 删文件，结果镜像一点没小 —— 后面的层删文件只是白out，
 # 前面那层的字节还在（docker save 出来一样大）。同一层内删才能真正释放。
+
+COPY prune-components.py nano-seeds.txt /tmp/
 
 RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     apk add --no-cache --virtual=build-dependencies build-base libffi-dev ${DEPS} && \
@@ -137,6 +141,14 @@ RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
              /usr/local/lib/python3.14/tkinter /usr/local/lib/python3.14/ensurepip \
              /usr/local/lib/python3.14/pydoc_data /usr/local/lib/python3.14/test; \
       echo "micro: trimmed translations/es5/sourcemaps/stdlib"; \
+    fi && \
+    if [ "${TRIM_COMPONENTS}" = "1" ]; then \
+      SP=/usr/local/lib/python3.14/site-packages; \
+      HA_COMPONENTS="$SP/homeassistant/components" \
+      KEEP_SEEDS="$(tr '\n' ' ' < /tmp/nano-seeds.txt)" \
+      DROP_PACKAGES="pycountry radios gTTS PyMetno" \
+      python3 /tmp/prune-components.py; \
+      rm -f /tmp/prune-components.py /tmp/nano-seeds.txt; \
     fi
 
 # musl 的 malloc 对 HA 这种大量小对象的负载不太友好，上游同样挂 jemalloc。

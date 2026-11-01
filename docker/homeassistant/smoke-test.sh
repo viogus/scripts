@@ -15,6 +15,7 @@ IMAGE="${1:?usage: smoke-test.sh <image-ref> [expected-xiaomi-version]}"
 WANT_XM="${2:-}"
 SLIM="${SMOKE_SLIM:-0}"
 MICRO="${SMOKE_MICRO:-0}"
+NANO="${SMOKE_NANO:-0}"
 NAME="hass-smoke-$$"
 PORT="${SMOKE_PORT:-18123}"
 DATA="$(mktemp -d)"
@@ -57,7 +58,9 @@ done
 [ "$up" = true ] || fail "Home Assistant never answered on port $PORT"
 
 echo "==> config dir is /config and /data points at the same place"
-docker logs "$NAME" 2>&1 | grep -q "config dir: /config" \
+# 先整段取回来再 grep：`docker logs | grep -q` 在 pipefail 下会被 SIGPIPE 判成 141
+LOGS_INIT="$(docker logs "$NAME" 2>&1 || true)"
+grep -q "config dir: /config" <<<"$LOGS_INIT" \
     || fail "entrypoint did not pick /config as the config dir"
 [ "$(docker exec "$NAME" readlink /data)" = "/config" ] \
     || fail "/data is not linked to /config"
@@ -76,6 +79,24 @@ if [ "$MICRO" = "1" ]; then
     if docker exec "$NAME" sh -c 'find /usr/local/lib/python3.14/site-packages -name "*.map" | head -1' | grep -q .; then
         fail "micro: sourcemaps still present"
     fi
+fi
+
+if [ "$NANO" = "1" ]; then
+    echo "==> nano: integration pruning"
+    docker exec "$NAME" test -d /usr/local/lib/python3.14/site-packages/homeassistant/components/zha \
+        && fail "nano still ships zha"
+    docker exec "$NAME" test -d /usr/local/lib/python3.14/site-packages/homeassistant/components/sensor \
+        || fail "nano dropped sensor (a platform it needs)"
+    # nano 保留摄像头链路（homekit 的 accessories.py 直接 import camera，删了会崩），
+    # 所以 ffmpeg 二进制必须还在；被裁掉的是没人用的那些集成目录。
+    docker exec "$NAME" test -x /usr/bin/ffmpeg \
+        || fail "nano lost the ffmpeg binary (homekit needs the camera stack)"
+    for gone in met radio_browser google_translate; do
+        docker exec "$NAME" test -d "/usr/local/lib/python3.14/site-packages/homeassistant/components/$gone" \
+            && fail "nano still ships pruned integration: $gone"
+    done
+    docker exec "$NAME" test -d /usr/local/lib/python3.14/site-packages/homeassistant/components/apple_tv \
+        || fail "nano dropped apple_tv (its deps are still installed)"
 fi
 
 if [ "$SLIM" = "1" ]; then
@@ -110,9 +131,20 @@ docker exec "$NAME" python3 -c \
 echo "==> discovery-only integrations' deps importable (pyatv / python-miio)"
 # apple_tv 要 miniaudio、xiaomi_miio 要 netifaces，两个都没有 musllinux wheel，
 # 构建期现场编译。这里连编译产物一起 import，确认不是桩包。
-docker exec "$NAME" python3 -c \
-    'import pyatv, miio, miniaudio, netifaces; import gtts, radios, pycountry, metno; print("    deps ok")' \
-    || fail "cannot import pyatv / miio / miniaudio / netifaces (or met/radio_browser/google_translate deps)"
+if [ "$NANO" = "1" ]; then
+    # apple_tv / xiaomi_miio 还在种子列表里，它们编译出来的依赖必须能用；
+    # met / radio_browser / google_translate 被裁掉，对应依赖也不该再占地方。
+    docker exec "$NAME" python3 -c 'import pyatv, miio, miniaudio, netifaces; print("    deps ok")' \
+        || fail "cannot import pyatv / miio / miniaudio / netifaces"
+    if docker exec "$NAME" python3 -c 'import gtts' >/dev/null 2>&1 \
+        || docker exec "$NAME" python3 -c 'import pycountry' >/dev/null 2>&1; then
+        fail "nano image still ships deps of pruned integrations (gtts / pycountry)"
+    fi
+else
+    docker exec "$NAME" python3 -c \
+        'import pyatv, miio, miniaudio, netifaces; import gtts, radios, pycountry, metno; print("    deps ok")' \
+        || fail "cannot import pyatv / miio / miniaudio / netifaces (or met/radio_browser/google_translate deps)"
+fi
 
 echo "==> default_config did not fail on missing packages"
 # go2rtc 是唯一允许的例外：官方 core 镜像同样没有 go2rtc 二进制。

@@ -56,7 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         # full = 装齐 default_config 依赖；slim = 只装始终加载的那批 + 小米集成
-        variant: [full, slim, micro]
+        variant: [full, slim, micro, nano]
     permissions:
       contents: read
       packages: write
@@ -128,6 +128,7 @@ jobs:
           case '${{ matrix.variant }}' in
             slim)  TAG="${TAG}-slim" ;;
             micro) TAG="${TAG}-micro" ;;
+            nano)  TAG="${TAG}-nano" ;;
           esac
           WANT_XM='${{ steps.v.outputs.xiaomi_home }}'
           WANT_SHA='${{ steps.v.outputs.dockerfile_sha }}'
@@ -178,6 +179,8 @@ jobs:
             type=raw,value=slim,enable=${{ matrix.variant == 'slim' }}
             type=raw,value=${{ steps.v.outputs.version }}-micro,enable=${{ matrix.variant == 'micro' }}
             type=raw,value=micro,enable=${{ matrix.variant == 'micro' }}
+            type=raw,value=${{ steps.v.outputs.version }}-nano,enable=${{ matrix.variant == 'nano' }}
+            type=raw,value=nano,enable=${{ matrix.variant == 'nano' }}
 
       - name: Build and push
         if: steps.check.outputs.skip != 'true'
@@ -194,7 +197,8 @@ jobs:
             XIAOMI_HOME_VERSION=${{ steps.v.outputs.xiaomi_home }}
             DOCKERFILE_SHA=${{ steps.v.outputs.dockerfile_sha }}
             VARIANT=${{ matrix.variant }}
-            TRIM_ASSETS=${{ matrix.variant == 'micro' && '1' || '0' }}
+            TRIM_ASSETS=${{ (matrix.variant == 'micro' || matrix.variant == 'nano') && '1' || '0' }}
+            TRIM_COMPONENTS=${{ matrix.variant == 'nano' && '1' || '0' }}
           # 不传 labels: — 镜像描述走 Dockerfile 里的 OCI LABEL，metadata-action
           # 自动生成的会写成 title=scripts / version=latest，反而更糟。
           tags: ${{ steps.meta.outputs.tags }}
@@ -211,43 +215,47 @@ jobs:
         env:
           XM_VERSION: ${{ steps.v.outputs.xiaomi_home }}
           SMOKE_SLIM: ${{ matrix.variant != 'full' && '1' || '0' }}
-          SMOKE_MICRO: ${{ matrix.variant == 'micro' && '1' || '0' }}
+          SMOKE_MICRO: ${{ (matrix.variant == 'micro' || matrix.variant == 'nano') && '1' || '0' }}
+          SMOKE_NANO: ${{ matrix.variant == 'nano' && '1' || '0' }}
         run: |
           set -euo pipefail
           IMG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
           case '${{ matrix.variant }}' in
             slim)  IMG="${IMG}-slim" ;;
             micro) IMG="${IMG}-micro" ;;
+            nano)  IMG="${IMG}-nano" ;;
           esac
           docker pull "$IMG"
           bash docker/homeassistant/smoke-test.sh "$IMG" "$XM_VERSION"
 
       - name: Summary
         run: |
+          set -euo pipefail
+          V='${{ matrix.variant }}'
+          case "$V" in
+            full)  DESC="full：default_config 依赖齐全。" ;;
+            slim)  DESC="slim：不含 default_config 那批依赖，首启会种一份精简 configuration.yaml。" ;;
+            micro) DESC="micro：slim + 只留 en/zh-Hans 翻译、去掉 frontend_es5 / sourcemap / 无用 stdlib。" ;;
+            nano)  DESC="nano：micro + 只保留小米 / HomeKit 实际用到的集成（nano-seeds.txt，机器可读清单）。" ;;
+          esac
+          [ "$V" = "full" ] && SUFFIX="" || SUFFIX="-$V"
+          VERSIONED="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}${SUFFIX}"
           {
-            echo "### Home Assistant ${{ steps.v.outputs.version }}"
+            echo "### Home Assistant ${{ steps.v.outputs.version }}（$V）"
             echo
-            echo "变体：\`${{ matrix.variant }}\`　Xiaomi Home：\`${{ steps.v.outputs.xiaomi_home }}\`"
+            echo "Xiaomi Home：\`${{ steps.v.outputs.xiaomi_home }}\`　构建指纹：\`${{ steps.v.outputs.dockerfile_sha }}\`"
             echo
             if [ '${{ steps.check.outputs.skip }}' = 'true' ]; then
-              echo "已存在同名 tag、集成版本与构建指纹一致，跳过：\`${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}$([ '${{ matrix.variant }}' = 'slim' ] && echo '-slim')\`"
+              echo "已存在同名 tag 且集成版本 / 构建指纹一致，跳过：\`${VERSIONED}\`"
             else
               echo "已推送："
               echo
               echo '```'
-              echo "docker pull ${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}$([ '${{ matrix.variant }}' = 'slim' ] && echo '-slim')"
-              echo "docker pull ${REGISTRY}/${IMAGE}:$([ '${{ matrix.variant }}' = 'slim' ] && echo 'slim' || echo 'latest')"
+              echo "docker pull ${VERSIONED}"
+              echo "docker pull ${REGISTRY}/${IMAGE}:${V}"
               echo '```'
               echo
-              if [ '${{ matrix.variant }}' = 'slim' ]; then
-                if [ '${{ matrix.variant }}' = 'micro' ]; then
-                echo "micro：slim + 只留 en/zh-Hans 翻译、去掉 frontend_es5 / sourcemap / 无用 stdlib。"
-              else
-                echo "slim：不含 default_config 那批依赖，首启会种一份精简 configuration.yaml。"
-              fi
-              else
-                echo "full：default_config 依赖齐全。"
-              fi
+              echo "$DESC"
               echo
               echo "平台：linux/amd64, linux/arm64"
             fi
