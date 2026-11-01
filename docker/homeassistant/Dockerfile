@@ -59,7 +59,7 @@ ARG DEPS="openssl-dev cargo zlib-dev libjpeg-turbo-dev cmake"
 #     失败、日志刷 "No module named ..."。pyatv 的 miniaudio 和 python-miio 的
 #     netifaces 没有 musllinux wheel，由本层的 build-dependencies 现场编译 —— 所以
 #     这里不需要任何桩包。升级 HA 时这些包跟随 requirements_all 的新 pin 自动更新。
-ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabucasa|aiohttp_cors|scapy|aiodiscover|psutil-home-assistant|securetar|ha-ffmpeg|construct|paho-mqtt|numpy|psutil|hassil|aiohasupervisor|mutagen|async-upnp-client|aiousbwatcher|aiodhcpwatcher|av|PyTurboJPEG|pymicro-vad|pyspeex-noise|serialx|gazetteer-matcher|go2rtc-client|infrared-protocols|rf-protocols|HAP-python|homekit-audio-proxy|PyQRCode|base36|pyatv|python-miio|PyMetno|gTTS|radios|pycountry|bleak|bleak-retry-connector|bluetooth-adapters|bluetooth-auto-recovery|bluetooth-data-tools|dbus-fast|habluetooth|aiousbwatcher|serialx|asyncinotify|xiaomi-ble|aiohomekit"
+ARG PLUGINS="home-assistant-frontend|PyNaCl|defusedxml|distro|zeroconf|hass-nabucasa|aiohttp_cors|scapy|aiodiscover|psutil-home-assistant|securetar|ha-ffmpeg|construct|paho-mqtt|numpy|psutil|hassil|aiohasupervisor|mutagen|async-upnp-client|aiousbwatcher|aiodhcpwatcher|av|PyTurboJPEG|pymicro-vad|pyspeex-noise|serialx|gazetteer-matcher|go2rtc-client|infrared-protocols|rf-protocols|HAP-python|homekit-audio-proxy|PyQRCode|base36|pyatv|python-miio|PyMetno|gTTS|radios|pycountry"
 
 # requirements_all.txt 的来源。默认走上游 raw（CI 上没问题）；国内本机构建时
 # raw.githubusercontent.com 常常解析被污染，可以换成任何能拿到同一份文件的地址，
@@ -80,10 +80,6 @@ ARG TRIM_ASSETS="0"
 # TRIM_COMPONENTS=1 时只保留 nano-seeds.txt 里的集成及其依赖（详见 prune-components.py）
 ARG TRIM_COMPONENTS="0"
 ARG SLIM_EXCLUDE="av|go2rtc-client|habluetooth|bleak|bleak-retry-connector|bluetooth-adapters|bluetooth-auto-recovery|bluetooth-data-tools|dbus-fast|async-upnp-client|asyncinotify|python-didl-lite|serialx|aiousbwatcher|aiodhcpwatcher|aiodiscover|pyroute2|cached-ipaddress|scapy"
-# nano 要能接 BLE 设备（米家温湿度计之类），所以蓝牙栈不能排除，只排其余
-# 「default_config 专用」的包。xiaomi-ble / aiohomekit 是 bluetooth + homekit_controller
-# 的 Python 依赖（前者给 xiaomi_ble 集成，后者让 HAP 设备能被接进 HA）。
-ARG NANO_EXCLUDE="av|go2rtc-client|async-upnp-client|aiodhcpwatcher|aiodiscover|pyroute2|cached-ipaddress|scapy|python-didl-lite"
 
 # Xiaomi Home 集成（小米官方，custom_components 形式分发，不在 PyPI 上）。
 ARG XIAOMI_HOME_REPO="XiaoMi/ha_xiaomi_home"
@@ -114,9 +110,7 @@ LABEL \
 
 COPY prune-components.py nano-seeds.txt /usr/src/
 
-RUN APK_EXTRA=""; \
-    if [ "${VARIANT}" = "nano" ]; then APK_EXTRA="eudev-libs"; fi; \
-    apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc ${APK_EXTRA} && \
+RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     apk add --no-cache --virtual=build-dependencies build-base libffi-dev ${DEPS} && \
     addgroup -g ${GUID} hass && \
     adduser -h /data -D -G hass -s /bin/sh -u ${UID} hass && \
@@ -124,21 +118,15 @@ RUN APK_EXTRA=""; \
     wget -q --header="Accept: application/vnd.github.raw" -O /usr/src/requirements_all.txt "$REQ_URL" && \
     grep -w -E "${PLUGINS}" /usr/src/requirements_all.txt | grep -v '#' > /tmp/req_all.txt || \
       { echo "ERROR: no plugin pins matched in requirements_all.txt (source: $REQ_URL)" >&2; head -5 /usr/src/requirements_all.txt >&2; exit 1; } && \
-    if [ "${VARIANT}" = "full" ]; then \
-      cp /tmp/req_all.txt /tmp/requirements_plugins.txt; \
+    if [ "${VARIANT}" != "full" ]; then \
+      grep -v -E "^(${SLIM_EXCLUDE})==" /tmp/req_all.txt > /tmp/requirements_plugins.txt; \
+      echo "slim: kept $(wc -l < /tmp/requirements_plugins.txt) / $(wc -l < /tmp/req_all.txt) plugin pins" >&2; \
     else \
-      EX="${SLIM_EXCLUDE}"; \
-      if [ "${VARIANT}" = "nano" ]; then EX="${NANO_EXCLUDE}"; fi; \
-      grep -v -E "^(${EX})==" /tmp/req_all.txt > /tmp/requirements_plugins.txt; \
-      echo "${VARIANT}: kept $(wc -l < /tmp/requirements_plugins.txt) / $(wc -l < /tmp/req_all.txt) plugin pins" >&2; \
+      cp /tmp/req_all.txt /tmp/requirements_plugins.txt; \
     fi && \
     pip3 install --no-cache-dir homeassistant=="${VERSION}" && \
     CFLAGS="-Wno-error=int-conversion" \
     pip3 install --no-cache-dir --prefer-binary --extra-index-url ${WHEELS_INDEX} -r /tmp/requirements_plugins.txt && \
-    if [ "${VARIANT}" = "nano" ]; then \
-      pip3 install --no-cache-dir --prefer-binary pyudev==0.24.3 && \
-      echo "nano: installed pyudev (needed by aiousbwatcher, not in requirements_all)"; \
-    fi && \
     apk del build-dependencies && \
     rm -rf /tmp/* /var/tmp/* /var/cache/apk/* && \
     if [ "${TRIM_ASSETS}" = "1" ]; then \

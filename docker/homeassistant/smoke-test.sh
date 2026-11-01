@@ -97,16 +97,6 @@ if [ "$NANO" = "1" ]; then
     done
     docker exec "$NAME" test -d /usr/local/lib/python3.14/site-packages/homeassistant/components/apple_tv \
         || fail "nano dropped apple_tv (its deps are still installed)"
-    # BLE：米家温湿度计这类设备要走 bluetooth -> xiaomi_ble，链路上少一环就静默没数据
-    for comp in bluetooth bluetooth_adapters usb xiaomi_ble homekit_controller; do
-        docker exec "$NAME" test -d "/usr/local/lib/python3.14/site-packages/homeassistant/components/$comp" \
-            || fail "nano dropped integration: $comp"
-    done
-    docker exec "$NAME" python3 -c \
-        'import bleak, habluetooth, dbus_fast, bluetooth_adapters, aiousbwatcher, serialx, pyudev, xiaomi_ble, aiohomekit; print("    ble deps ok")' \
-        || fail "nano is missing part of the BLE stack"
-    docker exec "$NAME" python3 -c 'import pyudev; print("    libudev via pyudev", pyudev.__version__)' \
-        || fail "pyudev cannot load libudev (eudev-libs missing?)"
 fi
 
 if [ "$SLIM" = "1" ]; then
@@ -158,11 +148,7 @@ fi
 
 echo "==> default_config did not fail on missing packages"
 # go2rtc 是唯一允许的例外：官方 core 镜像同样没有 go2rtc 二进制。
-# go2rtc 例外：官方 core 镜像同样没有它的二进制。
-# bluetooth / usb 也例外：CI 容器里没有 /run/dbus、也没有蓝牙适配器；只要失败原因
-# 是环境而不是缺模块（下面单独检查 "No module named"），就不算镜像的问题。
-BAD=$(docker logs "$NAME" 2>&1 | grep -E "Setup failed for '" \
-    | grep -vE "go2rtc|'bluetooth'|'usb'" || true)
+BAD=$(docker logs "$NAME" 2>&1 | grep -E "Setup failed for '" | grep -v "go2rtc" || true)
 if [ -n "$BAD" ]; then
     echo "$BAD" >&2
     fail "integrations failed to set up (missing packages?)"
