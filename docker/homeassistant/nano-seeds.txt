@@ -7,3 +7,8 @@ humidifier water_heater vacuum lock number select button text event update scene
 script automation group template input_boolean input_number input_select
 input_text input_button input_datetime timer counter calendar todo notify
 alarm_control_panel device_tracker homekit zeroconf mobile_app apple_tv xiaomi_miio
+bluetooth
+bluetooth_adapters
+usb
+xiaomi_ble
+homekit_controller
