@@ -38,6 +38,11 @@ on:
         required: false
         default: false
         type: boolean
+      variants:
+        description: 'Comma separated subset to build (e.g. nano). Empty = all four'
+        required: false
+        default: ''
+        type: string
 
 # 同一时间只跑一份：两次构建同时推同名 tag 会互相覆盖 manifest。
 concurrency:
@@ -49,14 +54,30 @@ env:
   IMAGE: ${{ github.repository_owner }}/homeassistant
 
 jobs:
+  # 调一个变体做迭代时不必等另外三个（每个都要跑 amd64 + QEMU arm64）
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      variants: ${{ steps.m.outputs.variants }}
+    steps:
+      - id: m
+        run: |
+          set -euo pipefail
+          V='${{ inputs.variants }}'
+          [ -n "$V" ] || V='full,slim,micro,nano'
+          JSON=$(printf '%s' "$V" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | jq -R . | jq -sc .)
+          echo "variants=$JSON" >> "$GITHUB_OUTPUT"
+          echo "building: $JSON"
+
   build:
+    needs: matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     strategy:
       fail-fast: false
       matrix:
         # full = 装齐 default_config 依赖；slim = 只装始终加载的那批 + 小米集成
-        variant: [full, slim, micro, nano]
+        variant: ${{ fromJson(needs.matrix.outputs.variants) }}
     permissions:
       contents: read
       packages: write
@@ -212,7 +233,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           push: true
           provenance: false
-          cache-from: type=gha,scope=homeassistant-${{ matrix.variant }}
+          # registry 缓存挂在镜像自己的 tag 上：缓存层就是已经推上去的 blob，
+          # 不占 GHA cache 的 10GB 配额，跨 run 命中率也高。
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:buildcache-${{ matrix.variant }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:buildcache-${{ matrix.variant }},mode=max,image-manifest=true,oci-mediatypes=true
           cache-to: type=gha,mode=max,scope=homeassistant-${{ matrix.variant }}
 
       # 推完立刻在原生 amd64 上把镜像跑起来。除了 /manifest.json 返回 200，还要
