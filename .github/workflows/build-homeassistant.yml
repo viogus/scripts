@@ -66,15 +66,18 @@ jobs:
 
       - name: Resolve Home Assistant version
         id: v
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           V='${{ inputs.ha_version }}'
           if [ -z "$V" ]; then
             # info.version 可能是 beta（2026.11.0b0），所以从 releases 里挑最高的正式版
-            V=$(curl -fsS https://pypi.org/pypi/homeassistant/json \
+            # 取不到就交给下面的 WARN 分支兜底，不要整条流水线挂掉
+            V=$(curl -fsS --retry 3 https://pypi.org/pypi/homeassistant/json \
               | jq -r '.releases | keys[]' \
               | grep -E '^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$' \
-              | sort -V | tail -1)
+              | sort -V | tail -1 || true)
           fi
           if ! printf '%s' "$V" | grep -Eq '^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$'; then
             echo "WARN: cannot resolve a sane Home Assistant version (got '$V'), falling back to 2026.10.4" >&2
@@ -89,8 +92,13 @@ jobs:
           XM='${{ inputs.xiaomi_home_version }}'
           if [ -z "$XM" ]; then
             # 不用 .tag_name 直接信：release 可能是 draft/prerelease，这里只认正式 tag
-            XM=$(curl -fsS https://api.github.com/repos/XiaoMi/ha_xiaomi_home/releases/latest \
-              | jq -r '.tag_name // ""')
+            # 匿名调 GitHub API 会被共享 runner 的 IP 打到 403；带上 token，
+            # 再退一步也允许失败，让 version 回落到 Dockerfile 里的默认值。
+            XM=$(curl -fsS --retry 3 \
+              -H "Authorization: Bearer ${GITHUB_TOKEN:-}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/XiaoMi/ha_xiaomi_home/releases/latest \
+              | jq -r '.tag_name // ""' || true)
           fi
           if ! printf '%s' "$XM" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "WARN: cannot resolve a sane Xiaomi Home version (got '$XM'), falling back to v0.5.0" >&2
