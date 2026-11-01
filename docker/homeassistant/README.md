@@ -23,10 +23,11 @@
 
 * HA 版本默认取 PyPI 上最新的**正式版**（自动跳过 `b`/`rc`）；Xiaomi Home 版本默认取 GitHub 最新 release，两者都能在 dispatch 时手动指定；
 * ghcr 上已有同名 tag，**并且**镜像 label 里的 Xiaomi Home 版本与本次解析的一致，才跳过 —— 只比 HA 版本会漏掉“HA 没动、小米集成发新版”的情况；
-* 双架构一次构建约 50–70 分钟，arm64 走 QEMU；构建层缓存在 registry 的 `:buildcache-<变体>`
-  tag 上（`cache-from`/`cache-to` type=registry），第二次起只重算变动的层；
-* 只想验一个变体：`gh workflow run build-homeassistant.yml -f variants=nano`
-  （默认四个全建）；
+* 两个架构各用自己的**原生** runner 构建（`ubuntu-24.04` / `ubuntu-24.04-arm`），再
+  `imagetools create` 合成 multi-arch manifest；arm64 不再走 QEMU，全量四变体约 5 分钟
+  （之前 17–18 分钟，时间基本都耗在模拟器里编译 pymicro-vad/netifaces/miniaudio）；
+* 构建层缓存在 registry 的 `:buildcache-<变体>-<架构>` tag 上，第二次起只重算变动的层；
+* 只想验一个变体：`gh workflow run build-homeassistant.yml -f variants=nano`（默认四个全建）；
 * 推完镜像会在 amd64 上真跑一遍（`docker/homeassistant/smoke-test.sh`）：配置目录是 `/config` 且 `/data` 指向它、集成被播种、`default_config` 不因缺包 setup 失败、`xiaomi_home` 在 flow_handlers 里且能起 flow、前端首屏的 websocket 命令正常，全过才算发布成功。
 
 ## 用
@@ -137,6 +138,25 @@ nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍�
 维护代价（真正的成本在这）：种子列表跟着 HA 版本走。升级后如果某个新平台没列进去，
 那个实体就是**静默消失** —— 日志里没有任何报错，只是功能没了。要加功能就编辑
 `nano-seeds.txt`（一行一个域名），下次构建自动生效；写错名字只会 WARN 不会失败。
+
+### nano 的已知代价（对抗性验证跑出来的）
+
+* **`homekit_controller` 不在种子里**。桥一广播 `_hap._tcp`，HA 的 zeroconf 发现就会去拉
+  `homekit_controller`，日志里留一条 `Cannot find integration homekit_controller` 加一段
+  traceback（每次启动一条）。桥本身不受影响（21064 在听、HAP 应答正常）。要把 HomeKit
+  设备接进 HA 就得把它连同 BLE 栈（habluetooth / bleak / dbus-fast 那一批）一起装回来，
+  而这批正是 slim 排除掉的。
+* 请求被裁掉的集成（比如 `zha`）返回 `404 Invalid handler specified` —— 报错，但不崩。
+* `pip` 还在，随时能装回来（`docker exec ... pip install ...`，落在可写层）。
+* 带着 `default_config:` 的老配置只会 WARN，不会卡住 bootstrap。
+
+### 怎么验的
+
+* CI 每次构建完跑 [`smoke-test.sh`](smoke-test.sh)：配置目录、播种、依赖、`default_config`、
+  xiaomi_home flow、前端 websocket 命令、HomeKit 建桥 + 21064 监听。
+* [`verify-nano.sh`](verify-nano.sh) 是更狠的手动验证（CI 不跑）：HomeKit 的 HAP 端口应答、
+  xiaomi_home flow 一路走到 OAuth、`xiaomi_miio` 本地协议 flow、被裁集成返回 404 后 HA 仍健康、
+  `pip` 可用、recorder 落库、重启后还能起来、带 `default_config:` 只 WARN。
 
 ### slim 为什么必须自带一份 configuration.yaml
 
