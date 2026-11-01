@@ -118,7 +118,7 @@ RUN apk add --no-cache git nmap iputils tzdata libturbojpeg jemalloc && \
     wget -q --header="Accept: application/vnd.github.raw" -O /usr/src/requirements_all.txt "$REQ_URL" && \
     grep -w -E "${PLUGINS}" /usr/src/requirements_all.txt | grep -v '#' > /tmp/req_all.txt || \
       { echo "ERROR: no plugin pins matched in requirements_all.txt (source: $REQ_URL)" >&2; head -5 /usr/src/requirements_all.txt >&2; exit 1; } && \
-    if [ "${VARIANT}" = "slim" ] || [ "${VARIANT}" = "micro" ]; then \
+    if [ "${VARIANT}" != "full" ]; then \
       grep -v -E "^(${SLIM_EXCLUDE})==" /tmp/req_all.txt > /tmp/requirements_plugins.txt; \
       echo "slim: kept $(wc -l < /tmp/requirements_plugins.txt) / $(wc -l < /tmp/req_all.txt) plugin pins" >&2; \
     else \
