@@ -103,7 +103,7 @@ seed_custom_components() {
 
 seed_slim_config() {
     config_dir="$1"
-    case "${HA_VARIANT:-full}" in slim|micro) ;; *) return 0 ;; esac
+    case "${HA_VARIANT:-full}" in slim|micro|nano) ;; *) return 0 ;; esac
     # 只给全新安装种；已有 configuration.yaml 或 .storage 的一律不碰
     [ -f "$config_dir/configuration.yaml" ] && return 0
     [ -d "$config_dir/.storage" ] && return 0
@@ -130,7 +130,7 @@ echo "[entrypoint] config dir: $CONFIG_DIR_PATH"
 link_other_path "$CONFIG_DIR_PATH"
 warn_if_default_config() {
     config_dir="$1"
-    case "${HA_VARIANT:-full}" in slim|micro) ;; *) return 0 ;; esac
+    case "${HA_VARIANT:-full}" in slim|micro|nano) ;; *) return 0 ;; esac
     conf="$config_dir/configuration.yaml"
     [ -f "$conf" ] || return 0
     # 旧配置大多来自官方镜像，第一行就是 default_config:；slim/micro 没有它那批
