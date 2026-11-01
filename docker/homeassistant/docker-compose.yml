@@ -1,7 +1,6 @@
 services:
   homeassistant:
-    # nano = 只留小米 + HomeKit + BLE 用得到的集成（261 MB）；换 full/slim/micro 改这一行
-    image: ghcr.io/viogus/homeassistant:2026.10.4-nano
+    image: ghcr.io/viogus/homeassistant:2026.10.4
     container_name: homeassistant
     restart: unless-stopped
     # HA 的自动发现（mDNS / SSDP / 局域网广播）需要 host 网络。
@@ -10,12 +9,6 @@ services:
     volumes:
       - ./config:/config
       - /etc/localtime:/etc/localtime:ro
-      # 蓝牙：容器里要通过 D-Bus 跟宿主的 bluetoothd 说话，BLE 温湿度计才看得见。
-      # 不用蓝牙可以删掉这一行和下面的 cap_add。
-      - /run/dbus:/run/dbus:ro
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
     environment:
       TZ: Asia/Shanghai
       # 镜像已预装 Xiaomi Home 集成，entrypoint 会在启动时把它补进

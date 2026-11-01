@@ -39,32 +39,23 @@ docker run -d --name homeassistant \
   -e TZ=Asia/Shanghai \
   -v /var/opt/docker/homeassistant:/config \
   -v /etc/localtime:/etc/localtime:ro \
-  -v /run/dbus:/run/dbus:ro \
-  --cap-add NET_ADMIN --cap-add NET_RAW \
-  ghcr.io/viogus/homeassistant:2026.10.4-nano
+  ghcr.io/viogus/homeassistant:2026.10.4
 ```
 
 打开 `http://<host>:8123` 就是 onboarding 页面。
 
-例子用的是 **nano**（小米 + HomeKit + BLE 温湿度计，261 MB）。换成 full / slim / micro 只改 tag，
-不用蓝牙的话把 `/run/dbus` 那行和两个 `--cap-add` 去掉即可。
-
-`docker compose up -d`（本目录的 compose 默认就是 host 网络 + `./config` + BLE 所需的 D-Bus 与权限）：
+`docker compose up -d`（本目录的 compose 默认就是 host 网络 + `./config`）：
 
 ```yaml
 services:
   homeassistant:
-    image: ghcr.io/viogus/homeassistant:2026.10.4-nano   # 换 full/slim/micro 只改这里
+    image: ghcr.io/viogus/homeassistant:2026.10.4
     container_name: homeassistant
     restart: unless-stopped
-    network_mode: host            # 自动发现（mDNS / SSDP）/ 蓝牙都靠它
+    network_mode: host
     volumes:
       - ./config:/config
       - /etc/localtime:/etc/localtime:ro
-      - /run/dbus:/run/dbus:ro    # 蓝牙要连宿主 bluetoothd，不用 BLE 可删
-    cap_add:
-      - NET_ADMIN                 # 同上，BLE 扫描需要
-      - NET_RAW
     environment:
       TZ: Asia/Shanghai
 ```
