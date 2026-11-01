@@ -9,7 +9,7 @@
 | 项 | 值 |
 |----|----|
 | 镜像 | `ghcr.io/viogus/homeassistant` |
-| tag | `:latest` `:2026.10` `:2026.10.4`（full）／`:slim` `:2026.10.4-slim`（slim） |
+| tag | `:latest` `:2026.10` `:2026.10.4`（full）／`:slim`（slim）／`:micro`（micro）／`:nano`（nano），带版本号的长 tag 同名 |
 | 平台 | linux/amd64, linux/arm64（armv7 已丢弃：QEMU 下构建慢且没人验过） |
 | 基础镜像 | `python:3.14-alpine`（HA 2026.10 要求 ≥3.14.2） |
 | 入口 | `/usr/local/bin/docker-entrypoint.sh` → `hass --config=<配置目录>` |
@@ -23,7 +23,10 @@
 
 * HA 版本默认取 PyPI 上最新的**正式版**（自动跳过 `b`/`rc`）；Xiaomi Home 版本默认取 GitHub 最新 release，两者都能在 dispatch 时手动指定；
 * ghcr 上已有同名 tag，**并且**镜像 label 里的 Xiaomi Home 版本与本次解析的一致，才跳过 —— 只比 HA 版本会漏掉“HA 没动、小米集成发新版”的情况；
-* 双架构一次构建约 50–70 分钟，arm64 走 QEMU；
+* 双架构一次构建约 50–70 分钟，arm64 走 QEMU；构建层缓存在 registry 的 `:buildcache-<变体>`
+  tag 上（`cache-from`/`cache-to` type=registry），第二次起只重算变动的层；
+* 只想验一个变体：`gh workflow run build-homeassistant.yml -f variants=nano`
+  （默认四个全建）；
 * 推完镜像会在 amd64 上真跑一遍（`docker/homeassistant/smoke-test.sh`）：配置目录是 `/config` 且 `/data` 指向它、集成被播种、`default_config` 不因缺包 setup 失败、`xiaomi_home` 在 flow_handlers 里且能起 flow、前端首屏的 websocket 命令正常，全过才算发布成功。
 
 ## 用
@@ -62,13 +65,14 @@ services:
 * 升级：改 tag 再 `docker compose up -d`。配置、数据库、备份都在卷上，不会丢。
 * 以非 root 跑：`chown -R 1000:1000 ./config` 后加 `user: "1000:1000"`。注意 nmap 的 SYN 扫描和部分设备追踪需要 root，切了会退化。
 
-## 两个变体：full / slim
+## 四个变体：full / slim / micro / nano
 
 | tag | 内容 | 压缩 | 磁盘 |
 |-----|------|------|------|
 | `:latest` `:2026.10.4` `:2026.10` | **full**：default_config 依赖齐全，行为与官方镜像对齐 | 431 MB | 1.89 GB |
 | `:slim` `:2026.10.4-slim` | **slim**：去掉只被 default_config 用到的包 | 384 MB | 1.72 GB |
 | `:micro` `:2026.10.4-micro` | **micro**：slim + 只留 en/zh-Hans 翻译、去掉 es5/sourcemap/无用 stdlib | ~290 MB | 1.17 GB |
+| `:nano` `:2026.10.4-nano` | **nano**：micro + 只保留这台机器实际用到的集成（见下） | 254 MB | 695 MB |
 
 slim 少装的包：`av`（stream / 摄像头转流）、蓝牙栈（habluetooth / bleak / dbus-fast…）、
 DHCP/SSDP/USB 发现（aiodhcpwatcher、scapy、async-upnp-client、serialx…）、go2rtc-client。
@@ -110,6 +114,29 @@ micro 在 slim 基础上继续删（都在**同一层**里删，见下）：
 **踩过的坑**：这些删除必须写在安装那层的同一个 `RUN` 里。单独加一层 `RUN rm ...`
 删文件，镜像一点都没变小 —— 后一层的删除只是 whiteout，前面那层的字节还在，
 `docker save` / `push` 出来一样大。
+
+### nano 多裁了什么
+
+nano 在 micro 基础上，把 `homeassistant/components` 从 1525 个集成砍到 118 个：只留
+[`nano-seeds.txt`](nano-seeds.txt) 里列的种子（各类平台、`homekit`、`xiaomi_miio`、`frontend`
+那一套），再加上三轮闭包：
+
+1. 种子本身；
+2. 这些集成 `manifest.json` 里的 `dependencies`；
+3. HA core 与其他保留集成里 `from homeassistant.components.<domain>` 这种**模块级 import**
+   到的集成 —— 第三轮最容易漏，少了它 `bootstrap` 会在 import 阶段直接崩。
+
+实测删掉 121.7 MB 代码，顺带卸掉只被删掉的集成用过的 `pycountry` / `radios` / `gTTS` / `PyMetno`。
+
+保留下来的东西不是漏了，是删不起：
+
+* `camera` / `stream` / `numpy` / ffmpeg 二进制：`homekit/accessories.py` 在模块层就
+  `from homeassistant.components.camera import ...`，砍掉摄像头链路 = HomeKit 起不来。
+* `pip` / `uv`：留着自己装集成。
+
+维护代价（真正的成本在这）：种子列表跟着 HA 版本走。升级后如果某个新平台没列进去，
+那个实体就是**静默消失** —— 日志里没有任何报错，只是功能没了。要加功能就编辑
+`nano-seeds.txt`（一行一个域名），下次构建自动生效；写错名字只会 WARN 不会失败。
 
 ### slim 为什么必须自带一份 configuration.yaml
 
