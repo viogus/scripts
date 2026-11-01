@@ -5,12 +5,14 @@ name: Build & Push Home Assistant (Alpine) Docker Image
 #   Dockerfile : docker/homeassistant/Dockerfile（紧跟上游，只把 jemalloc 换成 apk 包）
 #   HA 版本    : 默认取 PyPI 上最新的正式版；也可以在 workflow_dispatch 里指定
 #   Xiaomi Home: 预装小米官方集成，默认取 XiaoMi/ha_xiaomi_home 最新 release
-#   架构       : linux/amd64, linux/arm64（arm64 在 amd64 runner 上走 QEMU；armv7 已丢弃）
-#   跳过       : ghcr 上已有同名 tag，且镜像 label 里的 Xiaomi Home 版本与本次解析
-#                出来的一致，才跳过 —— 只比 tag 会漏掉“HA 没动但小米集成发新版”
-#                的情况。
+#   架构       : linux/amd64 + linux/arm64，各自在**原生** runner 上构建
+#                （ubuntu-24.04 / ubuntu-24.04-arm），再用 imagetools 合成一个
+#                multi-arch manifest —— 之前 arm64 走 QEMU，光编译就要十几分钟。
+#   跳过       : ghcr 上已有同名 tag，且镜像 label 里的 Xiaomi Home 版本与构建
+#                指纹都与本次一致，才跳过。
 #
-# 一次三架构构建实测 ~75 分钟（上游同样配置：2026.10.4，05:03 -> 06:16 UTC）。
+# 分层：resolve（版本）→ matrix（哪些变体）→ build（变体 × 架构，按 digest 推）
+#      → merge（合成多架构 tag）→ smoke（真跑一遍）
 
 on:
   push:
@@ -54,34 +56,14 @@ env:
   IMAGE: ${{ github.repository_owner }}/homeassistant
 
 jobs:
-  # 调一个变体做迭代时不必等另外三个（每个都要跑 amd64 + QEMU arm64）
-  matrix:
+  resolve:
     runs-on: ubuntu-24.04
     outputs:
-      variants: ${{ steps.m.outputs.variants }}
-    steps:
-      - id: m
-        run: |
-          set -euo pipefail
-          V='${{ inputs.variants }}'
-          [ -n "$V" ] || V='full,slim,micro,nano'
-          JSON=$(printf '%s' "$V" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | jq -R . | jq -sc .)
-          echo "variants=$JSON" >> "$GITHUB_OUTPUT"
-          echo "building: $JSON"
-
-  build:
-    needs: matrix
-    runs-on: ubuntu-24.04
-    timeout-minutes: 300
-    strategy:
-      fail-fast: false
-      matrix:
-        # full = 装齐 default_config 依赖；slim = 只装始终加载的那批 + 小米集成
-        variant: ${{ fromJson(needs.matrix.outputs.variants) }}
-    permissions:
-      contents: read
-      packages: write
-
+      version: ${{ steps.v.outputs.version }}
+      minor: ${{ steps.v.outputs.minor }}
+      build_date: ${{ steps.v.outputs.build_date }}
+      xiaomi_home: ${{ steps.v.outputs.xiaomi_home }}
+      dockerfile_sha: ${{ steps.v.outputs.dockerfile_sha }}
     steps:
       - uses: actions/checkout@v7
 
@@ -127,7 +109,7 @@ jobs:
           fi
           # 统一成上游的 tag 形式（v0.5.0），Dockerfile 直接拼在 tarball URL 里
           XM="v${XM#v}"
-          echo "xiaomi_home=${XM}" >> "$GITHUB_OUTPUT"
+          echo "xiaomi_home=$XM" >> "$GITHUB_OUTPUT"
           echo "Xiaomi Home $XM"
 
           # 构建脚本指纹：只比 HA/集成版本的话，改了 Dockerfile、entrypoint 或本
@@ -136,6 +118,39 @@ jobs:
             .github/workflows/build-homeassistant.yml | sha256sum | cut -c1-16)
           echo "dockerfile_sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "build fingerprint $SHA"
+
+  # 调一个变体做迭代时不必等另外三个
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      variants: ${{ steps.m.outputs.variants }}
+    steps:
+      - id: m
+        run: |
+          set -euo pipefail
+          V='${{ inputs.variants }}'
+          [ -n "$V" ] || V='full,slim,micro,nano'
+          JSON=$(printf '%s' "$V" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | jq -R . | jq -sc .)
+          echo "variants=$JSON" >> "$GITHUB_OUTPUT"
+          echo "building: $JSON"
+
+  build:
+    needs: [resolve, matrix]
+    # arm64 跑在原生 arm runner 上，不再过 QEMU
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        # full = 装齐 default_config 依赖；slim = 只装始终加载的那批 + 小米集成
+        variant: ${{ fromJson(needs.matrix.outputs.variants) }}
+        arch: [amd64, arm64]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
 
       - name: Log in to ghcr.io
         uses: docker/login-action@v4
@@ -146,6 +161,11 @@ jobs:
 
       - name: Check if version already published
         id: check
+        env:
+          VARIANT: ${{ matrix.variant }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          WANT_XM: ${{ needs.resolve.outputs.xiaomi_home }}
+          WANT_SHA: ${{ needs.resolve.outputs.dockerfile_sha }}
         run: |
           set -euo pipefail
           if [ '${{ inputs.force }}' = 'true' ]; then
@@ -153,21 +173,13 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          TAG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
-          case '${{ matrix.variant }}' in
-            slim)  TAG="${TAG}-slim" ;;
-            micro) TAG="${TAG}-micro" ;;
-            nano)  TAG="${TAG}-nano" ;;
-          esac
-          WANT_XM='${{ steps.v.outputs.xiaomi_home }}'
-          WANT_SHA='${{ steps.v.outputs.dockerfile_sha }}'
+          TAG="${REGISTRY}/${IMAGE}:${VERSION}"
+          [ "$VARIANT" = "full" ] || TAG="${TAG}-${VARIANT}"
           if ! docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
             echo "$TAG not found, building"
             echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # tag 在就去比 label 里的小米集成版本：HA 没发新版、但上游集成发了，
-          # 也应该重建。label 缺失（老镜像）同样按“需要重建”处理。
           AMD=$(docker buildx imagetools inspect "$TAG" --raw \
             | jq -r '.manifests[] | select(.platform.architecture=="amd64") | .digest' \
             | head -1)
@@ -178,84 +190,145 @@ jobs:
             --format '{{index .Image.Config.Labels "org.opencontainers.image.homeassistant.dockerfile-sha"}}' \
             2>/dev/null || true)
           if [ "$HAVE_XM" = "$WANT_XM" ] && [ "$HAVE_SHA" = "$WANT_SHA" ]; then
-            echo "$TAG already ships Xiaomi Home $HAVE_XM (build $HAVE_SHA), skipping"
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "$TAG already has xiaomi $WANT_XM / sha $WANT_SHA, skipping"
           else
-            echo "$TAG has Xiaomi Home '${HAVE_XM:-<none>}' build '${HAVE_SHA:-<none>}'," \
-                 "wanted '$WANT_XM' build '$WANT_SHA' -> rebuilding"
             echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "$TAG differs (xiaomi $HAVE_XM vs $WANT_XM, sha $HAVE_SHA vs $WANT_SHA), rebuilding"
           fi
 
-      - name: Set up QEMU
-        if: steps.check.outputs.skip != 'true'
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        if: steps.check.outputs.skip != 'true'
-        uses: docker/setup-buildx-action@v4
-
-      - name: Extract metadata
-        if: steps.check.outputs.skip != 'true'
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
-          tags: |
-            type=raw,value=latest,enable=${{ matrix.variant == 'full' }}
-            type=raw,value=${{ steps.v.outputs.version }},enable=${{ matrix.variant == 'full' }}
-            type=raw,value=${{ steps.v.outputs.minor }},enable=${{ matrix.variant == 'full' }}
-            type=raw,value=${{ steps.v.outputs.version }}-slim,enable=${{ matrix.variant == 'slim' }}
-            type=raw,value=slim,enable=${{ matrix.variant == 'slim' }}
-            type=raw,value=${{ steps.v.outputs.version }}-micro,enable=${{ matrix.variant == 'micro' }}
-            type=raw,value=micro,enable=${{ matrix.variant == 'micro' }}
-            type=raw,value=${{ steps.v.outputs.version }}-nano,enable=${{ matrix.variant == 'nano' }}
-            type=raw,value=nano,enable=${{ matrix.variant == 'nano' }}
-
-      - name: Build and push
+      - name: Build ${{ matrix.variant }} for linux/${{ matrix.arch }}
         if: steps.check.outputs.skip != 'true'
         id: build
         uses: docker/build-push-action@v7
         with:
           context: docker/homeassistant
           file: docker/homeassistant/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           build-args: |
-            VERSION=${{ steps.v.outputs.version }}
-            BUILD_DATE=${{ steps.v.outputs.build_date }}
+            VERSION=${{ needs.resolve.outputs.version }}
+            BUILD_DATE=${{ needs.resolve.outputs.build_date }}
             COMMIT=${{ github.sha }}
-            XIAOMI_HOME_VERSION=${{ steps.v.outputs.xiaomi_home }}
-            DOCKERFILE_SHA=${{ steps.v.outputs.dockerfile_sha }}
+            XIAOMI_HOME_VERSION=${{ needs.resolve.outputs.xiaomi_home }}
+            DOCKERFILE_SHA=${{ needs.resolve.outputs.dockerfile_sha }}
             VARIANT=${{ matrix.variant }}
             TRIM_ASSETS=${{ (matrix.variant == 'micro' || matrix.variant == 'nano') && '1' || '0' }}
             TRIM_COMPONENTS=${{ matrix.variant == 'nano' && '1' || '0' }}
-          # 不传 labels: — 镜像描述走 Dockerfile 里的 OCI LABEL，metadata-action
-          # 自动生成的会写成 title=scripts / version=latest，反而更糟。
-          tags: ${{ steps.meta.outputs.tags }}
-          push: true
+          # 只按 digest 推，tag 留给 merge 那步统一打，这样两个架构不会互相覆盖。
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: false
-          # registry 缓存挂在镜像自己的 tag 上：缓存层就是已经推上去的 blob，
-          # 不占 GHA cache 的 10GB 配额，跨 run 命中率也高。
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:buildcache-${{ matrix.variant }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:buildcache-${{ matrix.variant }},mode=max
+          # 缓存按架构分开存，两边指令不同，混用会互相失效。
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:buildcache-${{ matrix.variant }}-${{ matrix.arch }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:buildcache-${{ matrix.variant }}-${{ matrix.arch }},mode=max
 
-      # 推完立刻在原生 amd64 上把镜像跑起来。除了 /manifest.json 返回 200，还要
-      # 确认 Xiaomi Home 集成真的加载得起来（播种、依赖、config flow 三步），
-      # 详见 docker/homeassistant/smoke-test.sh。
-      - name: Smoke test the published image
+      - name: Export digest
         if: steps.check.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/digests
+          digest='${{ steps.build.outputs.digest }}'
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: digest-${{ matrix.variant }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [resolve, matrix, build]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJson(needs.matrix.outputs.variants) }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: digest-${{ matrix.variant }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        id: merge
         env:
-          XM_VERSION: ${{ steps.v.outputs.xiaomi_home }}
+          VARIANT: ${{ matrix.variant }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          MINOR: ${{ needs.resolve.outputs.minor }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=(/tmp/digests/*)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "no digests for $VARIANT — build was skipped"
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          SOURCES=()
+          for f in "${FILES[@]}"; do
+            SOURCES+=("${REGISTRY}/${IMAGE}@sha256:$(basename "$f")")
+          done
+          TAGS=()
+          if [ "$VARIANT" = "full" ]; then
+            TAGS+=("${REGISTRY}/${IMAGE}:${VERSION}" "${REGISTRY}/${IMAGE}:${MINOR}" "${REGISTRY}/${IMAGE}:latest")
+          else
+            TAGS+=("${REGISTRY}/${IMAGE}:${VERSION}-${VARIANT}" "${REGISTRY}/${IMAGE}:${VARIANT}")
+          fi
+          echo "sources: ${SOURCES[*]}"
+          echo "tags: ${TAGS[*]}"
+          ARGS=()
+          for t in "${TAGS[@]}"; do ARGS+=("-t" "$t"); done
+          docker buildx imagetools create "${ARGS[@]}" "${SOURCES[@]}"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect merged manifest
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          set -euo pipefail
+          TAG="${REGISTRY}/${IMAGE}:${{ needs.resolve.outputs.version }}"
+          [ "${{ matrix.variant }}" = "full" ] || TAG="${TAG}-${{ matrix.variant }}"
+          docker buildx imagetools inspect "$TAG"
+
+  # 推完立刻在原生 amd64 上把镜像跑起来。除了 /manifest.json 返回 200，还要
+  # 确认 Xiaomi Home 集成真的加载得起来（播种、依赖、config flow 三步），
+  # 详见 docker/homeassistant/smoke-test.sh。
+  smoke:
+    needs: [resolve, matrix, merge]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJson(needs.matrix.outputs.variants) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Smoke test the published image
+        env:
+          XM_VERSION: ${{ needs.resolve.outputs.xiaomi_home }}
+          VARIANT: ${{ matrix.variant }}
           SMOKE_SLIM: ${{ matrix.variant != 'full' && '1' || '0' }}
           SMOKE_MICRO: ${{ (matrix.variant == 'micro' || matrix.variant == 'nano') && '1' || '0' }}
           SMOKE_NANO: ${{ matrix.variant == 'nano' && '1' || '0' }}
         run: |
           set -euo pipefail
-          IMG="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}"
-          case '${{ matrix.variant }}' in
-            slim)  IMG="${IMG}-slim" ;;
-            micro) IMG="${IMG}-micro" ;;
-            nano)  IMG="${IMG}-nano" ;;
-          esac
+          IMG="${REGISTRY}/${IMAGE}:${{ needs.resolve.outputs.version }}"
+          [ "$VARIANT" = "full" ] || IMG="${IMG}-${VARIANT}"
           docker pull "$IMG"
           bash docker/homeassistant/smoke-test.sh "$IMG" "$XM_VERSION"
 
@@ -270,24 +343,18 @@ jobs:
             nano)  DESC="nano：micro + 只保留小米 / HomeKit 实际用到的集成（nano-seeds.txt，机器可读清单）。" ;;
           esac
           [ "$V" = "full" ] && SUFFIX="" || SUFFIX="-$V"
-          VERSIONED="${REGISTRY}/${IMAGE}:${{ steps.v.outputs.version }}${SUFFIX}"
+          VERSIONED="${REGISTRY}/${IMAGE}:${{ needs.resolve.outputs.version }}${SUFFIX}"
           {
-            echo "### Home Assistant ${{ steps.v.outputs.version }}（$V）"
+            echo "### Home Assistant ${{ needs.resolve.outputs.version }}（$V）"
             echo
-            echo "Xiaomi Home：\`${{ steps.v.outputs.xiaomi_home }}\`　构建指纹：\`${{ steps.v.outputs.dockerfile_sha }}\`"
+            echo "Xiaomi Home：\`${{ needs.resolve.outputs.xiaomi_home }}\`　构建指纹：\`${{ needs.resolve.outputs.dockerfile_sha }}\`"
             echo
-            if [ '${{ steps.check.outputs.skip }}' = 'true' ]; then
-              echo "已存在同名 tag 且集成版本 / 构建指纹一致，跳过：\`${VERSIONED}\`"
-            else
-              echo "已推送："
-              echo
-              echo '```'
-              echo "docker pull ${VERSIONED}"
-              echo "docker pull ${REGISTRY}/${IMAGE}:${V}"
-              echo '```'
-              echo
-              echo "$DESC"
-              echo
-              echo "平台：linux/amd64, linux/arm64"
-            fi
+            echo '```'
+            echo "docker pull ${VERSIONED}"
+            echo "docker pull ${REGISTRY}/${IMAGE}:${V}"
+            echo '```'
+            echo
+            echo "$DESC"
+            echo
+            echo "平台：linux/amd64, linux/arm64（各自原生构建，imagetools 合成 manifest）"
           } >> "$GITHUB_STEP_SUMMARY"
